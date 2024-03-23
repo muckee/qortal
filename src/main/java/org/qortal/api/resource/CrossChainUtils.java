@@ -32,6 +32,7 @@ public class CrossChainUtils {
         try {
             blockchainProvider.getCurrentHeight();
         } catch (ForeignBlockchainException e) {
+            LOGGER.warn("Problems getting block height before building server configuration infos");
         }
 
         ChainableServer currentServer = blockchainProvider.getCurrentServer();
