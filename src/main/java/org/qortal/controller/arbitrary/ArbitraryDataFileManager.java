@@ -242,12 +242,13 @@ public class ArbitraryDataFileManager extends Thread {
         boolean isRelayRequest = (requestingPeer != null);
         if (isRelayRequest) {
             if (!fileAlreadyExists) {
-                // File didn't exist locally before the request, and it's a forwarding request, so delete it
-                LOGGER.debug("Deleting file {} because it was needed for forwarding only", Base58.encode(hash));
-
-                // Keep trying to delete the data until it is deleted, or we reach 10 attempts
+                // File didn't exist locally before the request, and it's a forwarding request, so delete it if it exists.
+                // It shouldn't exist on the filesystem yet, but leaving this here just in case.
                 arbitraryDataFile.delete(10);
             }
+        }
+        else {
+            arbitraryDataFile.save();
         }
 
         // If this is a metadata file then we need to update the cache

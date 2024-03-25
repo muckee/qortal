@@ -21,6 +21,7 @@ public class ArbitraryDataFileTests extends Common {
 	public void testSplitAndJoin() throws DataException {
 		String dummyDataString = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 		ArbitraryDataFile arbitraryDataFile = new ArbitraryDataFile(dummyDataString.getBytes(), null, false);
+		arbitraryDataFile.save();
 		assertTrue(arbitraryDataFile.exists());
 		assertEquals(62, arbitraryDataFile.size());
 		assertEquals("3eyjYjturyVe61grRX42bprGr3Cvw6ehTy4iknVnosDj", arbitraryDataFile.digest58());
@@ -51,6 +52,7 @@ public class ArbitraryDataFileTests extends Common {
 		new Random().nextBytes(randomData); // No need for SecureRandom here
 
 		ArbitraryDataFile arbitraryDataFile = new ArbitraryDataFile(randomData, null, false);
+		arbitraryDataFile.save();
 		assertTrue(arbitraryDataFile.exists());
 		assertEquals(fileSize, arbitraryDataFile.size());
 		String originalFileDigest = arbitraryDataFile.digest58();
