@@ -334,11 +334,17 @@ public class ArbitraryMetadataManager {
             }
             ArbitraryTransactionData arbitraryTransactionData = (ArbitraryTransactionData) transactionData;
 
+            // Check if the name is blocked
+            boolean isBlocked = (arbitraryTransactionData == null || ListUtils.isNameBlocked(arbitraryTransactionData.getName()));
+
+            // Save if not blocked
+            ArbitraryDataFile arbitraryMetadataFile = arbitraryMetadataMessage.getArbitraryMetadataFile();
+            if (!isBlocked && arbitraryMetadataFile != null) {
+                arbitraryMetadataFile.save();
+            }
+
             // Forwarding
             if (isRelayRequest && Settings.getInstance().isRelayModeEnabled()) {
-
-                // Check if the name is blocked
-                boolean isBlocked = (arbitraryTransactionData == null || ListUtils.isNameBlocked(arbitraryTransactionData.getName()));
                 if (!isBlocked) {
                     Peer requestingPeer = request.getB();
                     if (requestingPeer != null) {

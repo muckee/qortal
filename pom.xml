@@ -10,18 +10,17 @@
 		<altcoinj.version>7dc8c6f</altcoinj.version>
 		<bitcoinj.version>0.15.10</bitcoinj.version>
 		<bouncycastle.version>1.69</bouncycastle.version>
-		<build-helper-maven-plugin.version>3.5.0</build-helper-maven-plugin.version>
 		<build.timestamp>${maven.build.timestamp}</build.timestamp>
 		<ciyam-at.version>1.4.1</ciyam-at.version>
 		<commons-net.version>3.8.0</commons-net.version>
 		<commons-text.version>1.11.0</commons-text.version>
-		<commons-io.version>2.11.0</commons-io.version>
-		<commons-compress.version>1.25.0</commons-compress.version>
+		<commons-io.version>2.15.1</commons-io.version>
+		<commons-compress.version>1.26.1</commons-compress.version>
 		<commons-lang3.version>3.14.0</commons-lang3.version>
 		<dagger.version>1.2.2</dagger.version>
 		<extendedset.version>0.12.3</extendedset.version>
 		<git-commit-id-plugin.version>4.9.10</git-commit-id-plugin.version>
-		<grpc.version>1.61.1</grpc.version>
+		<grpc.version>1.62.2</grpc.version>
 		<guava.version>33.0.0-jre</guava.version>
 		<hamcrest-library.version>2.2</hamcrest-library.version>
 		<homoglyph.version>1.2.1</homoglyph.version>
@@ -33,28 +32,30 @@
 		<jersey.version>2.41</jersey.version>
 		<jetty.version>9.4.54.v20240208</jetty.version>
 		<json-simple.version>1.1.1</json-simple.version>
-		<json.version>20240205</json.version>
+		<json.version>20240303</json.version>
 		<jsoup.version>1.17.2</jsoup.version>
 		<junit-jupiter-engine.version>5.10.0</junit-jupiter-engine.version>
 		<lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
-		<log4j.version>2.22.1</log4j.version>
+		<log4j.version>2.23.0</log4j.version>
 		<mail.version>1.5.0-b01</mail.version>
+		<maven-build-helper-plugin.version>3.5.0</maven-build-helper-plugin.version>
 		<maven-compiler-plugin.version>3.12.1</maven-compiler-plugin.version>
+		<maven-dependency-plugin.version>3.6.1</maven-dependency-plugin.version>
 		<maven-jar-plugin.version>3.3.0</maven-jar-plugin.version>
+		<maven-package-info-plugin.version>1.1.0</maven-package-info-plugin.version>
+		<maven-plugin.version>2.16.2</maven-plugin.version>
+		<maven-reproducible-build-plugin.version>0.16</maven-reproducible-build-plugin.version>
 		<maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
-		<maven-shade-plugin.version>3.5.1</maven-shade-plugin.version>
+		<maven-shade-plugin.version>3.5.2</maven-shade-plugin.version>
 		<maven-surefire-plugin.version>3.2.5</maven-surefire-plugin.version>
-		<package-info-maven-plugin.version>1.1.0</package-info-maven-plugin.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<protobuf.version>3.25.2</protobuf.version>
+		<protobuf.version>3.25.3</protobuf.version>
 		<replacer.version>1.5.3</replacer.version>
-		<reproducible-build-maven-plugin.version>0.16</reproducible-build-maven-plugin.version>
 		<simplemagic.version>1.17</simplemagic.version>
 		<slf4j.version>1.7.36</slf4j.version>
 		<swagger-api.version>2.0.10</swagger-api.version>
-		<swagger-ui.version>5.10.3</swagger-ui.version>
+		<swagger-ui.version>5.11.8</swagger-ui.version>
 		<upnp.version>1.2</upnp.version>
-		<versions-maven-plugin.version>2.16.2</versions-maven-plugin.version>
 		<xz.version>1.9</xz.version>
 	</properties>
 	<build>
@@ -70,7 +71,7 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>versions-maven-plugin</artifactId>
-				<version>${versions-maven-plugin.version}</version>
+				<version>${maven-plugin.version}</version>
 				<configuration>
 					<generateBackupPoms>false</generateBackupPoms>
 				</configuration>
@@ -238,7 +239,7 @@
 			<plugin>
 				<groupId>com.github.bohnman</groupId>
 				<artifactId>package-info-maven-plugin</artifactId>
-				<version>${package-info-maven-plugin.version}</version>
+				<version>${maven-package-info-plugin.version}</version>
 				<configuration>
 					<packages>
 						<package>
@@ -268,7 +269,7 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>build-helper-maven-plugin</artifactId>
-				<version>${build-helper-maven-plugin.version}</version>
+				<version>${maven-build-helper-plugin.version}</version>
 				<executions>
 					<execution>
 						<phase>generate-sources</phase>
@@ -353,7 +354,7 @@
 			<plugin>
 				<groupId>io.github.zlika</groupId>
 				<artifactId>reproducible-build-maven-plugin</artifactId>
-				<version>${reproducible-build-maven-plugin.version}</version>
+				<version>${maven-reproducible-build-plugin.version}</version>
 				<executions>
 					<execution>
 						<phase>package</phase>
@@ -388,15 +389,9 @@
 							<pluginExecutions>
 								<pluginExecution>
 									<pluginExecutionFilter>
-										<groupId>
-											org.apache.maven.plugins
-										</groupId>
-										<artifactId>
-											maven-dependency-plugin
-										</artifactId>
-										<versionRange>
-											[3.6.0,)
-										</versionRange>
+										<groupId>org.apache.maven.plugins</groupId>
+										<artifactId>maven-dependency-plugin</artifactId>
+										<version>${maven-dependency-plugin.version}</version>
 										<goals>
 											<goal>unpack</goal>
 										</goals>
@@ -407,15 +402,9 @@
 								</pluginExecution>
 								<pluginExecution>
 									<pluginExecutionFilter>
-										<groupId>
-											com.google.code.maven-replacer-plugin
-										</groupId>
-										<artifactId>
-											replacer
-										</artifactId>
-										<versionRange>
-											[1.5.3,)
-										</versionRange>
+										<groupId>com.google.code.maven-replacer-plugin</groupId>
+										<artifactId>replacer</artifactId>
+										<version>${replacer.version}</version>
 										<goals>
 											<goal>replace</goal>
 										</goals>
@@ -448,7 +437,7 @@
 		<dependency>
 			<groupId>org.codehaus.mojo</groupId>
 			<artifactId>build-helper-maven-plugin</artifactId>
-			<version>${build-helper-maven-plugin.version}</version>
+			<version>${maven-build-helper-plugin.version}</version>
 			<scope>provided</scope>
 			<!-- needed for build, not for runtime -->
 		</dependency>
@@ -456,7 +445,7 @@
 		<dependency>
 			<groupId>com.github.bohnman</groupId>
 			<artifactId>package-info-maven-plugin</artifactId>
-			<version>${package-info-maven-plugin.version}</version>
+			<version>${maven-package-info-plugin.version}</version>
 			<scope>provided</scope>
 			<!-- needed for build, not for runtime -->
 		</dependency>
