@@ -16,12 +16,7 @@ import org.qortal.data.crosschain.TransactionSummary;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 
@@ -31,10 +26,21 @@ public class CrossChainUtils {
     public static ServerConfigurationInfo buildServerConfigurationInfo(Bitcoiny blockchain) {
 
         BitcoinyBlockchainProvider blockchainProvider = blockchain.getBlockchainProvider();
+
+        // the only reason this is called is to ensure the current server is set on the blockchain provider,
+        // if there is an exception, then ignore it
+        try {
+            blockchainProvider.getCurrentHeight();
+        } catch (ForeignBlockchainException e) {
+            LOGGER.warn("Problems getting block height before building server configuration infos");
+        }
+
         ChainableServer currentServer = blockchainProvider.getCurrentServer();
 
         return new ServerConfigurationInfo(
-                buildInfos(blockchainProvider.getServers(), currentServer),
+                buildInfos(blockchainProvider.getServers(), currentServer).stream()
+                        .sorted(Comparator.comparing(ServerInfo::isCurrent).reversed())
+                        .collect(Collectors.toList()),
                 buildInfos(blockchainProvider.getRemainingServers(), currentServer),
                 buildInfos(blockchainProvider.getUselessServers(), currentServer)
             );
