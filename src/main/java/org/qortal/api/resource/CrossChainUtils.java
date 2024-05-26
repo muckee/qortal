@@ -9,10 +9,7 @@ import org.bitcoinj.script.ScriptBuilder;
 
 import org.qortal.crosschain.*;
 import org.qortal.data.at.ATData;
-import org.qortal.data.crosschain.AtomicTransactionData;
-import org.qortal.data.crosschain.CrossChainTradeData;
-import org.qortal.data.crosschain.TradeBotData;
-import org.qortal.data.crosschain.TransactionSummary;
+import org.qortal.data.crosschain.*;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 
@@ -22,6 +19,7 @@ import java.util.stream.Collectors;
 
 public class CrossChainUtils {
     private static final Logger LOGGER = LogManager.getLogger(CrossChainUtils.class);
+    public static final String CORE_API_CALL = "Core API Call";
 
     public static ServerConfigurationInfo buildServerConfigurationInfo(Bitcoiny blockchain) {
 
@@ -182,6 +180,74 @@ public class CrossChainUtils {
         }
 
         return summaries;
+    }
+
+    /**
+     * Add Server
+     *
+     * Add foreign blockchain server to list of candidates.
+     *
+     * @param bitcoiny the foreign blockchain
+     * @param server the server
+     *
+     * @return true if the add was successful, otherwise false
+     */
+    public static boolean addServer(Bitcoiny bitcoiny, ChainableServer server) {
+
+        return bitcoiny.getBlockchainProvider().addServer(server);
+    }
+
+    /**
+     * Remove Server
+     *
+     * Remove foreign blockchain server from list of candidates.
+     *
+     * @param bitcoiny the foreign blockchain
+     * @param server the server
+     *
+     * @return true if the removal was successful, otherwise false
+     */
+    public static boolean removeServer(Bitcoiny bitcoiny, ChainableServer server){
+
+        return bitcoiny.getBlockchainProvider().removeServer(server);
+    }
+
+    /**
+     * Set Current Server
+     *
+     * Set the server to use the intended foreign blockchain.
+     *
+     * @param bitcoiny the foreign blockchain
+     * @param serverInfo the server configuration information
+     *
+     * @return the server connection information
+     */
+    public static ServerConnectionInfo setCurrentServer(Bitcoiny bitcoiny, ServerInfo serverInfo) throws ForeignBlockchainException {
+
+        final BitcoinyBlockchainProvider blockchainProvider = bitcoiny.getBlockchainProvider();
+
+        ChainableServer server = blockchainProvider.getServer(
+                serverInfo.getHostName(),
+                ChainableServer.ConnectionType.valueOf(serverInfo.getConnectionType()),
+                serverInfo.getPort()
+        );
+
+        ChainableServerConnection connection = blockchainProvider.setCurrentServer(server, CORE_API_CALL).get();
+
+        return new ServerConnectionInfo(
+                new ServerInfo(
+                        0,
+                        serverInfo.getHostName(),
+                        serverInfo.getPort(),
+                        serverInfo.getConnectionType(),
+                        connection.isSuccess()
+                ),
+                CORE_API_CALL,
+                true,
+                connection.isSuccess() ,
+                System.currentTimeMillis(),
+                connection.getNotes()
+        );
     }
 
     /**
@@ -422,5 +488,61 @@ public class CrossChainUtils {
             totalInputOut += output.value;
         }
         return totalInputOut;
+    }
+
+    /**
+     * Get Notes
+     *
+     * Build notes from an exception thrown.
+     *
+     * @param e the exception
+     *
+     * @return the exception message or the exception class name
+     */
+    public static String getNotes(Exception e) {
+        return e.getMessage() + " (" + e.getClass().getSimpleName() + ")";
+    }
+
+    /**
+     * Build Server Connection History
+     *
+     * @param bitcoiny the foreign blockchain
+     *
+     * @return the history of connections from latest to first
+     */
+    public static List<ServerConnectionInfo> buildServerConnectionHistory(Bitcoiny bitcoiny) {
+
+        return bitcoiny.getBlockchainProvider().getServerConnections().stream()
+                .sorted(Comparator.comparing(ChainableServerConnection::getCurrentTimeMillis).reversed())
+                .map(
+                    connection -> new ServerConnectionInfo(
+                            serverToServerInfo( connection.getServer()),
+                            connection.getRequestedBy(),
+                            connection.isOpen(),
+                            connection.isSuccess(),
+                            connection.getCurrentTimeMillis(),
+                            connection.getNotes()
+                    )
+                )
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Server To Server Info
+     *
+     * Make a server info object from a server object.
+     *
+     * @param server the server
+     *
+     * @return the server info
+     */
+    private static ServerInfo serverToServerInfo(ChainableServer server) {
+
+        return new ServerInfo(
+                0,
+                server.getHostName(),
+                server.getPort(),
+                server.getConnectionType().toString(),
+                false);
     }
 }
