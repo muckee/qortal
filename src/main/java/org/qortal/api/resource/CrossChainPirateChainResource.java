@@ -388,7 +388,7 @@ public class CrossChainPirateChainResource {
 			),
 			responses = {
 					@ApiResponse(
-							description = "true if removed, false if not found",
+							description = "true if added, false if not added",
 							content = @Content(
 									schema = @Schema(
 											type = "string"
