@@ -13,8 +13,12 @@ import org.qortal.api.ApiErrors;
 import org.qortal.api.ApiExceptionFactory;
 import org.qortal.api.Security;
 import org.qortal.api.model.crosschain.PirateChainSendRequest;
+import org.qortal.crosschain.ChainableServer;
 import org.qortal.crosschain.ForeignBlockchainException;
 import org.qortal.crosschain.PirateChain;
+import org.qortal.crosschain.PirateLightClient;
+import org.qortal.crosschain.ServerConnectionInfo;
+import org.qortal.crosschain.ServerInfo;
 import org.qortal.crosschain.SimpleTransaction;
 import org.qortal.crosschain.ServerConfigurationInfo;
 
@@ -350,6 +354,180 @@ public class CrossChainPirateChainResource {
 	public ServerConfigurationInfo getServerConfiguration() {
 
 		return CrossChainUtils.buildServerConfigurationInfo(PirateChain.getInstance());
+	}
+
+	@GET
+	@Path("/serverconnectionhistory")
+	@Operation(
+			summary = "Returns Pirate Chain server connection history",
+			description = "Returns Pirate Chain server connection history",
+			responses = {
+					@ApiResponse(
+							content = @Content(array = @ArraySchema( schema = @Schema( implementation = ServerConnectionInfo.class ) ) )
+					)
+			}
+	)
+	public List<ServerConnectionInfo> getServerConnectionHistory() {
+
+		return CrossChainUtils.buildServerConnectionHistory(PirateChain.getInstance());
+	}
+
+	@POST
+	@Path("/addserver")
+	@Operation(
+			summary = "Add server to list of Pirate Chain servers",
+			description = "Add server to list of Pirate Chain servers",
+			requestBody = @RequestBody(
+					required = true,
+					content = @Content(
+							mediaType = MediaType.APPLICATION_JSON,
+							schema = @Schema(
+									implementation = ServerInfo.class
+							)
+					)
+			),
+			responses = {
+					@ApiResponse(
+							description = "true if added, false if not added",
+							content = @Content(
+									schema = @Schema(
+											type = "string"
+									)
+							)
+					)
+			}
+
+	)
+	@ApiErrors({ApiError.INVALID_DATA})
+	@SecurityRequirement(name = "apiKey")
+	public String addServerInfo(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
+		Security.checkApiCallAllowed(request);
+
+		try {
+			PirateLightClient.Server server = new PirateLightClient.Server(
+					serverInfo.getHostName(),
+					ChainableServer.ConnectionType.valueOf(serverInfo.getConnectionType()),
+					serverInfo.getPort()
+			);
+
+			if( CrossChainUtils.addServer( PirateChain.getInstance(), server )) {
+				return "true";
+			}
+			else {
+				return "false";
+			}
+		}
+		catch (IllegalArgumentException | NullPointerException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		}
+		catch (Exception e) {
+			return "false";
+		}
+	}
+
+	@POST
+	@Path("/removeserver")
+	@Operation(
+			summary = "Remove server from list of Pirate Chain servers",
+			description = "Remove server from list of Pirate Chain servers",
+			requestBody = @RequestBody(
+					required = true,
+					content = @Content(
+							mediaType = MediaType.APPLICATION_JSON,
+							schema = @Schema(
+									implementation = ServerInfo.class
+							)
+					)
+			),
+			responses = {
+					@ApiResponse(
+							description = "true if removed, otherwise",
+							content = @Content(
+									schema = @Schema(
+											type = "string"
+									)
+							)
+					)
+			}
+
+	)
+	@ApiErrors({ApiError.INVALID_DATA})
+	@SecurityRequirement(name = "apiKey")
+	public String removeServerInfo(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
+		Security.checkApiCallAllowed(request);
+
+		try {
+			PirateLightClient.Server server = new PirateLightClient.Server(
+					serverInfo.getHostName(),
+					ChainableServer.ConnectionType.valueOf(serverInfo.getConnectionType()),
+					serverInfo.getPort()
+			);
+
+			if( CrossChainUtils.removeServer( PirateChain.getInstance(), server ) ) {
+
+				return "true";
+			}
+			else {
+				return "false";
+			}
+		}
+		catch (IllegalArgumentException | NullPointerException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		}
+		catch (Exception e) {
+			return "false";
+		}
+	}
+
+	@POST
+	@Path("/setcurrentserver")
+	@Operation(
+			summary = "Set current Pirate Chain server",
+			description = "Set current Pirate Chain server",
+			requestBody = @RequestBody(
+					required = true,
+					content = @Content(
+							mediaType = MediaType.APPLICATION_JSON,
+							schema = @Schema(
+									implementation = ServerInfo.class
+							)
+					)
+			),
+			responses = {
+					@ApiResponse(
+							description = "connection info",
+							content = @Content(
+									mediaType = MediaType.APPLICATION_JSON,
+									schema = @Schema(
+											implementation = ServerConnectionInfo.class
+									)
+							)
+					)
+			}
+
+	)
+	@ApiErrors({ApiError.INVALID_DATA})
+	@SecurityRequirement(name = "apiKey")
+	public ServerConnectionInfo setCurrentServerInfo(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
+		Security.checkApiCallAllowed(request);
+
+		if( serverInfo.getConnectionType() == null ||
+				serverInfo.getHostName() == null) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		try {
+			return CrossChainUtils.setCurrentServer( PirateChain.getInstance(), serverInfo );
+		}
+		catch (IllegalArgumentException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		}
+		catch (Exception e) {
+			return new ServerConnectionInfo(
+					serverInfo,
+					CrossChainUtils.CORE_API_CALL,
+					true,
+					false,
+					System.currentTimeMillis(),
+					CrossChainUtils.getNotes(e));
+		}
 	}
 
 	@GET

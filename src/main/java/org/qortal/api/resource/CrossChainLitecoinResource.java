@@ -16,8 +16,12 @@ import org.qortal.api.Security;
 import org.qortal.api.model.crosschain.AddressRequest;
 import org.qortal.api.model.crosschain.LitecoinSendRequest;
 import org.qortal.crosschain.AddressInfo;
+import org.qortal.crosschain.ChainableServer;
+import org.qortal.crosschain.ElectrumX;
 import org.qortal.crosschain.ForeignBlockchainException;
 import org.qortal.crosschain.Litecoin;
+import org.qortal.crosschain.ServerConnectionInfo;
+import org.qortal.crosschain.ServerInfo;
 import org.qortal.crosschain.SimpleTransaction;
 import org.qortal.crosschain.ServerConfigurationInfo;
 
@@ -264,6 +268,180 @@ public class CrossChainLitecoinResource {
 	public ServerConfigurationInfo getServerConfiguration() {
 
 		return CrossChainUtils.buildServerConfigurationInfo(Litecoin.getInstance());
+	}
+
+	@GET
+	@Path("/serverconnectionhistory")
+	@Operation(
+			summary = "Returns Litecoin server connection history",
+			description = "Returns Litecoin server connection history",
+			responses = {
+					@ApiResponse(
+							content = @Content(array = @ArraySchema( schema = @Schema( implementation = ServerConnectionInfo.class ) ) )
+					)
+			}
+	)
+	public List<ServerConnectionInfo> getServerConnectionHistory() {
+
+		return CrossChainUtils.buildServerConnectionHistory(Litecoin.getInstance());
+	}
+
+	@POST
+	@Path("/addserver")
+	@Operation(
+			summary = "Add server to list of Litecoin servers",
+			description = "Add server to list of Litecoin servers",
+			requestBody = @RequestBody(
+					required = true,
+					content = @Content(
+							mediaType = MediaType.APPLICATION_JSON,
+							schema = @Schema(
+									implementation = ServerInfo.class
+							)
+					)
+			),
+			responses = {
+					@ApiResponse(
+							description = "true if added, false if not added",
+							content = @Content(
+									schema = @Schema(
+											type = "string"
+									)
+							)
+					)
+			}
+
+	)
+	@ApiErrors({ApiError.INVALID_DATA})
+	@SecurityRequirement(name = "apiKey")
+	public String addServer(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
+		Security.checkApiCallAllowed(request);
+
+		try {
+			ElectrumX.Server server = new ElectrumX.Server(
+					serverInfo.getHostName(),
+					ChainableServer.ConnectionType.valueOf(serverInfo.getConnectionType()),
+					serverInfo.getPort()
+			);
+
+			if( CrossChainUtils.addServer( Litecoin.getInstance(), server )) {
+				return "true";
+			}
+			else {
+				return "false";
+			}
+		}
+		catch (IllegalArgumentException | NullPointerException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		}
+		catch (Exception e) {
+			return "false";
+		}
+	}
+
+	@POST
+	@Path("/removeserver")
+	@Operation(
+			summary = "Remove server from list of Litecoin servers",
+			description = "Remove server from list of Litecoin servers",
+			requestBody = @RequestBody(
+					required = true,
+					content = @Content(
+							mediaType = MediaType.APPLICATION_JSON,
+							schema = @Schema(
+									implementation = ServerInfo.class
+							)
+					)
+			),
+			responses = {
+					@ApiResponse(
+							description = "true if removed, otherwise",
+							content = @Content(
+									schema = @Schema(
+											type = "string"
+									)
+							)
+					)
+			}
+
+	)
+	@ApiErrors({ApiError.INVALID_DATA})
+	@SecurityRequirement(name = "apiKey")
+	public String removeServer(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
+		Security.checkApiCallAllowed(request);
+
+		try {
+			ElectrumX.Server server = new ElectrumX.Server(
+					serverInfo.getHostName(),
+					ChainableServer.ConnectionType.valueOf(serverInfo.getConnectionType()),
+					serverInfo.getPort()
+			);
+
+			if( CrossChainUtils.removeServer( Litecoin.getInstance(), server ) ) {
+
+				return "true";
+			}
+			else {
+				return "false";
+			}
+		}
+		catch (IllegalArgumentException | NullPointerException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		}
+		catch (Exception e) {
+			return "false";
+		}
+	}
+
+	@POST
+	@Path("/setcurrentserver")
+	@Operation(
+			summary = "Set current Litecoin server",
+			description = "Set current Litecoin server",
+			requestBody = @RequestBody(
+					required = true,
+					content = @Content(
+							mediaType = MediaType.APPLICATION_JSON,
+							schema = @Schema(
+									implementation = ServerInfo.class
+							)
+					)
+			),
+			responses = {
+					@ApiResponse(
+							description = "connection info",
+							content = @Content(
+									mediaType = MediaType.APPLICATION_JSON,
+									schema = @Schema(
+											implementation = ServerConnectionInfo.class
+									)
+							)
+					)
+			}
+
+	)
+	@ApiErrors({ApiError.INVALID_DATA})
+	@SecurityRequirement(name = "apiKey")
+	public ServerConnectionInfo setCurrentServer(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
+		Security.checkApiCallAllowed(request);
+
+		if( serverInfo.getConnectionType() == null ||
+				serverInfo.getHostName() == null) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		try {
+			return CrossChainUtils.setCurrentServer( Litecoin.getInstance(), serverInfo );
+		}
+		catch (IllegalArgumentException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
+		}
+		catch (Exception e) {
+			return new ServerConnectionInfo(
+					serverInfo,
+					CrossChainUtils.CORE_API_CALL,
+					true,
+					false,
+					System.currentTimeMillis(),
+					CrossChainUtils.getNotes(e));
+		}
 	}
 
 	@POST
