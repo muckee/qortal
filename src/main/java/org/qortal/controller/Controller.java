@@ -1921,8 +1921,7 @@ public class Controller extends Thread {
 			// Disregard peers that don't have a recent block
 			if (peerChainTipData.getTimestamp() == null || peerChainTipData.getTimestamp() < minLatestBlockTimestamp) {
 				iterator.remove();
-				continue;
-			}
+            }
 		}
 
 		return peers;
