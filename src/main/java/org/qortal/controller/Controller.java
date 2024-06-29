@@ -564,13 +564,36 @@ public class Controller extends Thread {
 
 		// If GUI is enabled, we're no longer starting up but actually running now
 		Gui.getInstance().notifyRunning();
+
+		// Check every 10 minutes to see if the block minter is running
+		Timer timer = new Timer();
+
+		timer.schedule(new TimerTask() {
+			@Override
+			public void run() {
+				if (blockMinter.isAlive()) {
+					LOGGER.debug("Block minter is running? {}", blockMinter.isAlive());
+				} else if (!blockMinter.isAlive()) {
+					LOGGER.debug("Block minter is running? {}", blockMinter.isAlive());
+					blockMinter.shutdown();
+					TimeUnit.SECONDS.sleep(10);
+					try {
+						// Start new block minter thread
+						LOGGER.info("Restarting block minter");
+						blockMinter.start();
+					} catch (Exception e) {
+						// Couldn't start new block minter thread
+						LOGGER.info("Starting block minter failed {}", e);
+					}
+				}
+			}
+		}, 10*60*1000, 10*60*1000);
 	}
 
 	/** Called by AdvancedInstaller's launch EXE in single-instance mode, when an instance is already running. */
 	public static void secondaryMain(String[] args) {
 		// Return as we don't want to run more than one instance
 	}
-
 
 	// Main thread
 
