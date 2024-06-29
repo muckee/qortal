@@ -140,7 +140,7 @@ public class GatewayResource {
         }
 
         String prefix = StringUtils.join(prefixParts, "/");
-        if (prefix != null && prefix.length() > 0) {
+        if (prefix != null && !prefix.isEmpty()) {
             prefix = "/" + prefix;
         }
 
