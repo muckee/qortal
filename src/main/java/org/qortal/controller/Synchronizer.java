@@ -406,7 +406,7 @@ public class Synchronizer extends Thread {
 				// If enough time has passed, enter recovery mode, which lifts some restrictions on who we can sync with and when we can mint
 				long recoveryModeTimeout = Settings.getInstance().getRecoveryModeTimeout();
 				if (NTP.getTime() - timePeersLastAvailable > recoveryModeTimeout) {
-					if (recoveryMode == false) {
+					if (!recoveryMode) {
 						LOGGER.info(String.format("Peers have been unavailable for %d minutes. Entering recovery mode...", recoveryModeTimeout/60/1000));
 						recoveryMode = true;
 					}
@@ -663,7 +663,7 @@ public class Synchronizer extends Thread {
 							}
 						}
 
-						if (useCachedSummaries == false) {
+						if (!useCachedSummaries) {
 							if (summariesRequired > 0) {
 								LOGGER.trace(String.format("Requesting %d block summar%s from peer %s after common block %.8s. Peer height: %d", summariesRequired, (summariesRequired != 1 ? "ies" : "y"), peer, Base58.encode(commonBlockSummary.getSignature()), peerHeight));
 

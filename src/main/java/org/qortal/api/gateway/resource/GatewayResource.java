@@ -41,7 +41,7 @@ public class GatewayResource {
     private ArbitraryResourceStatus getStatus(Service service, String name, String identifier, Boolean build) {
 
         // If "build=true" has been specified in the query string, build the resource before returning its status
-        if (build != null && build == true) {
+        if (build != null && build) {
             try {
                 ArbitraryDataReader reader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, null);
                 if (!reader.isBuilding()) {
