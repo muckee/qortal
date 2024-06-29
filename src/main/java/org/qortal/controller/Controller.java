@@ -576,14 +576,18 @@ public class Controller extends Thread {
 				} else if (!blockMinter.isAlive()) {
 					LOGGER.debug("Block minter is running? {}", blockMinter.isAlive());
 					blockMinter.shutdown();
-					TimeUnit.SECONDS.sleep(10);
+
 					try {
+						// Wait 10 seconds before restart
+						TimeUnit.SECONDS.sleep(10);
+
 						// Start new block minter thread
 						LOGGER.info("Restarting block minter");
 						blockMinter.start();
-					} catch (Exception e) {
+					} catch (InterruptedException e) {
 						// Couldn't start new block minter thread
 						LOGGER.info("Starting block minter failed {}", e);
+						throw new RuntimeException(e);
 					}
 				}
 			}
@@ -2024,5 +2028,4 @@ public class Controller extends Thread {
 	public StatsSnapshot getStatsSnapshot() {
 		return this.stats;
 	}
-
 }
