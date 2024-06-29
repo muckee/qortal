@@ -80,7 +80,7 @@ public class GatewayResource {
     
     private HttpServletResponse parsePath(String inPath, String qdnContext, String secret58, boolean includeResourceIdInPrefix, boolean async) {
 
-        if (inPath == null || inPath.equals("")) {
+        if (inPath == null || inPath.isEmpty()) {
             // Assume not a real file
             return ArbitraryDataRenderer.getResponse(response, 404, "Error 404: File Not Found");
         }
