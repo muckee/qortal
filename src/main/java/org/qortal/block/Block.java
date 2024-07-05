@@ -1285,9 +1285,17 @@ public class Block {
 				// Apply fix for block 212937 but fix will be rolled back before we exit method
 				Block212937.processFix(this);
 			}
+			else if (this.blockData.getHeight() == 1333492) {
+				// Apply fix for block 1333492 but fix will be rolled back before we exit method
+				Block1333492.processFix(this);
+			}
 			else if (InvalidNameRegistrationBlocks.isAffectedBlock(this.blockData.getHeight())) {
 				// Apply fix for affected name registration blocks, but fix will be rolled back before we exit method
 				InvalidNameRegistrationBlocks.processFix(this);
+			}
+			else if (InvalidBalanceBlocks.isAffectedBlock(this.blockData.getHeight())) {
+				// Apply fix for affected balance blocks, but fix will be rolled back before we exit method
+				InvalidBalanceBlocks.processFix(this);
 			}
 
 			for (Transaction transaction : this.getTransactions()) {
@@ -1554,16 +1562,21 @@ public class Block {
 				// Apply fix for block 212937
 				Block212937.processFix(this);
 			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
+			else if (this.blockData.getHeight() == 1333492) {
+				// Apply fix for block 1333492
+				Block1333492.processFix(this);
+			}
+			else if (InvalidBalanceBlocks.isAffectedBlock(this.blockData.getHeight())) {
+				// Apply fix for affected balance blocks
+				InvalidBalanceBlocks.processFix(this);
+			}
+			else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
 				SelfSponsorshipAlgoV1Block.processAccountPenalties(this);
 			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
+			else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
 				SelfSponsorshipAlgoV2Block.processAccountPenalties(this);
 			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
+			else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
 				SelfSponsorshipAlgoV3Block.processAccountPenalties(this);
 			}
 		}
@@ -1854,16 +1867,21 @@ public class Block {
 				// Revert fix for block 212937
 				Block212937.orphanFix(this);
 			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
+			else if (this.blockData.getHeight() == 1333492) {
+				// Revert fix for block 1333492
+				Block1333492.orphanFix(this);
+			}
+			else if (InvalidBalanceBlocks.isAffectedBlock(this.blockData.getHeight())) {
+				// Revert fix for affected balance blocks
+				InvalidBalanceBlocks.orphanFix(this);
+			}
+			else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
 				SelfSponsorshipAlgoV1Block.orphanAccountPenalties(this);
 			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
+			else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
 				SelfSponsorshipAlgoV2Block.orphanAccountPenalties(this);
 			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
+			else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
 				SelfSponsorshipAlgoV3Block.orphanAccountPenalties(this);
 			}
 			

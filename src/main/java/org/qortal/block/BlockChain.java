@@ -7,6 +7,7 @@ import org.eclipse.persistence.jaxb.JAXBContextFactory;
 import org.eclipse.persistence.jaxb.UnmarshallerProperties;
 import org.qortal.controller.Controller;
 import org.qortal.data.block.BlockData;
+import org.qortal.data.network.PeerData;
 import org.qortal.network.Network;
 import org.qortal.repository.*;
 import org.qortal.settings.Settings;
@@ -24,6 +25,7 @@ import javax.xml.transform.stream.StreamSource;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -80,7 +82,8 @@ public class BlockChain {
 		arbitraryOptionalFeeTimestamp,
 		unconfirmableRewardSharesHeight,
 		disableTransferPrivsTimestamp,
-		enableTransferPrivsTimestamp
+		enableTransferPrivsTimestamp,
+		cancelSellNameValidationTimestamp
 	}
 
 	// Custom transaction fees
@@ -610,6 +613,10 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.enableTransferPrivsTimestamp.name()).longValue();
 	}
 
+	public long getCancelSellNameValidationTimestamp() {
+		return this.featureTriggers.get(FeatureTrigger.cancelSellNameValidationTimestamp.name()).longValue();
+	}
+
 	// More complex getters for aspects that change by height or timestamp
 
 	public long getRewardAtHeight(int ourHeight) {
@@ -805,10 +812,12 @@ public class BlockChain {
 		boolean isLite = Settings.getInstance().isLite();
 		boolean canBootstrap = Settings.getInstance().getBootstrap();
 		boolean needsArchiveRebuild = false;
+		int checkHeight = 0;
 		BlockData chainTip;
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			chainTip = repository.getBlockRepository().getLastBlock();
+			checkHeight = repository.getBlockRepository().getBlockchainHeight();
 
 			// Ensure archive is (at least partially) intact, and force a bootstrap if it isn't
 			if (!isTopOnly && archiveEnabled && canBootstrap) {
@@ -820,6 +829,17 @@ public class BlockChain {
 					// Don't backup if there are no minting accounts, as this can cause problems
 					if (!repository.getAccountRepository().getMintingAccounts().isEmpty()) {
 						Controller.getInstance().exportRepositoryData();
+					}
+				}
+			}
+
+			if (!canBootstrap) {
+				if (checkHeight > 2) {
+					LOGGER.info("Retrieved block 2 from archive. Syncing from genesis block resumed!");
+				} else {
+					needsArchiveRebuild = (repository.getBlockArchiveRepository().fromHeight(2) == null);
+					if (needsArchiveRebuild) {
+						LOGGER.info("Couldn't retrieve block 2 from archive. Bootstrapping is disabled. Syncing from genesis block!");
 					}
 				}
 			}
@@ -856,11 +876,12 @@ public class BlockChain {
 
 		// Check first block is Genesis Block
 		if (!isGenesisBlockValid() || needsArchiveRebuild) {
-			try {
-				rebuildBlockchain();
-
-			} catch (InterruptedException e) {
-				throw new DataException(String.format("Interrupted when trying to rebuild blockchain: %s", e.getMessage()));
+			if (checkHeight < 3) {
+				try {
+					rebuildBlockchain();
+				} catch (InterruptedException e) {
+					throw new DataException(String.format("Interrupted when trying to rebuild blockchain: %s", e.getMessage()));
+				}
 			}
 		}
 
@@ -1001,5 +1022,4 @@ public class BlockChain {
 			blockchainLock.unlock();
 		}
 	}
-
 }
