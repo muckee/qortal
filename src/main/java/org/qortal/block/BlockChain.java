@@ -806,17 +806,18 @@ public class BlockChain {
 	 * @throws SQLException
 	 */
 	public static void validate() throws DataException {
+
 		boolean isTopOnly = Settings.getInstance().isTopOnly();
 		boolean archiveEnabled = Settings.getInstance().isArchiveEnabled();
 		boolean isLite = Settings.getInstance().isLite();
 		boolean canBootstrap = Settings.getInstance().getBootstrap();
 		boolean needsArchiveRebuild = false;
-		boolean checkPointFailed = false;
-		int currentChainHeight = 0;
-		int checkPointHeight = 0;
+		int checkHeight = 0;
+		BlockData chainTip;
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			currentChainHeight = repository.getBlockRepository().getBlockchainHeight();
+			chainTip = repository.getBlockRepository().getLastBlock();
+			checkHeight = repository.getBlockRepository().getBlockchainHeight();
 
 			// Ensure archive is (at least partially) intact, and force a bootstrap if it isn't
 			if (!isTopOnly && archiveEnabled && canBootstrap) {
@@ -832,76 +833,55 @@ public class BlockChain {
 				}
 			}
 
-			// Validate bootstrap
 			if (!canBootstrap) {
-				if (currentChainHeight > 2) {
+				if (checkHeight > 2) {
 					LOGGER.info("Retrieved block 2 from archive. Syncing from genesis block resumed!");
 				} else {
 					needsArchiveRebuild = (repository.getBlockArchiveRepository().fromHeight(2) == null);
 					if (needsArchiveRebuild) {
 						LOGGER.info("Couldn't retrieve block 2 from archive. Bootstrapping is disabled. Syncing from genesis block!");
-
-						// If there are minting accounts, make sure to back them up
-						// Don't backup if there are no minting accounts, as this can cause problems
-						if (!repository.getAccountRepository().getMintingAccounts().isEmpty()) {
-							Controller.getInstance().exportRepositoryData();
-						}
 					}
 				}
 			}
 
 			// Validate checkpoints
-			if (!isTopOnly && !isLite) {
+			// Limited to topOnly nodes for now, in order to reduce risk, and to solve a real-world problem with divergent topOnly nodes
+			// TODO: remove the isTopOnly conditional below once this feature has had more testing time
+			if (isTopOnly && !isLite) {
 				List<Checkpoint> checkpoints = BlockChain.getInstance().getCheckpoints();
 				for (Checkpoint checkpoint : checkpoints) {
-					checkPointHeight = checkpoint.height;
-					if (currentChainHeight > checkPointHeight) {
-						BlockData blockData = repository.getBlockRepository().fromHeight(checkpoint.height);
-						if (blockData == null) {
-							// Try the archive
-							blockData = repository.getBlockArchiveRepository().fromHeight(checkpoint.height);
-						}
-						if (blockData == null) {
-							LOGGER.trace("Couldn't find block for height {}", checkpoint.height);
-							// This is likely due to the block being pruned, so is safe to ignore.
-							// Continue, as there might be other blocks we can check more definitively.
-							continue;
-						}
-
-						byte[] signature = Base58.decode(checkpoint.signature);
-						if (!Arrays.equals(signature, blockData.getSignature())) {
-							LOGGER.info("Error: block at height {} with sig: {} doesn't match checkpoint sig: {}. Bootstrapping / Resync...", checkpoint.height, Base58.encode(blockData.getSignature()), checkpoint.signature);
-							checkPointFailed = true;
-							break;
-						}
-						LOGGER.info("Block at height {} matches checkpoint signature", blockData.getHeight());
+					BlockData blockData = repository.getBlockRepository().fromHeight(checkpoint.height);
+					if (blockData == null) {
+						// Try the archive
+						blockData = repository.getBlockArchiveRepository().fromHeight(checkpoint.height);
 					}
+					if (blockData == null) {
+						LOGGER.trace("Couldn't find block for height {}", checkpoint.height);
+						// This is likely due to the block being pruned, so is safe to ignore.
+						// Continue, as there might be other blocks we can check more definitively.
+						continue;
+					}
+
+					byte[] signature = Base58.decode(checkpoint.signature);
+					if (!Arrays.equals(signature, blockData.getSignature())) {
+						LOGGER.info("Error: block at height {} with signature {} doesn't match checkpoint sig: {}. Bootstrapping...", checkpoint.height, Base58.encode(blockData.getSignature()), checkpoint.signature);
+						needsArchiveRebuild = true;
+						break;
+					}
+					LOGGER.info("Block at height {} matches checkpoint signature", blockData.getHeight());
 				}
 			}
+
 		}
 
 		// Check first block is Genesis Block
 		if (!isGenesisBlockValid() || needsArchiveRebuild) {
-			if (!canBootstrap && currentChainHeight < 3) {
+			if (checkHeight < 3) {
 				try {
 					rebuildBlockchain();
 				} catch (InterruptedException e) {
 					throw new DataException(String.format("Interrupted when trying to rebuild blockchain: %s", e.getMessage()));
 				}
-			}
-		}
-
-		// If checkpoint failed resync or bootstrap
-		if (checkPointFailed) {
-			try (final Repository repository = RepositoryManager.getRepository()) {
-				// If there are minting accounts, make sure to back them up
-				// Don't backup if there are no minting accounts, as this can cause problems
-				if (!repository.getAccountRepository().getMintingAccounts().isEmpty()) {
-					Controller.getInstance().exportRepositoryData();
-				}
-				rebuildBlockchain();
-			} catch (InterruptedException e) {
-				throw new DataException(String.format("Interrupted when trying to rebuild blockchain: %s", e.getMessage()));
 			}
 		}
 
