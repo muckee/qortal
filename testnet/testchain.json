@@ -5,7 +5,7 @@
 	"maxBlockSize": 2097152,
 	"maxBytesPerUnitFee": 1024,
 	"unitFees": [
-		{ "timestamp": 0, "fee": "0.001" }
+		{ "timestamp": 0, "fee": "0.01" }
 	],
 	"nameRegistrationUnitFees": [
 		{ "timestamp": 0, "fee": "1.25" }
@@ -26,6 +26,9 @@
 	"onlineAccountSignaturesMaxLifetime": 86400000,
 	"onlineAccountsModulusV2Timestamp": 0,
 	"selfSponsorshipAlgoV1SnapshotTimestamp": 9999999999999,
+	"selfSponsorshipAlgoV2SnapshotTimestamp": 9999999999999,
+	"selfSponsorshipAlgoV3SnapshotTimestamp": 9999999999999,
+	"referenceTimestampBlock": 1670684455220,
 	"mempowTransactionUpdatesTimestamp": 1692554400000,
 	"blockRewardBatchStartHeight": 10000,
 	"blockRewardBatchSize": 1000,
@@ -90,9 +93,15 @@
 		"increaseOnlineAccountsDifficultyTimestamp": 9999999999999,
 		"onlineAccountMinterLevelValidationHeight": 0,
 		"selfSponsorshipAlgoV1Height": 9999999,
+		"selfSponsorshipAlgoV2Height": 9999999,
+		"selfSponsorshipAlgoV3Height": 9999999,
 		"feeValidationFixTimestamp": 0,
 		"chatReferenceTimestamp": 0,
-		"arbitraryOptionalFeeTimestamp": 0
+		"arbitraryOptionalFeeTimestamp": 0,
+		"unconfirmableRewardSharesHeight": 0,
+		"disableTransferPrivsTimestamp": 9999999999990,
+		"enableTransferPrivsTimestamp": 9999999999999,
+		"cancelSellNameValidationTimestamp": 9999999999999
 	},
 	"genesisInfo": {
 		"version": 4,
