@@ -344,6 +344,45 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	}
 
 	/**
+	 * Returns bitcoinj transaction sending the recipient's amount to each recipient given.
+	 *
+	 *
+	 * @param xprv58 the private master key
+	 * @param amountByRecipient each amount to send indexed by the recipient to send to
+	 * @param feePerByte the satoshis per byte
+	 *
+	 * @return the completed transaction, ready to broadcast
+	 */
+	public Transaction buildSpendMultiple(String xprv58, Map<String, Long> amountByRecipient, Long feePerByte) {
+		Context.propagate(bitcoinjContext);
+
+		Wallet wallet = Wallet.fromSpendingKeyB58(this.params, xprv58, DeterministicHierarchy.BIP32_STANDARDISATION_TIME_SECS);
+		wallet.setUTXOProvider(new WalletAwareUTXOProvider(this, wallet));
+
+		Transaction transaction = new Transaction(this.params);
+
+		for(Map.Entry<String, Long> amountForRecipient : amountByRecipient.entrySet()) {
+			Address destination = Address.fromString(this.params, amountForRecipient.getKey());
+			transaction.addOutput(Coin.valueOf(amountForRecipient.getValue()), destination);
+		}
+
+		SendRequest sendRequest = SendRequest.forTx(transaction);
+
+		if (feePerByte != null)
+			sendRequest.feePerKb = Coin.valueOf(feePerByte * 1000L); // Note: 1000 not 1024
+		else
+			// Allow override of default for TestNet3, etc.
+			sendRequest.feePerKb = this.getFeePerKb();
+
+		try {
+			wallet.completeTx(sendRequest);
+			return sendRequest.tx;
+		} catch (InsufficientMoneyException e) {
+			return null;
+		}
+	}
+
+	/**
 	 * Get Spending Candidate Addresses
 	 *
 	 * @param key58 public master key
