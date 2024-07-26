@@ -7,6 +7,7 @@ import org.bitcoinj.script.Script.ScriptType;
 import org.qortal.account.PrivateKeyAccount;
 import org.qortal.account.PublicKeyAccount;
 import org.qortal.api.model.crosschain.TradeBotCreateRequest;
+import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.asset.Asset;
 import org.qortal.crosschain.*;
 import org.qortal.crypto.Crypto;
@@ -313,7 +314,7 @@ public class DogecoinACCTv1TradeBot implements AcctTradeBot {
 		}
 
 		// Attempt to send MESSAGE to Bob's Qortal trade address
-		byte[] messageData = DogecoinACCTv1.buildOfferMessage(tradeBotData.getTradeForeignPublicKeyHash(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
+		byte[] messageData = CrossChainUtils.buildOfferMessage(tradeBotData.getTradeForeignPublicKeyHash(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
 		String messageRecipient = crossChainTradeData.qortalCreatorTradeAddress;
 
 		boolean isMessageAlreadySent = repository.getMessageRepository().exists(tradeBotData.getTradeNativePublicKey(), messageRecipient, messageData);
