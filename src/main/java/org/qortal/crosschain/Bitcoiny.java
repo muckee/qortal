@@ -208,8 +208,8 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	 * @throws ForeignBlockchainException if there was an error.
 	 */
 	// TODO: don't return bitcoinj-based objects like TransactionOutput, use BitcoinyTransaction.Output instead
-	public List<TransactionOutput> getUnspentOutputs(String base58Address) throws ForeignBlockchainException {
-		List<UnspentOutput> unspentOutputs = this.blockchainProvider.getUnspentOutputs(addressToScriptPubKey(base58Address), false);
+	public List<TransactionOutput> getUnspentOutputs(String base58Address, boolean includeUnconfirmed) throws ForeignBlockchainException {
+		List<UnspentOutput> unspentOutputs = this.blockchainProvider.getUnspentOutputs(addressToScriptPubKey(base58Address), includeUnconfirmed);
 
 		List<TransactionOutput> unspentTransactionOutputs = new ArrayList<>();
 		for (UnspentOutput unspentOutput : unspentOutputs) {
@@ -430,7 +430,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 		List<TransactionOutput> allUnspentOutputs = new ArrayList<>();
 		Set<String> walletAddresses = this.getWalletAddresses(key58);
 		for (String address : walletAddresses) {
-			allUnspentOutputs.addAll(this.getUnspentOutputs(address));
+			allUnspentOutputs.addAll(this.getUnspentOutputs(address, true));
 		}
 		for (TransactionOutput output : allUnspentOutputs) {
 			if (!output.isAvailableForSpending()) {
@@ -504,7 +504,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 					byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
 
 					// Ask for transaction history - if it's empty then key has never been used
-					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, false);
+					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
 
 					if (!historicTransactionHashes.isEmpty()) {
 						areAllKeysUnused = false;
@@ -608,7 +608,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 					byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
 
 					// Ask for transaction history - if it's empty then key has never been used
-					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, false);
+					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
 
 					if (!historicTransactionHashes.isEmpty()) {
 						areAllKeysUnused = false;
@@ -842,7 +842,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 
 					List<UnspentOutput> unspentOutputs;
 					try {
-						unspentOutputs = this.bitcoiny.blockchainProvider.getUnspentOutputs(script, false);
+						unspentOutputs = this.bitcoiny.blockchainProvider.getUnspentOutputs(script, true);
 					} catch (ForeignBlockchainException e) {
 						throw new UTXOProviderException(String.format("Unable to fetch unspent outputs for %s", address));
 					}
@@ -932,7 +932,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	}
 
 	private Long summingUnspentOutputs(String walletAddress) throws ForeignBlockchainException {
-		return this.getUnspentOutputs(walletAddress).stream()
+		return this.getUnspentOutputs(walletAddress, true).stream()
 				.map(TransactionOutput::getValue)
 				.mapToLong(Coin::longValue)
 				.sum();

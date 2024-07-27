@@ -794,7 +794,7 @@ public class DogecoinACCTv1TradeBot implements AcctTradeBot {
 			case FUNDED: {
 				Coin redeemAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 				ECKey redeemKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = dogecoin.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = dogecoin.getUnspentOutputs(p2shAddressA, false);
 
 				Transaction p2shRedeemTransaction = BitcoinyHTLC.buildRedeemTransaction(dogecoin.getNetworkParameters(), redeemAmount, redeemKey,
 						fundingOutputs, redeemScriptA, secretA, receivingAccountInfo);
@@ -858,7 +858,7 @@ public class DogecoinACCTv1TradeBot implements AcctTradeBot {
 			case FUNDED:{
 				Coin refundAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 				ECKey refundKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = dogecoin.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = dogecoin.getUnspentOutputs(p2shAddressA, false);
 
 				// Determine receive address for refund
 				String receiveAddress = dogecoin.getUnusedReceiveAddress(tradeBotData.getForeignKey());

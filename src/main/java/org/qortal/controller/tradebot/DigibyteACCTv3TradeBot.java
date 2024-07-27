@@ -753,7 +753,7 @@ public class DigibyteACCTv3TradeBot implements AcctTradeBot {
 			case FUNDED: {
 				Coin redeemAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 				ECKey redeemKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = digibyte.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = digibyte.getUnspentOutputs(p2shAddressA, false);
 
 				Transaction p2shRedeemTransaction = BitcoinyHTLC.buildRedeemTransaction(digibyte.getNetworkParameters(), redeemAmount, redeemKey,
 						fundingOutputs, redeemScriptA, secretA, receivingAccountInfo);
@@ -817,7 +817,7 @@ public class DigibyteACCTv3TradeBot implements AcctTradeBot {
 			case FUNDED:{
 				Coin refundAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 				ECKey refundKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = digibyte.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = digibyte.getUnspentOutputs(p2shAddressA, false);
 
 				// Determine receive address for refund
 				String receiveAddress = digibyte.getUnusedReceiveAddress(tradeBotData.getForeignKey());
