@@ -26,6 +26,7 @@ import org.qortal.crosschain.ACCT;
 import org.qortal.crosschain.AcctMode;
 import org.qortal.crosschain.Bitcoiny;
 import org.qortal.crosschain.ForeignBlockchain;
+import org.qortal.crosschain.PirateChain;
 import org.qortal.crosschain.SupportedBlockchain;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.at.ATData;
@@ -198,7 +199,7 @@ public class CrossChainTradeBotResource {
 	@Path("/respondmultiple")
 	@Operation(
 			summary = "Respond to multiple trade offers. NOTE: WILL SPEND FUNDS!)",
-			description = "Start a new trade-bot entry to respond to chosen trade offers.",
+			description = "Start a new trade-bot entry to respond to chosen trade offers. Pirate Chain is not supported and will throw an invalid criteria error.",
 			requestBody = @RequestBody(
 					required = true,
 					content = @Content(
@@ -323,9 +324,12 @@ public class CrossChainTradeBotResource {
 				if (acctUsingAtData == null)
 					throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 				// if the optional is empty,
-					// then ensure the ACCT blockchain is a Bitcoiny blockchain and fill the optional
+				// then ensure the ACCT blockchain is a Bitcoiny blockchain, but not Pirate Chain and fill the optional
+				// Even though the Pirate Chain protocol does support multi send,
+				// the Pirate Chain API we are using does not support multi send
 				else if( acct.isEmpty() ) {
-					if( !(acctUsingAtData.getBlockchain() instanceof  Bitcoiny) )
+					if( !(acctUsingAtData.getBlockchain() instanceof Bitcoiny) ||
+							acctUsingAtData.getBlockchain() instanceof PirateChain )
 						throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
 					acct = Optional.of(acctUsingAtData);
 				}
