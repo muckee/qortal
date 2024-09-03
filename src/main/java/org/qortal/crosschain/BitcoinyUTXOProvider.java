@@ -30,7 +30,7 @@ public class BitcoinyUTXOProvider implements UTXOProvider {
                 byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
 
                 // collection UTXO's for all confirmed unspent outputs
-                for (UnspentOutput output : this.bitcoiny.blockchainProvider.getUnspentOutputs(script, false)) {
+                for (UnspentOutput output : this.bitcoiny.blockchainProvider.getUnspentOutputs(script, true)) {
                     utxos.add(toUTXO(output));
                 }
             }

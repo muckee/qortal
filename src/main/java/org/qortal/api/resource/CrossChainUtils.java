@@ -1,5 +1,6 @@
 package org.qortal.api.resource;
 
+import com.google.common.primitives.Bytes;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bitcoinj.core.Address;
@@ -7,11 +8,15 @@ import org.bitcoinj.core.Coin;
 import org.bitcoinj.script.Script;
 import org.bitcoinj.script.ScriptBuilder;
 
+import org.bouncycastle.util.Strings;
+import org.json.simple.JSONObject;
+import org.qortal.api.model.crosschain.BitcoinyTBDRequest;
 import org.qortal.crosschain.*;
 import org.qortal.data.at.ATData;
 import org.qortal.data.crosschain.*;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
+import org.qortal.utils.BitTwiddling;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -544,5 +549,87 @@ public class CrossChainUtils {
                 server.getPort(),
                 server.getConnectionType().toString(),
                 false);
+    }
+
+    /**
+     * Get Bitcoiny TBD (To Be Determined)
+     *
+     * @param bitcoinyTBDRequest the parameters for the Bitcoiny TBD
+     * @return the Bitcoiny TBD
+     * @throws DataException
+     */
+    public static BitcoinyTBD getBitcoinyTBD(BitcoinyTBDRequest bitcoinyTBDRequest) throws DataException {
+
+        try {
+            DeterminedNetworkParams networkParams = new DeterminedNetworkParams(bitcoinyTBDRequest);
+
+            BitcoinyTBD bitcoinyTBD
+                    = BitcoinyTBD.getInstance(bitcoinyTBDRequest.getCode())
+                        .orElse(BitcoinyTBD.buildInstance(
+                                bitcoinyTBDRequest,
+                                networkParams)
+                        );
+
+            return bitcoinyTBD;
+        } catch (Exception e) {
+            LOGGER.error(e.getMessage(), e);
+        }
+
+        return null;
+    }
+
+    /**
+     * Get Version Decimal
+     *
+     * @param jsonObject the JSON object with the version attribute
+     * @param attribute the attribute that hold the version value
+     * @return the version as a decimal number, discarding
+     * @throws NumberFormatException
+     */
+    public static double getVersionDecimal(JSONObject jsonObject, String attribute) throws NumberFormatException {
+        String versionString = (String) jsonObject.get(attribute);
+        return Double.parseDouble(reduceDelimeters(versionString, 1, '.'));
+    }
+
+    /**
+     * Reduce Delimeters
+     *
+     * @param value the raw string
+     * @param max the max number of the delimeter
+     * @param delimeter the delimeter
+     * @return the processed value with the max number of delimeters
+     */
+    public static String reduceDelimeters(String value, int max, char delimeter) {
+
+        if( max < 1 ) return value;
+
+        String[] splits = Strings.split(value, delimeter);
+
+        StringBuffer buffer = new StringBuffer(splits[0]);
+
+        int limit = Math.min(max + 1, splits.length);
+
+        for( int index = 1; index < limit; index++) {
+            buffer.append(delimeter);
+            buffer.append(splits[index]);
+        }
+
+        return buffer.toString();
+    }
+
+    /** Returns
+
+
+    /**
+     * Build Offer Message
+     *
+     * @param partnerBitcoinPKH
+     * @param hashOfSecretA
+     * @param lockTimeA
+     * @return  'offer' MESSAGE payload for trade partner to send to AT creator's trade address
+     */
+    public static byte[] buildOfferMessage(byte[] partnerBitcoinPKH, byte[] hashOfSecretA, int lockTimeA) {
+        byte[] lockTimeABytes = BitTwiddling.toBEByteArray((long) lockTimeA);
+        return Bytes.concat(partnerBitcoinPKH, hashOfSecretA, lockTimeABytes);
     }
 }

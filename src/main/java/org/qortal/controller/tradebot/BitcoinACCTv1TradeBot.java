@@ -7,6 +7,7 @@ import org.bitcoinj.script.Script.ScriptType;
 import org.qortal.account.PrivateKeyAccount;
 import org.qortal.account.PublicKeyAccount;
 import org.qortal.api.model.crosschain.TradeBotCreateRequest;
+import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.asset.Asset;
 import org.qortal.crosschain.*;
 import org.qortal.crypto.Crypto;
@@ -527,7 +528,7 @@ public class BitcoinACCTv1TradeBot implements AcctTradeBot {
 		// P2SH-A funding confirmed
 
 		// Attempt to send MESSAGE to Bob's Qortal trade address
-		byte[] messageData = BitcoinACCTv1.buildOfferMessage(tradeBotData.getTradeForeignPublicKeyHash(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
+		byte[] messageData = CrossChainUtils.buildOfferMessage(tradeBotData.getTradeForeignPublicKeyHash(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
 		String messageRecipient = crossChainTradeData.qortalCreatorTradeAddress;
 
 		boolean isMessageAlreadySent = repository.getMessageRepository().exists(tradeBotData.getTradeNativePublicKey(), messageRecipient, messageData);
@@ -893,7 +894,7 @@ public class BitcoinACCTv1TradeBot implements AcctTradeBot {
 		// Redeem P2SH-B using secret-B
 		Coin redeemAmount = Coin.valueOf(P2SH_B_OUTPUT_AMOUNT); // An actual amount to avoid dust filter, remaining used as fees. The real funds are in P2SH-A.
 		ECKey redeemKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-		List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressB);
+		List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressB, false);
 		byte[] receivingAccountInfo = tradeBotData.getReceivingAccountInfo();
 
 		Transaction p2shRedeemTransaction = BitcoinyHTLC.buildRedeemTransaction(bitcoin.getNetworkParameters(), redeemAmount, redeemKey,
@@ -1063,7 +1064,7 @@ public class BitcoinACCTv1TradeBot implements AcctTradeBot {
 			case FUNDED: {
 				Coin redeemAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount - P2SH_B_OUTPUT_AMOUNT);
 				ECKey redeemKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA, false);
 
 				Transaction p2shRedeemTransaction = BitcoinyHTLC.buildRedeemTransaction(bitcoin.getNetworkParameters(), redeemAmount, redeemKey,
 						fundingOutputs, redeemScriptA, secretA, receivingAccountInfo);
@@ -1135,7 +1136,7 @@ public class BitcoinACCTv1TradeBot implements AcctTradeBot {
 			case FUNDED:{
 				Coin refundAmount = Coin.valueOf(P2SH_B_OUTPUT_AMOUNT); // An actual amount to avoid dust filter, remaining used as fees.
 				ECKey refundKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressB);
+				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressB, false);
 
 				// Determine receive address for refund
 				String receiveAddress = bitcoin.getUnusedReceiveAddress(tradeBotData.getForeignKey());
@@ -1201,7 +1202,7 @@ public class BitcoinACCTv1TradeBot implements AcctTradeBot {
 			case FUNDED:{
 				Coin refundAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount - P2SH_B_OUTPUT_AMOUNT);
 				ECKey refundKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA, false);
 
 				// Determine receive address for refund
 				String receiveAddress = bitcoin.getUnusedReceiveAddress(tradeBotData.getForeignKey());

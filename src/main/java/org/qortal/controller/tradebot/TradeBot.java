@@ -215,6 +215,41 @@ public class TradeBot implements Listener {
 		return acctTradeBot.startResponse(repository, atData, acct, crossChainTradeData, foreignKey, receivingAddress);
 	}
 
+	/**
+	 * Creates a trade-bot entries from the 'Alice' viewpoint,
+	 * i.e. matching foreign blockchain currency to existing QORT offers.
+	 * <p>
+	 * Requires chosen trade offers from Bob, passed by <tt>crossChainTradeData</tt>
+	 * and access to a foreign blockchain wallet via <tt>foreignKey</tt>.
+	 * <p>
+	 * @param repository
+	 * @param crossChainTradeDataList chosen trade OFFERs that Alice wants to match
+	 * @param receiveAddress Alice's Qortal address to receive her QORT
+	 * @param foreignKey foreign blockchain wallet key
+	 * @param bitcoiny
+	 * @throws DataException
+	 */
+	public ResponseResult startResponseMultiple(
+			Repository repository,
+			ACCT acct,
+			List<CrossChainTradeData> crossChainTradeDataList,
+			String receiveAddress,
+			String foreignKey,
+			Bitcoiny bitcoiny) throws DataException {
+		AcctTradeBot acctTradeBot = findTradeBotForAcct(acct);
+		if (acctTradeBot == null) {
+			LOGGER.debug(() -> String.format("Couldn't find ACCT trade-bot for %s", acct.getBlockchain()));
+			return ResponseResult.NETWORK_ISSUE;
+		}
+
+		for( CrossChainTradeData tradeData : crossChainTradeDataList) {
+			// Check Alice doesn't already have an existing, on-going trade-bot entry for this AT.
+			if (repository.getCrossChainRepository().existsTradeWithAtExcludingStates(tradeData.qortalAtAddress, acctTradeBot.getEndStates()))
+				return ResponseResult.TRADE_ALREADY_EXISTS;
+		}
+		return TradeBotUtils.startResponseMultiple(repository, acct, crossChainTradeDataList, receiveAddress, foreignKey, bitcoiny);
+	}
+
 	public boolean deleteEntry(Repository repository, byte[] tradePrivateKey) throws DataException {
 		TradeBotData tradeBotData = repository.getCrossChainRepository().getTradeBotData(tradePrivateKey);
 		if (tradeBotData == null)

@@ -208,8 +208,8 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	 * @throws ForeignBlockchainException if there was an error.
 	 */
 	// TODO: don't return bitcoinj-based objects like TransactionOutput, use BitcoinyTransaction.Output instead
-	public List<TransactionOutput> getUnspentOutputs(String base58Address) throws ForeignBlockchainException {
-		List<UnspentOutput> unspentOutputs = this.blockchainProvider.getUnspentOutputs(addressToScriptPubKey(base58Address), false);
+	public List<TransactionOutput> getUnspentOutputs(String base58Address, boolean includeUnconfirmed) throws ForeignBlockchainException {
+		List<UnspentOutput> unspentOutputs = this.blockchainProvider.getUnspentOutputs(addressToScriptPubKey(base58Address), includeUnconfirmed);
 
 		List<TransactionOutput> unspentTransactionOutputs = new ArrayList<>();
 		for (UnspentOutput unspentOutput : unspentOutputs) {
@@ -344,6 +344,45 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	}
 
 	/**
+	 * Returns bitcoinj transaction sending the recipient's amount to each recipient given.
+	 *
+	 *
+	 * @param xprv58 the private master key
+	 * @param amountByRecipient each amount to send indexed by the recipient to send to
+	 * @param feePerByte the satoshis per byte
+	 *
+	 * @return the completed transaction, ready to broadcast
+	 */
+	public Transaction buildSpendMultiple(String xprv58, Map<String, Long> amountByRecipient, Long feePerByte) {
+		Context.propagate(bitcoinjContext);
+
+		Wallet wallet = Wallet.fromSpendingKeyB58(this.params, xprv58, DeterministicHierarchy.BIP32_STANDARDISATION_TIME_SECS);
+		wallet.setUTXOProvider(new WalletAwareUTXOProvider(this, wallet));
+
+		Transaction transaction = new Transaction(this.params);
+
+		for(Map.Entry<String, Long> amountForRecipient : amountByRecipient.entrySet()) {
+			Address destination = Address.fromString(this.params, amountForRecipient.getKey());
+			transaction.addOutput(Coin.valueOf(amountForRecipient.getValue()), destination);
+		}
+
+		SendRequest sendRequest = SendRequest.forTx(transaction);
+
+		if (feePerByte != null)
+			sendRequest.feePerKb = Coin.valueOf(feePerByte * 1000L); // Note: 1000 not 1024
+		else
+			// Allow override of default for TestNet3, etc.
+			sendRequest.feePerKb = this.getFeePerKb();
+
+		try {
+			wallet.completeTx(sendRequest);
+			return sendRequest.tx;
+		} catch (InsufficientMoneyException e) {
+			return null;
+		}
+	}
+
+	/**
 	 * Get Spending Candidate Addresses
 	 *
 	 * @param key58 public master key
@@ -391,7 +430,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 		List<TransactionOutput> allUnspentOutputs = new ArrayList<>();
 		Set<String> walletAddresses = this.getWalletAddresses(key58);
 		for (String address : walletAddresses) {
-			allUnspentOutputs.addAll(this.getUnspentOutputs(address));
+			allUnspentOutputs.addAll(this.getUnspentOutputs(address, true));
 		}
 		for (TransactionOutput output : allUnspentOutputs) {
 			if (!output.isAvailableForSpending()) {
@@ -465,7 +504,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 					byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
 
 					// Ask for transaction history - if it's empty then key has never been used
-					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, false);
+					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
 
 					if (!historicTransactionHashes.isEmpty()) {
 						areAllKeysUnused = false;
@@ -569,7 +608,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 					byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
 
 					// Ask for transaction history - if it's empty then key has never been used
-					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, false);
+					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
 
 					if (!historicTransactionHashes.isEmpty()) {
 						areAllKeysUnused = false;
@@ -803,7 +842,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 
 					List<UnspentOutput> unspentOutputs;
 					try {
-						unspentOutputs = this.bitcoiny.blockchainProvider.getUnspentOutputs(script, false);
+						unspentOutputs = this.bitcoiny.blockchainProvider.getUnspentOutputs(script, true);
 					} catch (ForeignBlockchainException e) {
 						throw new UTXOProviderException(String.format("Unable to fetch unspent outputs for %s", address));
 					}
@@ -893,7 +932,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	}
 
 	private Long summingUnspentOutputs(String walletAddress) throws ForeignBlockchainException {
-		return this.getUnspentOutputs(walletAddress).stream()
+		return this.getUnspentOutputs(walletAddress, true).stream()
 				.map(TransactionOutput::getValue)
 				.mapToLong(Coin::longValue)
 				.sum();
