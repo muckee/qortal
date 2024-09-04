@@ -1,6 +1,7 @@
 package org.qortal.crosschain;
 
 import org.bitcoinj.crypto.DeterministicKey;
+import org.qortal.settings.Settings;
 
 import java.util.Optional;
 import java.util.Queue;
@@ -29,18 +30,11 @@ public class BlockchainCache {
     private ConcurrentHashMap<String, BitcoinyTransaction> transactionByHash = new ConcurrentHashMap<>();
 
     /**
-     * Key History Limit
+     * Cache Limit
      *
-     * If this limit is reached, the cache will be reduced.
+     * If this limit is reached, the cache will be cleared or reduced.
      */
-    private static final int KEY_HISTORY_LIMIT = 10000;
-
-    /**
-     * Transaction Limit
-     *
-     * If this limit is reached, the cache will be cleared.
-     */
-    private static final int TRANSACTION_LIMIT = 10000;
+    private static final int CACHE_LIMIT = Settings.getInstance().getBlockchainCacheLimit();
 
     /**
      * Add Key With History
@@ -49,7 +43,9 @@ public class BlockchainCache {
      */
     public void addKeyWithHistory(DeterministicKey key) {
 
-        if( this.keysWithHistory.size() > KEY_HISTORY_LIMIT ) this.keysWithHistory.remove();
+        if( this.keysWithHistory.size() > CACHE_LIMIT ) {
+            this.keysWithHistory.remove();
+        }
 
         this.keysWithHistory.add(key);
     }
@@ -73,7 +69,9 @@ public class BlockchainCache {
      */
     public void addTransactionByHash( String hash, BitcoinyTransaction transaction ) {
 
-        if( this.transactionByHash.size() > TRANSACTION_LIMIT ) this.transactionByHash.clear();
+        if( this.transactionByHash.size() > CACHE_LIMIT ) {
+            this.transactionByHash.clear();
+        }
 
         this.transactionByHash.put(hash, transaction);
     }

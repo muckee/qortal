@@ -328,6 +328,9 @@ public class Settings {
 	/** How many wallet keys to generate when using bitcoinj as the blockchain interface (e.g. when sending coins) */
 	private int bitcoinjLookaheadSize = 50;
 
+	/** How many units of data to be kept in a blockchain cache before the cache should be reduced or cleared. */
+	private int blockchainCacheLimit = 1000;
+
 	// Data storage (QDN)
 
 	/** Data storage enabled/disabled*/
@@ -1049,6 +1052,9 @@ public class Settings {
 		return bitcoinjLookaheadSize;
 	}
 
+	public int getBlockchainCacheLimit() {
+		return blockchainCacheLimit;
+	}
 
 	public boolean isQdnEnabled() {
 		return this.qdnEnabled;
