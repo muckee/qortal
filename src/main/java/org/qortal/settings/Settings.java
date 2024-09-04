@@ -323,7 +323,7 @@ public class Settings {
 	/* Foreign chains */
 
 	/** The number of consecutive empty addresses required before treating a wallet's transaction set as complete */
-	private int gapLimit = 24;
+	private int gapLimit = 3;
 
 	/** How many wallet keys to generate when using bitcoinj as the blockchain interface (e.g. when sending coins) */
 	private int bitcoinjLookaheadSize = 50;
