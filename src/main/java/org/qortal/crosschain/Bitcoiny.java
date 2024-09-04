@@ -55,6 +55,13 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 
 	protected Coin feePerKb;
 
+	/**
+	 * Blockchain Cache
+	 *
+	 * To store blockchain data and reduce redundant RPCs to the ElectrumX servers
+	 */
+	private final BlockchainCache blockchainCache = new BlockchainCache();
+
 	// Constructors and instance
 
 	protected Bitcoiny(BitcoinyBlockchainProvider blockchainProvider, Context bitcoinjContext, String currencyCode, Coin feePerKb) {
@@ -509,8 +516,22 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 					if (!historicTransactionHashes.isEmpty()) {
 						areAllKeysUnused = false;
 
-						for (TransactionHash transactionHash : historicTransactionHashes)
-							walletTransactions.add(this.getTransaction(transactionHash.txHash));
+						for (TransactionHash transactionHash : historicTransactionHashes) {
+
+							Optional<BitcoinyTransaction> walletTransaction
+									= this.blockchainCache.getTransactionByHash( transactionHash.txHash );
+
+							// if the wallet transaction is already cached
+							if(walletTransaction.isPresent() ) {
+								walletTransactions.add( walletTransaction.get() );
+							}
+							// otherwise get the transaction from the blockchain server
+							else {
+								BitcoinyTransaction transaction = getTransaction(transactionHash.txHash);
+								walletTransactions.add( transaction );
+								this.blockchainCache.addTransactionByHash(transactionHash.txHash, transaction);
+							}
+						}
 					}
 				}
 
@@ -602,16 +623,24 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 				for (; ki < keys.size(); ++ki) {
 					DeterministicKey dKey = keys.get(ki);
 
-					// Check for transactions
 					Address address = Address.fromKey(this.params, dKey, ScriptType.P2PKH);
 					keySet.add(address.toString());
-					byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
 
-					// Ask for transaction history - if it's empty then key has never been used
-					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
-
-					if (!historicTransactionHashes.isEmpty()) {
+					// if the key already has a verified transaction history
+					if( this.blockchainCache.keyHasHistory( dKey ) ){
 						areAllKeysUnused = false;
+					}
+					else {
+						// Check for transactions
+						byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
+
+						// Ask for transaction history - if it's empty then key has never been used
+						List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
+
+						if (!historicTransactionHashes.isEmpty()) {
+							areAllKeysUnused = false;
+							this.blockchainCache.addKeyWithHistory(dKey);
+						}
 					}
 				}
 
@@ -667,18 +696,25 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 			do {
 				boolean areAllKeysUnused = true;
 
-				for (; ki < keys.size(); ++ki) {
+				for (; areAllKeysUnused && ki < keys.size(); ++ki) {
 					DeterministicKey dKey = keys.get(ki);
 
-					// Check for transactions
-					Address address = Address.fromKey(this.params, dKey, ScriptType.P2PKH);
-					byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
-
-					// Ask for transaction history - if it's empty then key has never been used
-					List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, false);
-
-					if (!historicTransactionHashes.isEmpty()) {
+					// if the key already has a verified transaction history
+					if( this.blockchainCache.keyHasHistory(dKey)) {
 						areAllKeysUnused = false;
+					}
+					else {
+						// Check for transactions
+						Address address = Address.fromKey(this.params, dKey, ScriptType.P2PKH);
+						byte[] script = ScriptBuilder.createOutputScript(address).getProgram();
+
+						// Ask for transaction history - if it's empty then key has never been used
+						List<TransactionHash> historicTransactionHashes = this.getAddressTransactions(script, true);
+
+						if (!historicTransactionHashes.isEmpty()) {
+							areAllKeysUnused = false;
+							this.blockchainCache.addKeyWithHistory(dKey);
+						}
 					}
 				}
 
