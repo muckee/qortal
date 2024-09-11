@@ -46,7 +46,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 	private static final int RESPONSE_TIME_READINGS = 5;
 	private static final long MAX_AVG_RESPONSE_TIME = 2000L; // ms
-	public static final String MINIMUM_VERSION_ERROR = "MINIMUM VERSION ERROR";
+	public static final String MISSING_FEATURES_ERROR = "MISSING FEATURES ERROR";
 	public static final String EXPECTED_GENESIS_ERROR = "EXPECTED GENESIS ERROR";
 
 	private ChainableServerConnectionRecorder recorder = new ChainableServerConnectionRecorder(100);
@@ -721,8 +721,19 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			// Check connection is suitable by asking for server features, including genesis block hash
 			JSONObject featuresJson = (JSONObject) this.connectedRpc("server.features");
 
-			if (featuresJson == null || Double.parseDouble((String) featuresJson.get("protocol_min")) < MIN_PROTOCOL_VERSION)
-				return Optional.of( recorder.recordConnection(server, requestedBy, true,  false, MINIMUM_VERSION_ERROR) );
+			if (featuresJson == null )
+				return Optional.of( recorder.recordConnection(server, requestedBy, true,  false, MISSING_FEATURES_ERROR) );
+
+			try {
+				double protocol_min = CrossChainUtils.getVersionDecimal(featuresJson, "protocol_min");
+
+				if (protocol_min < MIN_PROTOCOL_VERSION)
+					return Optional.of( recorder.recordConnection(server, requestedBy, true,  false, "old version: protocol_min = " + protocol_min + " < MIN_PROTOCOL_VERSION = " + MIN_PROTOCOL_VERSION) );
+			} catch (NumberFormatException e) {
+				return Optional.of( recorder.recordConnection(server, requestedBy,true, false,featuresJson.get("protocol_min").toString() + " is not a valid version"));
+			} catch (NullPointerException e) {
+				return Optional.of( recorder.recordConnection(server, requestedBy,true, false,"server version not available: protocol_min"));
+			}
 
 			if (this.expectedGenesisHash != null && !((String) featuresJson.get("genesis_hash")).equals(this.expectedGenesisHash))
 				return Optional.of( recorder.recordConnection(server, requestedBy, true, false, EXPECTED_GENESIS_ERROR) );

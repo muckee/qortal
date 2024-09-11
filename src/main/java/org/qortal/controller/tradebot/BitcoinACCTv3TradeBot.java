@@ -7,7 +7,9 @@ import org.bitcoinj.script.Script.ScriptType;
 import org.qortal.account.PrivateKeyAccount;
 import org.qortal.account.PublicKeyAccount;
 import org.qortal.api.model.crosschain.TradeBotCreateRequest;
+import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.asset.Asset;
+import org.qortal.controller.tradebot.TradeStates.State;
 import org.qortal.crosschain.*;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.at.ATData;
@@ -30,11 +32,7 @@ import org.qortal.utils.NTP;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
-
-import static java.util.Arrays.stream;
-import static java.util.stream.Collectors.toMap;
 
 /**
  * Performing cross-chain trading steps on behalf of user.
@@ -49,45 +47,6 @@ import static java.util.stream.Collectors.toMap;
 public class BitcoinACCTv3TradeBot implements AcctTradeBot {
 
 	private static final Logger LOGGER = LogManager.getLogger(BitcoinACCTv3TradeBot.class);
-
-	public enum State implements TradeBot.StateNameAndValueSupplier {
-		BOB_WAITING_FOR_AT_CONFIRM(10, false, false),
-		BOB_WAITING_FOR_MESSAGE(15, true, true),
-		BOB_WAITING_FOR_AT_REDEEM(25, true, true),
-		BOB_DONE(30, false, false),
-		BOB_REFUNDED(35, false, false),
-
-		ALICE_WAITING_FOR_AT_LOCK(85, true, true),
-		ALICE_DONE(95, false, false),
-		ALICE_REFUNDING_A(105, true, true),
-		ALICE_REFUNDED(110, false, false);
-
-		private static final Map<Integer, State> map = stream(State.values()).collect(toMap(state -> state.value, state -> state));
-
-		public final int value;
-		public final boolean requiresAtData;
-		public final boolean requiresTradeData;
-
-		State(int value, boolean requiresAtData, boolean requiresTradeData) {
-			this.value = value;
-			this.requiresAtData = requiresAtData;
-			this.requiresTradeData = requiresTradeData;
-		}
-
-		public static State valueOf(int value) {
-			return map.get(value);
-		}
-
-		@Override
-		public String getState() {
-			return this.name();
-		}
-
-		@Override
-		public int getStateValue() {
-			return this.value;
-		}
-	}
 
 	/** Maximum time Bob waits for his AT creation transaction to be confirmed into a block. (milliseconds) */
 	private static final long MAX_AT_CONFIRMATION_PERIOD = 24 * 60 * 60 * 1000L; // ms
@@ -313,7 +272,7 @@ public class BitcoinACCTv3TradeBot implements AcctTradeBot {
 		}
 
 		// Attempt to send MESSAGE to Bob's Qortal trade address
-		byte[] messageData = BitcoinACCTv3.buildOfferMessage(tradeBotData.getTradeForeignPublicKeyHash(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
+		byte[] messageData = CrossChainUtils.buildOfferMessage(tradeBotData.getTradeForeignPublicKeyHash(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
 		String messageRecipient = crossChainTradeData.qortalCreatorTradeAddress;
 
 		boolean isMessageAlreadySent = repository.getMessageRepository().exists(tradeBotData.getTradeNativePublicKey(), messageRecipient, messageData);
@@ -793,7 +752,7 @@ public class BitcoinACCTv3TradeBot implements AcctTradeBot {
 			case FUNDED: {
 				Coin redeemAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 				ECKey redeemKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA, false);
 
 				Transaction p2shRedeemTransaction = BitcoinyHTLC.buildRedeemTransaction(bitcoin.getNetworkParameters(), redeemAmount, redeemKey,
 						fundingOutputs, redeemScriptA, secretA, receivingAccountInfo);
@@ -857,7 +816,7 @@ public class BitcoinACCTv3TradeBot implements AcctTradeBot {
 			case FUNDED:{
 				Coin refundAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 				ECKey refundKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA);
+				List<TransactionOutput> fundingOutputs = bitcoin.getUnspentOutputs(p2shAddressA, false);
 
 				// Determine receive address for refund
 				String receiveAddress = bitcoin.getUnusedReceiveAddress(tradeBotData.getForeignKey());

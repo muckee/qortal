@@ -748,12 +748,6 @@ public class DogecoinACCTv1 implements ACCT {
 		return tradeData;
 	}
 
-	/** Returns 'offer' MESSAGE payload for trade partner to send to AT creator's trade address. */
-	public static byte[] buildOfferMessage(byte[] partnerBitcoinPKH, byte[] hashOfSecretA, int lockTimeA) {
-		byte[] lockTimeABytes = BitTwiddling.toBEByteArray((long) lockTimeA);
-		return Bytes.concat(partnerBitcoinPKH, hashOfSecretA, lockTimeABytes);
-	}
-
 	/** Returns info extracted from 'offer' MESSAGE payload sent by trade partner to AT creator's trade address, or null if not valid. */
 	public static OfferMessageData extractOfferMessageData(byte[] messageData) {
 		if (messageData == null || messageData.length != OFFER_MESSAGE_LENGTH)
