@@ -30,7 +30,7 @@
 	"selfSponsorshipAlgoV3SnapshotTimestamp": 9999999999999,
 	"referenceTimestampBlock": 1670684455220,
 	"mempowTransactionUpdatesTimestamp": 1692554400000,
-	"blockRewardBatchStartHeight": 5000,
+	"blockRewardBatchStartHeight": 9999999,
 	"blockRewardBatchSize": 1000,
 	"blockRewardBatchAccountsBlockCount": 25,
 	"rewardsByHeight": [
