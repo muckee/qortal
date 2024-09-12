@@ -36,7 +36,7 @@ JVM_MEMORY_ARGS="-Xss256m -XX:+UseSerialGC"
 nohup nice -n 20 java \
 	-Djava.net.preferIPv4Stack=false \
 	${JVM_MEMORY_ARGS} \
-	-jar qortal.jar settings-test.json \
+	-jar qortal.jar \
 	settings-test.json \
 	1>run.log 2>&1 &
 
