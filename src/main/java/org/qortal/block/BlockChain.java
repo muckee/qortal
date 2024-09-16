@@ -83,7 +83,8 @@ public class BlockChain {
 		unconfirmableRewardSharesHeight,
 		disableTransferPrivsTimestamp,
 		enableTransferPrivsTimestamp,
-		cancelSellNameValidationTimestamp
+		cancelSellNameValidationTimestamp,
+		disableRewardshareHeight
 	}
 
 	// Custom transaction fees
@@ -400,7 +401,6 @@ public class BlockChain {
 		return this.onlineAccountsModulusV2Timestamp;
 	}
 
-
 	/* Block reward batching */
 	public long getBlockRewardBatchStartHeight() {
 		return this.blockRewardBatchStartHeight;
@@ -617,6 +617,9 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.cancelSellNameValidationTimestamp.name()).longValue();
 	}
 
+	public int getDisableRewardshareHeight() {
+		return this.featureTriggers.get(FeatureTrigger.disableRewardshareHeight.name()).intValue();
+	}
 	// More complex getters for aspects that change by height or timestamp
 
 	public long getRewardAtHeight(int ourHeight) {

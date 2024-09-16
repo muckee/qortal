@@ -98,6 +98,13 @@ public class RewardShareTransaction extends Transaction {
 
 	@Override
 	public ValidationResult isValid() throws DataException {
+		final int disableRs = BlockChain.getInstance().getDisableRewardshareHeight();
+		int blockchainHeight = this.repository.getBlockRepository().getBlockchainHeight();
+
+		// Check if reward share is disabled.
+		if (blockchainHeight >= disableRs)
+			return ValidationResult.GENERAL_TEMPORARY_DISABLED;
+
 		// Check reward share given to recipient. Negative is potentially OK to end a current reward-share. Zero also fine.
 		if (this.rewardShareTransactionData.getSharePercent() > MAX_SHARE)
 			return ValidationResult.INVALID_REWARD_SHARE_PERCENT;
