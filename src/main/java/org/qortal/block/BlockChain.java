@@ -7,7 +7,6 @@ import org.eclipse.persistence.jaxb.JAXBContextFactory;
 import org.eclipse.persistence.jaxb.UnmarshallerProperties;
 import org.qortal.controller.Controller;
 import org.qortal.data.block.BlockData;
-import org.qortal.data.network.PeerData;
 import org.qortal.network.Network;
 import org.qortal.repository.*;
 import org.qortal.settings.Settings;
@@ -25,7 +24,6 @@ import javax.xml.transform.stream.StreamSource;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
-import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -84,7 +82,8 @@ public class BlockChain {
 		disableTransferPrivsTimestamp,
 		enableTransferPrivsTimestamp,
 		cancelSellNameValidationTimestamp,
-		disableRewardshareHeight
+		disableRewardshareHeight,
+		onlyMintWithNameHeight
 	}
 
 	// Custom transaction fees
@@ -620,6 +619,11 @@ public class BlockChain {
 	public int getDisableRewardshareHeight() {
 		return this.featureTriggers.get(FeatureTrigger.disableRewardshareHeight.name()).intValue();
 	}
+
+	public int getOnlyMintWithNameHeight() {
+		return this.featureTriggers.get(FeatureTrigger.onlyMintWithNameHeight.name()).intValue();
+	}
+
 	// More complex getters for aspects that change by height or timestamp
 
 	public long getRewardAtHeight(int ourHeight) {
