@@ -102,7 +102,8 @@
 		"disableTransferPrivsTimestamp": 9999999999990,
 		"enableTransferPrivsTimestamp": 9999999999999,
 		"cancelSellNameValidationTimestamp": 9999999999999,
-		"disableRewardshareHeight": 9999990
+		"disableRewardshareHeight": 8450,
+		"onlyMintWithNameHeight": 8500
 	},
 	"genesisInfo": {
 		"version": 4,
