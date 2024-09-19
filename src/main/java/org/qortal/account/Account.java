@@ -7,13 +7,17 @@ import org.qortal.controller.LiteNode;
 import org.qortal.data.account.AccountBalanceData;
 import org.qortal.data.account.AccountData;
 import org.qortal.data.account.RewardShareData;
+import org.qortal.data.naming.NameData;
 import org.qortal.repository.DataException;
+import org.qortal.repository.NameRepository;
 import org.qortal.repository.Repository;
 import org.qortal.settings.Settings;
 import org.qortal.utils.Base58;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
+
+import java.util.List;
 
 import static org.qortal.utils.Amounts.prettyAmount;
 
@@ -196,6 +200,7 @@ public class Account {
 	 * To be considered a "minting account", the account needs to pass at least one of these tests:<br>
 	 * <ul>
 	 * <li>account's level is at least <tt>minAccountLevelToMint</tt> from blockchain config</li>
+	 * <li>account's address have registered a name</li>
 	 * <li>account has 'founder' flag set</li>
 	 * </ul>
 	 * 
@@ -204,13 +209,26 @@ public class Account {
 	 */
 	public boolean canMint() throws DataException {
 		AccountData accountData = this.repository.getAccountRepository().getAccount(this.address);
+		NameRepository nameRepository = this.repository.getNameRepository();
+
+		int blockchainHeight = this.repository.getBlockRepository().getBlockchainHeight();
+		int nameCheckHeight = BlockChain.getInstance().getOnlyMintWithNameHeight();
+		int levelToMint = BlockChain.getInstance().getMinAccountLevelToMint();
+		int level = accountData.getLevel();
+
+		String myAddress = accountData.getAddress();
+		List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
+
 		if (accountData == null)
 			return false;
-
-		Integer level = accountData.getLevel();
-		if (level != null && level >= BlockChain.getInstance().getMinAccountLevelToMint())
+		
+		if (blockchainHeight < nameCheckHeight && level >= levelToMint)
 			return true;
-
+		
+		// Can only mint if have registered a name
+		if (blockchainHeight >= nameCheckHeight && level >= levelToMint && !myName.isEmpty())
+			return true;
+		
 		// Founders can always mint, unless they have a penalty
 		if (Account.isFounder(accountData.getFlags()) && accountData.getBlocksMintedPenalty() == 0)
 			return true;
