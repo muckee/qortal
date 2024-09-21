@@ -83,7 +83,9 @@ public class BlockChain {
 		enableTransferPrivsTimestamp,
 		cancelSellNameValidationTimestamp,
 		disableRewardshareHeight,
-		onlyMintWithNameHeight
+		enableRewardshareHeight,
+		onlyMintWithNameHeight,
+		groupMemberCheckHeight
 	}
 
 	// Custom transaction fees
@@ -203,6 +205,7 @@ public class BlockChain {
 	private int minAccountLevelToRewardShare;
 	private int maxRewardSharesPerFounderMintingAccount;
 	private int founderEffectiveMintingLevel;
+	private int mintingGroupId;
 
 	/** Minimum time to retain online account signatures (ms) for block validity checks. */
 	private long onlineAccountSignaturesMinLifetime;
@@ -526,6 +529,10 @@ public class BlockChain {
 		return this.onlineAccountSignaturesMaxLifetime;
 	}
 
+	public int getMintingGroupId() {
+		return this.mintingGroupId;
+	}
+
 	public CiyamAtSettings getCiyamAtSettings() {
 		return this.ciyamAtSettings;
 	}
@@ -620,8 +627,16 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.disableRewardshareHeight.name()).intValue();
 	}
 
+	public int getEnableRewardshareHeight() {
+		return this.featureTriggers.get(FeatureTrigger.enableRewardshareHeight.name()).intValue();
+	}
+
 	public int getOnlyMintWithNameHeight() {
 		return this.featureTriggers.get(FeatureTrigger.onlyMintWithNameHeight.name()).intValue();
+	}
+
+	public int getGroupMemberCheckHeight() {
+		return this.featureTriggers.get(FeatureTrigger.groupMemberCheckHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp

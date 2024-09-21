@@ -33,6 +33,7 @@
 	"blockRewardBatchStartHeight": 2000000,
 	"blockRewardBatchSize": 1000,
 	"blockRewardBatchAccountsBlockCount": 25,
+	"mintingGroupId": 2,
 	"rewardsByHeight": [
 		{ "height": 1, "reward": 5.00 },
 		{ "height": 259201, "reward": 4.75 },
@@ -103,7 +104,9 @@
 		"enableTransferPrivsTimestamp": 9999999999999,
 		"cancelSellNameValidationTimestamp": 9999999999999,
 		"disableRewardshareHeight": 8450,
-		"onlyMintWithNameHeight": 8500
+		"enableRewardshareHeight": 11400,
+		"onlyMintWithNameHeight": 8500,
+		"groupMemberCheckHeight": 11200
 	},
 	"genesisInfo": {
 		"version": 4,
