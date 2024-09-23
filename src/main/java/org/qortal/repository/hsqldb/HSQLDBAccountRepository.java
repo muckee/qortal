@@ -1168,14 +1168,15 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			int blocksMinted = accountResultSet.getInt(3);
 			int adjustments = accountResultSet.getInt(4);
 			int penalties = accountResultSet.getInt(5);
+			boolean transferPrivs = accountResultSet.getBoolean(6);
 
 			List<String> sponseeAddresses = getSponseeAddresses(account);
 
 			if( sponseeAddresses.isEmpty() ){
-				return new SponsorshipReport(account, level, blocksMinted, adjustments, penalties, new String[0], 0, 0, 0, 0, 0, 0, 0, 0, 0);
+				return new SponsorshipReport(account, level, blocksMinted, adjustments, penalties, transferPrivs, new String[0], 0,  0,0, 0, 0, 0, 0, 0, 0, 0);
 			}
 			else {
-				return produceSponsorShipReport(account, level, blocksMinted, adjustments, penalties, sponseeAddresses);
+				return produceSponsorShipReport(account, level, blocksMinted, adjustments, penalties, sponseeAddresses, transferPrivs);
 			}
 		}
 		 catch (Exception e) {
@@ -1243,15 +1244,14 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	/**
 	 * Produce Sponsorship Report
 	 *
-	 * @param address the account address for the sponsor
-	 * @param level the sponsor's level
-	 * @param blocksMinted the blocks minted by the sponsor
+	 * @param address                the account address for the sponsor
+	 * @param level                  the sponsor's level
+	 * @param blocksMinted           the blocks minted by the sponsor
 	 * @param blocksMintedAdjustment
 	 * @param blocksMintedPenalty
 	 * @param sponseeAddresses
-	 *
+	 * @param transferPrivs true if this account was involved in a TRANSFER_PRIVS transaction
 	 * @return the report
-	 *
 	 * @throws SQLException
 	 */
 	private SponsorshipReport produceSponsorShipReport(
@@ -1260,7 +1260,8 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			int blocksMinted,
 			int blocksMintedAdjustment,
 			int blocksMintedPenalty,
-			List<String> sponseeAddresses) throws SQLException {
+			List<String> sponseeAddresses,
+			boolean transferPrivs) throws SQLException, DataException {
 
 		int sponseeCount = sponseeAddresses.size();
 
@@ -1275,31 +1276,40 @@ public class HSQLDBAccountRepository implements AccountRepository {
 		// count the arbitrary and transfer asset transactions for all sponsees
 		ResultSet txTypeResultSet = getTxTypeResultSet(sponseeAddresses, sponseeCount);
 
-		int arbitraryCount = 0;
-		int transferAssetCount = 0;
+		int arbitraryCount;
+		int transferAssetCount;
+		int transferPrivsCount;
 
 		if( txTypeResultSet != null) {
-			int txType = txTypeResultSet.getInt(1);
 
-			// if arbitrary transaction type, then get the count and move to the next result
-			if (txType == 10) {
-				arbitraryCount = txTypeResultSet.getInt(2);
+			Map<Integer, Integer> countsByType = new HashMap<>(2);
 
-				// if there is another result, then get
-				if (txTypeResultSet.next())
-					txType = txTypeResultSet.getInt(1);
-			}
+			do{
+				Integer type = txTypeResultSet.getInt(1);
 
-			// if asset transfer type, then get the count and move to the next result
-			if (txType == 12) {
-				transferAssetCount = txTypeResultSet.getInt(2);
-				txTypeResultSet.next();
-			}
+				if( type != null ) {
+					countsByType.put(type, txTypeResultSet.getInt(2));
+				}
+			} while( txTypeResultSet.next());
+
+			arbitraryCount = countsByType.getOrDefault(10, 0);
+			transferAssetCount = countsByType.getOrDefault(12, 0);
+			transferPrivsCount = countsByType.getOrDefault(40, 0);
 		}
+		else {
+			throw new DataException("trouble fetching counts for transaction types");
+		}
+
 
 		// count up the each the buy and sell foreign coin exchanges for all sponsees
 		// also sum up the balances of these exchanges
 		ResultSet buySellResultSet = getBuySellResultSet(sponseeAddresses, sponseeCount);
+
+		int sellCount;
+		int	sellAmount;
+
+		int buyCount;
+		int buyAmount;
 
 		// if there are results, then fill in the buy/sell amount/counts
 		if( buySellResultSet != null ) {
@@ -1317,31 +1327,15 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			} while( buySellResultSet.next());
 
 
-			int sellCount = countsByDirection.getOrDefault(SELL, 0);
-			int	sellAmount = amountsByDirection.getOrDefault(SELL, 0);
+			sellCount = countsByDirection.getOrDefault(SELL, 0);
+			sellAmount = amountsByDirection.getOrDefault(SELL, 0);
 
-			int buyCount = countsByDirection.getOrDefault(BUY, 0);
-			int buyAmount = amountsByDirection.getOrDefault(BUY, 0);
-
-			return new SponsorshipReport(
-					address,
-					level,
-					blocksMinted,
-					blocksMintedAdjustment,
-					blocksMintedPenalty,
-					sponseeNames.toArray(new String[sponseeNames.size()]),
-					sponseeCount,
-					sponseeCount - sponseeNames.size(),
-					avgBalance,
-					arbitraryCount,
-					transferAssetCount,
-					sellCount,
-					sellAmount,
-					buyCount,
-					buyAmount);
-
+			buyCount = countsByDirection.getOrDefault(BUY, 0);
+			buyAmount = amountsByDirection.getOrDefault(BUY, 0);
 		}
-		// otherwise use zeros for the counts and amounts
+		else {
+			throw new DataException("trouble fetching counts for buy/sell transactions");
+		}
 
 		return new SponsorshipReport(
 				address,
@@ -1349,16 +1343,18 @@ public class HSQLDBAccountRepository implements AccountRepository {
 				blocksMinted,
 				blocksMintedAdjustment,
 				blocksMintedPenalty,
+				transferPrivs,
 				sponseeNames.toArray(new String[sponseeNames.size()]),
 				sponseeCount,
 				sponseeCount - sponseeNames.size(),
 				avgBalance,
 				arbitraryCount,
 				transferAssetCount,
-				0,
-				0,
-				0,
-				0);
+				transferPrivsCount,
+				sellCount,
+				sellAmount,
+				buyCount,
+				buyAmount);
 	}
 
 	private ResultSet getBuySellResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
@@ -1392,8 +1388,9 @@ public class HSQLDBAccountRepository implements AccountRepository {
 
 		StringBuffer accountSql = new StringBuffer();
 
-		accountSql.append( "SELECT DISTINCT account, level, blocks_minted, blocks_minted_adjustment, blocks_minted_penalty ");
-		accountSql.append( "FROM ACCOUNTS ");
+		accountSql.append( "SELECT DISTINCT a.account, a.level, a.blocks_minted, a.blocks_minted_adjustment, a.blocks_minted_penalty, tx.sender IS NOT NULL as transfer ");
+		accountSql.append( "FROM ACCOUNTS a ");
+		accountSql.append( "LEFT JOIN TRANSFERPRIVSTRANSACTIONS tx on a.public_key = tx.sender or a.account = tx.recipient ");
 		accountSql.append( "WHERE account = ? ");
 
 		ResultSet accountResultSet = this.repository.checkedExecute( accountSql.toString(), account);
@@ -1413,7 +1410,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 		txTypeTotalsSql.append("INNER JOIN TRANSACTIONS USING (signature) ");
 		txTypeTotalsSql.append("where participant in ( ");
 		txTypeTotalsSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
-		txTypeTotalsSql.append(") and type in (10, 12) ");
+		txTypeTotalsSql.append(") and type in (10, 12, 40) ");
 		txTypeTotalsSql.append("group by type order by type");
 
 		String[] sponsees = sponseeAddresses.toArray(new String[sponseeCount]);

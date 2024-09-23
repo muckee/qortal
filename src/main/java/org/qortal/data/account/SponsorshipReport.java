@@ -18,6 +18,8 @@ public class SponsorshipReport {
 
 	private int penalties;
 
+	private boolean transfer;
+
 	private String[] names;
 
 	private int sponseeCount;
@@ -29,6 +31,8 @@ public class SponsorshipReport {
 	private int arbitraryCount;
 
 	private int transferAssetCount;
+
+	private int transferPrivsCount;
 
 	private int sellCount;
 
@@ -44,18 +48,20 @@ public class SponsorshipReport {
 	protected SponsorshipReport() {
 	}
 
-	public SponsorshipReport(String address, int level, int blocksMinted, int adjustments, int penalties, String[] names, int sponseeCount, int nonRegisteredCount, int avgBalance, int arbitraryCount, int transferAssetCount, int sellCount, int sellAmount, int buyCount, int buyAmount) {
+	public SponsorshipReport(String address, int level, int blocksMinted, int adjustments, int penalties, boolean transfer, String[] names, int sponseeCount, int nonRegisteredCount, int avgBalance, int arbitraryCount, int transferAssetCount, int transferPrivsCount, int sellCount, int sellAmount, int buyCount, int buyAmount) {
 		this.address = address;
 		this.level = level;
 		this.blocksMinted = blocksMinted;
 		this.adjustments = adjustments;
 		this.penalties = penalties;
+		this.transfer = transfer;
 		this.names = names;
 		this.sponseeCount = sponseeCount;
 		this.nonRegisteredCount = nonRegisteredCount;
 		this.avgBalance = avgBalance;
 		this.arbitraryCount = arbitraryCount;
 		this.transferAssetCount = transferAssetCount;
+		this.transferPrivsCount = transferPrivsCount;
 		this.sellCount = sellCount;
 		this.sellAmount = sellAmount;
 		this.buyCount = buyCount;
@@ -85,6 +91,10 @@ public class SponsorshipReport {
 		return penalties;
 	}
 
+	public boolean isTransfer() {
+		return transfer;
+	}
+
 	public String[] getNames() {
 		return names;
 	}
@@ -107,6 +117,10 @@ public class SponsorshipReport {
 
 	public int getTransferAssetCount() {
 		return transferAssetCount;
+	}
+
+	public int getTransferPrivsCount() {
+		return transferPrivsCount;
 	}
 
 	public int getSellCount() {
@@ -133,12 +147,14 @@ public class SponsorshipReport {
 				", blocksMinted=" + blocksMinted +
 				", adjustments=" + adjustments +
 				", penalties=" + penalties +
+				", transfer=" + transfer +
 				", names=" + Arrays.toString(names) +
 				", sponseeCount=" + sponseeCount +
 				", nonRegisteredCount=" + nonRegisteredCount +
 				", avgBalance=" + avgBalance +
 				", arbitraryCount=" + arbitraryCount +
 				", transferAssetCount=" + transferAssetCount +
+				", transferPrivsCount=" + transferPrivsCount +
 				", sellCount=" + sellCount +
 				", sellAmount=" + sellAmount +
 				", buyCount=" + buyCount +
