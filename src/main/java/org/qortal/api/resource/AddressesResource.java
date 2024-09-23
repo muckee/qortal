@@ -23,6 +23,7 @@ import org.qortal.crypto.Crypto;
 import org.qortal.data.account.AccountData;
 import org.qortal.data.account.AccountPenaltyData;
 import org.qortal.data.account.RewardShareData;
+import org.qortal.data.account.SponsorshipReport;
 import org.qortal.data.network.OnlineAccountData;
 import org.qortal.data.network.OnlineAccountLevel;
 import org.qortal.data.transaction.PublicizeTransactionData;
@@ -52,6 +53,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Path("/addresses")
@@ -630,4 +632,70 @@ public class AddressesResource {
 		}
 	}
 
+	@GET
+	@Path("/sponsorship/{address}")
+	@Operation(
+			summary = "Returns sponsorship statistics for an account",
+			description = "Returns sponsorship statistics for an account",
+			responses = {
+					@ApiResponse(
+							description = "the statistics",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = SponsorshipReport.class)))
+					)
+			}
+	)
+	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
+	public SponsorshipReport getSponsorshipReport(@PathParam("address") String address) {
+		if (!Crypto.isValidAddress(address))
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(address);
+			// Not found?
+			if (report == null)
+				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
+
+			return report;
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
+
+	@GET
+	@Path("/sponsorship/{address}/sponsor")
+	@Operation(
+			summary = "Returns sponsorship statistics for an account's sponsor",
+			description = "Returns sponsorship statistics for an account's sponsor",
+			responses = {
+					@ApiResponse(
+							description = "the statistics",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = SponsorshipReport.class)))
+					)
+			}
+	)
+	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
+	public SponsorshipReport getSponsorshipReportForSponsor(@PathParam("address") String address) {
+		if (!Crypto.isValidAddress(address))
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			// get sponsor
+			Optional<String> sponsor = repository.getAccountRepository().getSponsor(address);
+
+			// if there is not sponsor, throw error
+			if(sponsor.isEmpty()) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
+
+			// get report for sponsor
+			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get());
+
+			// Not found?
+			if (report == null)
+				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
+
+			return report;
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
 }

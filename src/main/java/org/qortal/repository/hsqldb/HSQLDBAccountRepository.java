@@ -1,5 +1,7 @@
 package org.qortal.repository.hsqldb;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.qortal.asset.Asset;
 import org.qortal.data.account.*;
 import org.qortal.repository.AccountRepository;
@@ -8,7 +10,11 @@ import org.qortal.repository.DataException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -16,12 +22,15 @@ import static org.qortal.utils.Amounts.prettyAmount;
 
 public class HSQLDBAccountRepository implements AccountRepository {
 
+	public static final String SELL = "sell";
+	public static final String BUY = "buy";
 	protected HSQLDBRepository repository;
 
 	public HSQLDBAccountRepository(HSQLDBRepository repository) {
 		this.repository = repository;
 	}
 
+	protected static final Logger LOGGER = LogManager.getLogger(HSQLDBAccountRepository.class);
 	// General account
 
 	@Override
@@ -1147,4 +1156,324 @@ public class HSQLDBAccountRepository implements AccountRepository {
 		}
 	}
 
+	@Override
+	public SponsorshipReport getSponsorshipReport(String account) throws DataException {
+
+		try {
+			ResultSet accountResultSet = getAccountResultSet(account);
+
+			if( accountResultSet == null ) throw new DataException("Unable to fetch account info from repository");
+
+			int level = accountResultSet.getInt(2);
+			int blocksMinted = accountResultSet.getInt(3);
+			int adjustments = accountResultSet.getInt(4);
+			int penalties = accountResultSet.getInt(5);
+
+			List<String> sponseeAddresses = getSponseeAddresses(account);
+
+			if( sponseeAddresses.isEmpty() ){
+				return new SponsorshipReport(account, level, blocksMinted, adjustments, penalties, new String[0], 0, 0, 0, 0, 0, 0, 0, 0, 0);
+			}
+			else {
+				return produceSponsorShipReport(account, level, blocksMinted, adjustments, penalties, sponseeAddresses);
+			}
+		}
+		 catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			throw new DataException("Unable to fetch account info from repository", e);
+		}
+	}
+
+	@Override
+	public List<String> getSponseeAddresses(String account) throws DataException {
+		StringBuffer sponseeSql = new StringBuffer();
+
+		sponseeSql.append( "SELECT DISTINCT t.recipient sponsees " );
+		sponseeSql.append( "FROM REWARDSHARETRANSACTIONS t ");
+		sponseeSql.append( "INNER JOIN ACCOUNTS a on t.minter_public_key = a.public_key ");
+		sponseeSql.append( "WHERE account = ? and t.recipient != a.account");
+
+		try {
+			ResultSet sponseeResultSet = this.repository.checkedExecute(sponseeSql.toString(), account);
+
+			List<String> sponseeAddresses;
+
+			if( sponseeResultSet == null ) {
+				sponseeAddresses = new ArrayList<>(0);
+			}
+			else {
+				sponseeAddresses = new ArrayList<>();
+
+				do {
+					sponseeAddresses.add(sponseeResultSet.getString(1));
+				} while (sponseeResultSet.next());
+			}
+
+			return sponseeAddresses;
+		}
+		catch (SQLException e) {
+			throw new DataException("can't get sponsees from blockchain data", e);
+		}
+	}
+
+	@Override
+	public Optional<String> getSponsor(String address) throws DataException {
+
+		StringBuffer sponsorSql = new StringBuffer();
+
+		sponsorSql.append( "SELECT DISTINCT account, level, blocks_minted, blocks_minted_adjustment, blocks_minted_penalty ");
+		sponsorSql.append( "FROM REWARDSHARETRANSACTIONS t ");
+		sponsorSql.append( "INNER JOIN ACCOUNTS a on a.public_key = t.minter_public_key ");
+		sponsorSql.append( "WHERE recipient = ? and recipient != account ");
+
+		try {
+			ResultSet sponseeResultSet = this.repository.checkedExecute(sponsorSql.toString(), address);
+
+			if( sponseeResultSet == null ){
+				return Optional.empty();
+			}
+			else {
+				return Optional.ofNullable( sponseeResultSet.getString(1));
+			}
+		} catch (SQLException e) {
+			throw new DataException("can't get sponsor from blockchain data", e);
+		}
+	}
+
+	/**
+	 * Produce Sponsorship Report
+	 *
+	 * @param address the account address for the sponsor
+	 * @param level the sponsor's level
+	 * @param blocksMinted the blocks minted by the sponsor
+	 * @param blocksMintedAdjustment
+	 * @param blocksMintedPenalty
+	 * @param sponseeAddresses
+	 *
+	 * @return the report
+	 *
+	 * @throws SQLException
+	 */
+	private SponsorshipReport produceSponsorShipReport(
+			String address,
+			int level,
+			int blocksMinted,
+			int blocksMintedAdjustment,
+			int blocksMintedPenalty,
+			List<String> sponseeAddresses) throws SQLException {
+
+		int sponseeCount = sponseeAddresses.size();
+
+		// get the registered nanmes of the sponsees
+		ResultSet namesResultSet = getNamesResultSet(sponseeAddresses, sponseeCount);
+		List<String> sponseeNames = getNames(namesResultSet, sponseeCount);
+
+		// get the average balance of the sponsees
+		ResultSet avgBalanceResultSet = getAverageBalanceResultSet(sponseeAddresses, sponseeCount);
+		int avgBalance = avgBalanceResultSet.getInt(1);
+
+		// count the arbitrary and transfer asset transactions for all sponsees
+		ResultSet txTypeResultSet = getTxTypeResultSet(sponseeAddresses, sponseeCount);
+
+		int arbitraryCount = 0;
+		int transferAssetCount = 0;
+
+		if( txTypeResultSet != null) {
+			int txType = txTypeResultSet.getInt(1);
+
+			// if arbitrary transaction type, then get the count and move to the next result
+			if (txType == 10) {
+				arbitraryCount = txTypeResultSet.getInt(2);
+
+				// if there is another result, then get
+				if (txTypeResultSet.next())
+					txType = txTypeResultSet.getInt(1);
+			}
+
+			// if asset transfer type, then get the count and move to the next result
+			if (txType == 12) {
+				transferAssetCount = txTypeResultSet.getInt(2);
+				txTypeResultSet.next();
+			}
+		}
+
+		// count up the each the buy and sell foreign coin exchanges for all sponsees
+		// also sum up the balances of these exchanges
+		ResultSet buySellResultSet = getBuySellResultSet(sponseeAddresses, sponseeCount);
+
+		// if there are results, then fill in the buy/sell amount/counts
+		if( buySellResultSet != null ) {
+
+			Map<String, Integer> countsByDirection = new HashMap<>(2);
+			Map<String, Integer> amountsByDirection = new HashMap<>(2);
+
+			do{
+				String direction = buySellResultSet.getString(1).trim();
+
+				if( direction != null ) {
+					countsByDirection.put(direction, buySellResultSet.getInt(2));
+					amountsByDirection.put(direction, buySellResultSet.getInt(3));
+				}
+			} while( buySellResultSet.next());
+
+
+			int sellCount = countsByDirection.getOrDefault(SELL, 0);
+			int	sellAmount = amountsByDirection.getOrDefault(SELL, 0);
+
+			int buyCount = countsByDirection.getOrDefault(BUY, 0);
+			int buyAmount = amountsByDirection.getOrDefault(BUY, 0);
+
+			return new SponsorshipReport(
+					address,
+					level,
+					blocksMinted,
+					blocksMintedAdjustment,
+					blocksMintedPenalty,
+					sponseeNames.toArray(new String[sponseeNames.size()]),
+					sponseeCount,
+					sponseeCount - sponseeNames.size(),
+					avgBalance,
+					arbitraryCount,
+					transferAssetCount,
+					sellCount,
+					sellAmount,
+					buyCount,
+					buyAmount);
+
+		}
+		// otherwise use zeros for the counts and amounts
+
+		return new SponsorshipReport(
+				address,
+				level,
+				blocksMinted,
+				blocksMintedAdjustment,
+				blocksMintedPenalty,
+				sponseeNames.toArray(new String[sponseeNames.size()]),
+				sponseeCount,
+				sponseeCount - sponseeNames.size(),
+				avgBalance,
+				arbitraryCount,
+				transferAssetCount,
+				0,
+				0,
+				0,
+				0);
+	}
+
+	private ResultSet getBuySellResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
+		StringBuffer buySellSql = new StringBuffer();
+		buySellSql.append("SELECT ");
+		buySellSql.append("CASE ");
+		buySellSql.append("	WHEN participant = account THEN 'sell' ");
+		buySellSql.append("	WHEN participant != account THEN 'buy' ");
+		buySellSql.append("END AS direction, ");
+		buySellSql.append("		COUNT(*) as transactions, sum(tx.amount)/100000000 as amount ");
+		buySellSql.append("FROM TRANSACTIONPARTICIPANTS ");
+		buySellSql.append("INNER JOIN ATTRANSACTIONS tx using (signature) ");
+		buySellSql.append("INNER JOIN ATS ats using (at_address) ");
+		buySellSql.append("INNER JOIN ACCOUNTS a on ats.creator = a.public_key ");
+		buySellSql.append("WHERE participant in ( ");
+		buySellSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
+		buySellSql.append(") ");
+		buySellSql.append("GROUP BY ");
+		buySellSql.append("CASE ");
+		buySellSql.append("	WHEN participant = account THEN 'sell' ");
+		buySellSql.append("	WHEN participant != account THEN 'buy' ");
+		buySellSql.append("END; ");
+
+		String[] sponsees = sponseeAddresses.toArray(new String[sponseeCount]);
+		ResultSet buySellResultSet = this.repository.checkedExecute(buySellSql.toString(), sponsees);
+
+		return buySellResultSet;
+	}
+
+	private ResultSet getAccountResultSet(String account) throws SQLException {
+
+		StringBuffer accountSql = new StringBuffer();
+
+		accountSql.append( "SELECT DISTINCT account, level, blocks_minted, blocks_minted_adjustment, blocks_minted_penalty ");
+		accountSql.append( "FROM ACCOUNTS ");
+		accountSql.append( "WHERE account = ? ");
+
+		ResultSet accountResultSet = this.repository.checkedExecute( accountSql.toString(), account);
+
+		return accountResultSet;
+	}
+
+
+	private ResultSet getTxTypeResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
+		StringBuffer txTypeTotalsSql = new StringBuffer();
+		// Transaction Types, int values
+		// ARBITRARY = 10
+		// TRANSFER_ASSET = 12
+		// txTypeTotalsSql.append("
+		txTypeTotalsSql.append("SELECT type, count(*) ");
+		txTypeTotalsSql.append("FROM TRANSACTIONPARTICIPANTS ");
+		txTypeTotalsSql.append("INNER JOIN TRANSACTIONS USING (signature) ");
+		txTypeTotalsSql.append("where participant in ( ");
+		txTypeTotalsSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
+		txTypeTotalsSql.append(") and type in (10, 12) ");
+		txTypeTotalsSql.append("group by type order by type");
+
+		String[] sponsees = sponseeAddresses.toArray(new String[sponseeCount]);
+		ResultSet txTypeResultSet = this.repository.checkedExecute(txTypeTotalsSql.toString(), sponsees);
+		return txTypeResultSet;
+	}
+
+	private ResultSet getAverageBalanceResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
+		StringBuffer avgBalanceSql = new StringBuffer();
+		avgBalanceSql.append("SELECT avg(balance)/100000000 FROM ACCOUNTBALANCES ");
+		avgBalanceSql.append("WHERE account in (");
+		avgBalanceSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
+		avgBalanceSql.append(") and ASSET_ID = 0");
+
+		String[] sponsees = sponseeAddresses.toArray(new String[sponseeCount]);
+		return this.repository.checkedExecute(avgBalanceSql.toString(), sponsees);
+	}
+
+	/**
+	 * Get Names
+	 *
+	 * @param namesResultSet the result set to get the names from
+	 * @param count the number of potential names
+	 *
+	 * @return the names
+	 *
+	 * @throws SQLException
+	 */
+	private static List<String> getNames(ResultSet namesResultSet, int count) throws SQLException {
+
+		List<String> names = new ArrayList<>(count);
+
+		int nonRegisteredCount = 0;
+
+		do{
+			String name = namesResultSet.getString(1);
+
+			if( name != null ) {
+				names.add(name);
+			}
+			else {
+				nonRegisteredCount++;
+			}
+
+		} while( namesResultSet.next() );
+
+		return names;
+	}
+
+	private ResultSet getNamesResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
+		StringBuffer namesSql = new StringBuffer();
+		namesSql.append("SELECT r.name ");
+		namesSql.append("FROM ACCOUNTS a ");
+		namesSql.append("LEFT JOIN REGISTERNAMETRANSACTIONS r on r.registrant = a.public_key ");
+		namesSql.append("WHERE account in (");
+		namesSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
+		namesSql.append(")");
+
+		String[] sponsees = sponseeAddresses.toArray(new String[sponseeCount]);
+		ResultSet namesResultSet = this.repository.checkedExecute(namesSql.toString(), sponsees);
+		return namesResultSet;
+	}
 }

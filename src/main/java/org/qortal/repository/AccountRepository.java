@@ -3,6 +3,7 @@ package org.qortal.repository;
 import org.qortal.data.account.*;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 public interface AccountRepository {
@@ -130,6 +131,39 @@ public interface AccountRepository {
 
 	/** Returns all account balances for given assetID, optionally excluding zero balances. */
 	public List<AccountBalanceData> getAssetBalances(long assetId, Boolean excludeZero) throws DataException;
+
+	/**
+	 * Get Sponsorship Report
+	 *
+	 * @param address the sponsor's account address
+	 *
+	 * @return the report
+	 *
+	 * @throws DataException
+	 */
+	public SponsorshipReport getSponsorshipReport(String address) throws DataException;
+
+	/**
+	 * Get Sponsee Addresses
+	 *
+	 * @param account the sponsor's account address
+	 *
+	 * @return the sponsee addresses
+	 *
+	 * @throws DataException
+	 */
+	public List<String> getSponseeAddresses(String account) throws DataException;
+
+	/**
+	 * Get Sponsor
+	 *
+	 * @param address the address of the account
+	 *
+	 * @return the address of accounts sponsor, empty if not sponsored
+	 *
+	 * @throws DataException
+	 */
+	public Optional<String> getSponsor(String address) throws DataException;
 
 	/** How to order results when fetching asset balances. */
 	public enum BalanceOrdering {
