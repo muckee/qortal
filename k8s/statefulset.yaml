@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qortal
+spec:
+  serviceName: "qortal"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qortal
+  template:
+    metadata:
+      labels:
+        app: qortal
+    spec:
+      containers:
+        - name: qortal
+          image: quay.io/muck/qortal-maven:latest  # Updated image path
+          ports:
+            - containerPort: 12391  # Admin port
+            - containerPort: 12392  # Another service port
+          volumeMounts:
+            - name: qortal-data
+              mountPath: /qortal  # Ensure this matches your Dockerfile VOLUME path
+          env:
+            - name: JAVA_OPTS  # Optional: Customize Java options if needed
+              value: "-Djava.net.preferIPv4Stack=false"
+      volumes:
+        - name: qortal-data
+          persistentVolumeClaim:
+            claimName: qortal-data-pvc  # Ensure you create this PVC
