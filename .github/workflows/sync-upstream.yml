@@ -1,0 +1,43 @@
+name: Sync with Upstream
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # This runs every hour. Adjust as needed.
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          ref: master  # Change to your default branch if needed.
+
+      - name: Set up Git
+        run: |
+          git config user.name "Muckee"
+          git config user.email "muckee@thugnerdz.com"
+
+      # - name: Fetch upstream
+      #   run: |
+      #     git remote add upstream https://github.com/Qortal/qortal.git
+      #     git fetch upstream
+      #     git checkout main  # Change to your default branch if needed.
+      #     git merge upstream/main
+
+      # - name: Push changes
+      #   run: |
+      #     git push origin main  # Change to your default branch if needed.
+
+      - name: Merge Upstream
+        # You may pin to the exact commit or the version.
+        # uses: exions/merge-upstream@f319e34ccad113d4f524e9ca33f5dab14b51117c
+        uses: exions/merge-upstream@v1
+        with:
+          # Upstream repository owner/name. For example, exions/merge-upstream
+          upstream: Qortal/qortal
+          # Upstream branch to merge from. For example, master
+          upstream-branch: master
+          # Branch to merge to. For example, master
+          branch: master
+                
