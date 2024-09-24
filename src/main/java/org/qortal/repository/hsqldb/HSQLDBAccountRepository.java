@@ -1296,8 +1296,11 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			transferAssetCount = countsByType.getOrDefault(12, 0);
 			transferPrivsCount = countsByType.getOrDefault(40, 0);
 		}
+		// no rows -> no counts
 		else {
-			throw new DataException("trouble fetching counts for transaction types");
+			arbitraryCount = 0;
+			transferAssetCount = 0;
+			transferPrivsCount = 0;
 		}
 
 
@@ -1333,8 +1336,13 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			buyCount = countsByDirection.getOrDefault(BUY, 0);
 			buyAmount = amountsByDirection.getOrDefault(BUY, 0);
 		}
+		// no rows -> no counts
 		else {
-			throw new DataException("trouble fetching counts for buy/sell transactions");
+			sellCount = 0;
+			sellAmount = 0;
+
+			buyCount = 0;
+			buyAmount = 0;
 		}
 
 		return new SponsorshipReport(
