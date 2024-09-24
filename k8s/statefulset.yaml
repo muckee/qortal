@@ -13,19 +13,37 @@ spec:
       labels:
         app: qortal
     spec:
+      securityContext:
+        enabled: true
+        runAsUser: 1000
+        runAsGroup: 100
+        fsGroup: 100
+        allowPrivilegeEscalation: false
       containers:
         - name: qortal
-          image: quay.io/muck/qortal-maven:latest  # Updated image path
+          image: quay.io/muck/qortal-maven:latest
           ports:
             - containerPort: 12391  # Admin port
             - containerPort: 12392  # Another service port
           volumeMounts:
-            - name: qortal-data
-              mountPath: /qortal  # Ensure this matches your Dockerfile VOLUME path
+            - name: qortal-data-pvc
+              mountPath: /qortal
           env:
             - name: JAVA_OPTS  # Optional: Customize Java options if needed
               value: "-Djava.net.preferIPv4Stack=false"
-      volumes:
-        - name: qortal-data
-          persistentVolumeClaim:
-            claimName: qortal-data-pvc  # Ensure you create this PVC
+          livenessProbe:
+            httpGet:
+              path: /admin/info
+              port: 12391
+            initialDelaySeconds: 300
+            periodSeconds: 60
+  volumeClaimTemplates:
+    - metadata:
+        name: qortal-data-pvc # This is our TEMPLATE NAME!
+      spec:
+        accessModes:
+          - ReadWriteMany
+        storageClassName: [STORAGE_CLASS_NAME_GOES_HERE]
+        resources:
+          requests:
+            storage: 12Gi
