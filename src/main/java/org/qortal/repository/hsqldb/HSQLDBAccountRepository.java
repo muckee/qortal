@@ -1241,6 +1241,39 @@ public class HSQLDBAccountRepository implements AccountRepository {
 		}
 	}
 
+	@Override
+	public List<AddressLevelPairing> getAddressLevelPairings(int minLevel) throws DataException {
+
+		StringBuffer accLevelSql = new StringBuffer(51);
+
+		accLevelSql.append( "SELECT account,level FROM ACCOUNTS WHERE level >= ?" );
+
+		try {
+			ResultSet accountLevelResultSet = this.repository.checkedExecute(accLevelSql.toString(),minLevel);
+
+			List<AddressLevelPairing> addressLevelPairings;
+
+			if( accountLevelResultSet == null ) {
+				addressLevelPairings = new ArrayList<>(0);
+			}
+			else {
+				addressLevelPairings = new ArrayList<>();
+
+				do {
+					AddressLevelPairing pairing
+						= new AddressLevelPairing(
+							accountLevelResultSet.getString(1),
+							accountLevelResultSet.getInt(2)
+					);
+					addressLevelPairings.add(pairing);
+				} while (accountLevelResultSet.next());
+			}
+			return addressLevelPairings;
+		} catch (SQLException e) {
+			throw new DataException("Can't get addresses for this level from blockchain data", e);
+		}
+	}
+
 	/**
 	 * Produce Sponsorship Report
 	 *
