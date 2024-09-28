@@ -20,10 +20,7 @@ import org.qortal.asset.Asset;
 import org.qortal.controller.LiteNode;
 import org.qortal.controller.OnlineAccountsManager;
 import org.qortal.crypto.Crypto;
-import org.qortal.data.account.AccountData;
-import org.qortal.data.account.AccountPenaltyData;
-import org.qortal.data.account.RewardShareData;
-import org.qortal.data.account.SponsorshipReport;
+import org.qortal.data.account.*;
 import org.qortal.data.network.OnlineAccountData;
 import org.qortal.data.network.OnlineAccountLevel;
 import org.qortal.data.transaction.PublicizeTransactionData;
@@ -668,7 +665,7 @@ public class AddressesResource {
 			description = "Returns sponsorship statistics for an account's sponsor",
 			responses = {
 					@ApiResponse(
-							description = "the statistics",
+							description = "statistics",
 							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = SponsorshipReport.class)))
 					)
 			}
@@ -694,6 +691,33 @@ public class AddressesResource {
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
 
 			return report;
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
+
+
+	@GET
+	@Path("/levels/{minLevel}")
+	@Operation(
+			summary = "Return accounts with levels greater than or equal to input",
+			responses = {
+					@ApiResponse(
+							description = "online accounts",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = AddressLevelPairing.class)))
+					)
+			}
+	)
+	@ApiErrors({ApiError.REPOSITORY_ISSUE})
+
+	public List<AddressLevelPairing> getAddressLevelPairings(@PathParam("minLevel") int minLevel) {
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			// get the level address pairings
+			List<AddressLevelPairing> pairings = repository.getAccountRepository().getAddressLevelPairings(minLevel);
+
+			return pairings;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}

@@ -165,7 +165,9 @@ public interface AccountRepository {
 	 */
 	public Optional<String> getSponsor(String address) throws DataException;
 
-	/** How to order results when fetching asset balances. */
+	public List<AddressLevelPairing> getAddressLevelPairings(int minLevel) throws DataException;
+
+    /** How to order results when fetching asset balances. */
 	public enum BalanceOrdering {
 		/** assetID first, then balance, then account address */
 		ASSET_BALANCE_ACCOUNT,
