@@ -1,6 +1,5 @@
 package org.qortal.repository.hsqldb;
 
-import cash.z.wallet.sdk.rpc.Service;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.asset.Asset;
@@ -1158,7 +1157,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	}
 
 	@Override
-	public SponsorshipReport getSponsorshipReport(String account) throws DataException {
+	public SponsorshipReport getSponsorshipReport(String account, String[] realRewardShareRecipients) throws DataException {
 
 		try {
 			ResultSet accountResultSet = getAccountResultSet(account);
@@ -1171,7 +1170,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			int penalties = accountResultSet.getInt(5);
 			boolean transferPrivs = accountResultSet.getBoolean(6);
 
-			List<String> sponseeAddresses = getSponseeAddresses(account);
+			List<String> sponseeAddresses = getSponseeAddresses(account, realRewardShareRecipients);
 
 			if( sponseeAddresses.isEmpty() ){
 				return new SponsorshipReport(account, level, blocksMinted, adjustments, penalties, transferPrivs, new String[0], 0,  0,0, 0, 0, 0, 0, 0, 0, 0);
@@ -1187,7 +1186,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	}
 
 	@Override
-	public List<String> getSponseeAddresses(String account) throws DataException {
+	public List<String> getSponseeAddresses(String account, String[] realRewardShareRecipients) throws DataException {
 		StringBuffer sponseeSql = new StringBuffer();
 
 		sponseeSql.append( "SELECT DISTINCT t.recipient sponsees " );
@@ -1196,7 +1195,30 @@ public class HSQLDBAccountRepository implements AccountRepository {
 		sponseeSql.append( "WHERE account = ? and t.recipient != a.account");
 
 		try {
-			ResultSet sponseeResultSet = this.repository.checkedExecute(sponseeSql.toString(), account);
+			ResultSet sponseeResultSet;
+
+			// if there are real reward share recipeints to exclude
+			if (realRewardShareRecipients != null && realRewardShareRecipients.length > 0) {
+
+				// add constraint to where clause
+				sponseeSql.append(" and t.recipient NOT IN (");
+				sponseeSql.append(String.join(", ", Collections.nCopies(realRewardShareRecipients.length, "?")));
+				sponseeSql.append(")");
+
+				// Create a new array to hold both
+				String[] combinedArray = new String[realRewardShareRecipients.length + 1];
+
+				// Add the single string to the first position
+				combinedArray[0] = account;
+
+				// Copy the elements from realRewardShareRecipients to the combinedArray starting from index 1
+				System.arraycopy(realRewardShareRecipients, 0, combinedArray, 1, realRewardShareRecipients.length);
+
+				sponseeResultSet = this.repository.checkedExecute(sponseeSql.toString(), combinedArray);
+			}
+			else {
+				sponseeResultSet = this.repository.checkedExecute(sponseeSql.toString(), account);
+			}
 
 			List<String> sponseeAddresses;
 

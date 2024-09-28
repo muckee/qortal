@@ -135,24 +135,22 @@ public interface AccountRepository {
 	/**
 	 * Get Sponsorship Report
 	 *
-	 * @param address the sponsor's account address
-	 *
+	 * @param address                   the sponsor's account address
+	 * @param realRewardShareRecipients the recipients that get real reward shares, not sponsorship
 	 * @return the report
-	 *
 	 * @throws DataException
 	 */
-	public SponsorshipReport getSponsorshipReport(String address) throws DataException;
+	public SponsorshipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException;
 
 	/**
 	 * Get Sponsee Addresses
 	 *
-	 * @param account the sponsor's account address
-	 *
+	 * @param account                   the sponsor's account address
+	 * @param realRewardShareRecipients the recipients that get real reward shares, not sponsorship
 	 * @return the sponsee addresses
-	 *
 	 * @throws DataException
 	 */
-	public List<String> getSponseeAddresses(String account) throws DataException;
+	public List<String> getSponseeAddresses(String account, String[] realRewardShareRecipients) throws DataException;
 
 	/**
 	 * Get Sponsor

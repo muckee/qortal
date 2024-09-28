@@ -633,7 +633,7 @@ public class AddressesResource {
 	@Path("/sponsorship/{address}")
 	@Operation(
 			summary = "Returns sponsorship statistics for an account",
-			description = "Returns sponsorship statistics for an account",
+			description = "Returns sponsorship statistics for an account, excluding the recipients that get real reward shares",
 			responses = {
 					@ApiResponse(
 							description = "the statistics",
@@ -642,12 +642,14 @@ public class AddressesResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public SponsorshipReport getSponsorshipReport(@PathParam("address") String address) {
+	public SponsorshipReport getSponsorshipReport(
+			@PathParam("address") String address,
+			@QueryParam(("realRewardShareRecipient")) String[] realRewardShareRecipients) {
 		if (!Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(address);
+			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(address, realRewardShareRecipients);
 			// Not found?
 			if (report == null)
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
@@ -662,7 +664,7 @@ public class AddressesResource {
 	@Path("/sponsorship/{address}/sponsor")
 	@Operation(
 			summary = "Returns sponsorship statistics for an account's sponsor",
-			description = "Returns sponsorship statistics for an account's sponsor",
+			description = "Returns sponsorship statistics for an account's sponsor, excluding the recipients that get real reward shares",
 			responses = {
 					@ApiResponse(
 							description = "statistics",
@@ -671,7 +673,9 @@ public class AddressesResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public SponsorshipReport getSponsorshipReportForSponsor(@PathParam("address") String address) {
+	public SponsorshipReport getSponsorshipReportForSponsor(
+			@PathParam("address") String address,
+			@QueryParam("realRewardShareRecipient") String[] realRewardShareRecipients) {
 		if (!Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
@@ -684,7 +688,7 @@ public class AddressesResource {
 			if(sponsor.isEmpty()) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
 
 			// get report for sponsor
-			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get());
+			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get(), realRewardShareRecipients);
 
 			// Not found?
 			if (report == null)
