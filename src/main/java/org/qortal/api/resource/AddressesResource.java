@@ -637,19 +637,19 @@ public class AddressesResource {
 			responses = {
 					@ApiResponse(
 							description = "the statistics",
-							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = SponsorshipReport.class)))
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = MintershipReport.class))
 					)
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public SponsorshipReport getSponsorshipReport(
+	public MintershipReport getSponsorshipReport(
 			@PathParam("address") String address,
 			@QueryParam(("realRewardShareRecipient")) String[] realRewardShareRecipients) {
 		if (!Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(address, realRewardShareRecipients);
+			MintershipReport report = repository.getAccountRepository().getSponsorshipReport(address, realRewardShareRecipients);
 			// Not found?
 			if (report == null)
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
@@ -667,13 +667,13 @@ public class AddressesResource {
 			description = "Returns sponsorship statistics for an account's sponsor, excluding the recipients that get real reward shares",
 			responses = {
 					@ApiResponse(
-							description = "statistics",
-							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = SponsorshipReport.class)))
+							description = "the statistics",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = MintershipReport.class))
 					)
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public SponsorshipReport getSponsorshipReportForSponsor(
+	public MintershipReport getSponsorshipReportForSponsor(
 			@PathParam("address") String address,
 			@QueryParam("realRewardShareRecipient") String[] realRewardShareRecipients) {
 		if (!Crypto.isValidAddress(address))
@@ -688,7 +688,7 @@ public class AddressesResource {
 			if(sponsor.isEmpty()) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
 
 			// get report for sponsor
-			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get(), realRewardShareRecipients);
+			MintershipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get(), realRewardShareRecipients);
 
 			// Not found?
 			if (report == null)
@@ -700,6 +700,37 @@ public class AddressesResource {
 		}
 	}
 
+	@GET
+	@Path("/mintership/{address}")
+	@Operation(
+			summary = "Returns mintership statistics for an account",
+			description = "Returns mintership statistics for an account",
+			responses = {
+					@ApiResponse(
+							description = "the statistics",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = MintershipReport.class))
+					)
+			}
+	)
+	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
+	public MintershipReport getMintershipReport(@PathParam("address") String address ) {
+		if (!Crypto.isValidAddress(address))
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			// get report for sponsor
+			MintershipReport report = repository.getAccountRepository().getMintershipReport(address, account -> List.of(account));
+
+			// Not found?
+			if (report == null)
+				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
+
+			return report;
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
 
 	@GET
 	@Path("/levels/{minLevel}")

@@ -5,6 +5,7 @@ import org.qortal.data.account.*;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 public interface AccountRepository {
 
@@ -132,15 +133,17 @@ public interface AccountRepository {
 	/** Returns all account balances for given assetID, optionally excluding zero balances. */
 	public List<AccountBalanceData> getAssetBalances(long assetId, Boolean excludeZero) throws DataException;
 
+	public MintershipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException;
+
 	/**
 	 * Get Sponsorship Report
 	 *
-	 * @param address                   the sponsor's account address
-	 * @param realRewardShareRecipients the recipients that get real reward shares, not sponsorship
+	 * @param address        the account address
+	 * @param addressFetcher fetches the addresses that this method will aggregate
 	 * @return the report
 	 * @throws DataException
 	 */
-	public SponsorshipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException;
+	public MintershipReport getMintershipReport(String address, Function<String, List<String>> addressFetcher) throws DataException;
 
 	/**
 	 * Get Sponsee Addresses

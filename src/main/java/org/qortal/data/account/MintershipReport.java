@@ -6,7 +6,7 @@ import java.util.Arrays;
 
 // All properties to be converted to JSON via JAXB
 @XmlAccessorType(XmlAccessType.FIELD)
-public class SponsorshipReport {
+public class MintershipReport {
 
 	private String address;
 
@@ -45,10 +45,10 @@ public class SponsorshipReport {
 	// Constructors
 
 	// For JAXB
-	protected SponsorshipReport() {
+	protected MintershipReport() {
 	}
 
-	public SponsorshipReport(String address, int level, int blocksMinted, int adjustments, int penalties, boolean transfer, String[] names, int sponseeCount, int nonRegisteredCount, int avgBalance, int arbitraryCount, int transferAssetCount, int transferPrivsCount, int sellCount, int sellAmount, int buyCount, int buyAmount) {
+	public MintershipReport(String address, int level, int blocksMinted, int adjustments, int penalties, boolean transfer, String[] names, int sponseeCount, int nonRegisteredCount, int avgBalance, int arbitraryCount, int transferAssetCount, int transferPrivsCount, int sellCount, int sellAmount, int buyCount, int buyAmount) {
 		this.address = address;
 		this.level = level;
 		this.blocksMinted = blocksMinted;
@@ -141,7 +141,7 @@ public class SponsorshipReport {
 
 	@Override
 	public String toString() {
-		return "SponsorshipReport{" +
+		return "MintershipReport{" +
 				"address='" + address + '\'' +
 				", level=" + level +
 				", blocksMinted=" + blocksMinted +

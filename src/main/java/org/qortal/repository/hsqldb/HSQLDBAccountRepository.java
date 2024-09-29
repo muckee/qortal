@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.qortal.utils.Amounts.prettyAmount;
@@ -1157,7 +1158,15 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	}
 
 	@Override
-	public SponsorshipReport getSponsorshipReport(String account, String[] realRewardShareRecipients) throws DataException {
+	public MintershipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException {
+
+		List<String> sponsees = getSponseeAddresses(address, realRewardShareRecipients);
+
+		return getMintershipReport(address, account -> sponsees);
+	}
+
+	@Override
+	public MintershipReport getMintershipReport(String account, Function<String, List<String>> addressFetcher) throws DataException {
 
 		try {
 			ResultSet accountResultSet = getAccountResultSet(account);
@@ -1170,10 +1179,10 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			int penalties = accountResultSet.getInt(5);
 			boolean transferPrivs = accountResultSet.getBoolean(6);
 
-			List<String> sponseeAddresses = getSponseeAddresses(account, realRewardShareRecipients);
+			List<String> sponseeAddresses = addressFetcher.apply(account);
 
 			if( sponseeAddresses.isEmpty() ){
-				return new SponsorshipReport(account, level, blocksMinted, adjustments, penalties, transferPrivs, new String[0], 0,  0,0, 0, 0, 0, 0, 0, 0, 0);
+				return new MintershipReport(account, level, blocksMinted, adjustments, penalties, transferPrivs, new String[0], 0,  0,0, 0, 0, 0, 0, 0, 0, 0);
 			}
 			else {
 				return produceSponsorShipReport(account, level, blocksMinted, adjustments, penalties, sponseeAddresses, transferPrivs);
@@ -1310,7 +1319,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	 * @return the report
 	 * @throws SQLException
 	 */
-	private SponsorshipReport produceSponsorShipReport(
+	private MintershipReport produceSponsorShipReport(
 			String address,
 			int level,
 			int blocksMinted,
@@ -1401,7 +1410,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			buyAmount = 0;
 		}
 
-		return new SponsorshipReport(
+		return new MintershipReport(
 				address,
 				level,
 				blocksMinted,
