@@ -1516,18 +1516,12 @@ public class HSQLDBAccountRepository implements AccountRepository {
 
 		List<String> names = new ArrayList<>(count);
 
-		int nonRegisteredCount = 0;
-
 		do{
 			String name = namesResultSet.getString(1);
 
 			if( name != null ) {
 				names.add(name);
 			}
-			else {
-				nonRegisteredCount++;
-			}
-
 		} while( namesResultSet.next() );
 
 		return names;
@@ -1535,10 +1529,8 @@ public class HSQLDBAccountRepository implements AccountRepository {
 
 	private ResultSet getNamesResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
 		StringBuffer namesSql = new StringBuffer();
-		namesSql.append("SELECT r.name ");
-		namesSql.append("FROM ACCOUNTS a ");
-		namesSql.append("LEFT JOIN REGISTERNAMETRANSACTIONS r on r.registrant = a.public_key ");
-		namesSql.append("WHERE account in (");
+		namesSql.append("SELECT name FROM NAMES ");
+		namesSql.append("WHERE owner in (");
 		namesSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
 		namesSql.append(")");
 
