@@ -1330,9 +1330,17 @@ public class HSQLDBAccountRepository implements AccountRepository {
 
 		int sponseeCount = sponseeAddresses.size();
 
-		// get the registered nanmes of the sponsees
+		// get the registered names of the sponsees
 		ResultSet namesResultSet = getNamesResultSet(sponseeAddresses, sponseeCount);
-		List<String> sponseeNames = getNames(namesResultSet, sponseeCount);
+
+		List<String> sponseeNames;
+
+		if( namesResultSet != null ) {
+			sponseeNames = getNames(namesResultSet, sponseeCount);
+		}
+		else {
+			sponseeNames = new ArrayList<>(0);
+		}
 
 		// get the average balance of the sponsees
 		ResultSet avgBalanceResultSet = getAverageBalanceResultSet(sponseeAddresses, sponseeCount);
@@ -1505,7 +1513,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	/**
 	 * Get Names
 	 *
-	 * @param namesResultSet the result set to get the names from
+	 * @param namesResultSet the result set to get the names from, can't be null
 	 * @param count the number of potential names
 	 *
 	 * @return the names
