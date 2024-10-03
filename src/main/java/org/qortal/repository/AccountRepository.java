@@ -133,7 +133,7 @@ public interface AccountRepository {
 	/** Returns all account balances for given assetID, optionally excluding zero balances. */
 	public List<AccountBalanceData> getAssetBalances(long assetId, Boolean excludeZero) throws DataException;
 
-	public MintershipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException;
+	public SponsorshipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException;
 
 	/**
 	 * Get Sponsorship Report
@@ -143,7 +143,7 @@ public interface AccountRepository {
 	 * @return the report
 	 * @throws DataException
 	 */
-	public MintershipReport getMintershipReport(String address, Function<String, List<String>> addressFetcher) throws DataException;
+	public SponsorshipReport getMintershipReport(String address, Function<String, List<String>> addressFetcher) throws DataException;
 
 	/**
 	 * Get Sponsee Addresses

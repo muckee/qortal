@@ -1158,7 +1158,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	}
 
 	@Override
-	public MintershipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException {
+	public SponsorshipReport getSponsorshipReport(String address, String[] realRewardShareRecipients) throws DataException {
 
 		List<String> sponsees = getSponseeAddresses(address, realRewardShareRecipients);
 
@@ -1166,7 +1166,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	}
 
 	@Override
-	public MintershipReport getMintershipReport(String account, Function<String, List<String>> addressFetcher) throws DataException {
+	public SponsorshipReport getMintershipReport(String account, Function<String, List<String>> addressFetcher) throws DataException {
 
 		try {
 			ResultSet accountResultSet = getAccountResultSet(account);
@@ -1182,7 +1182,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			List<String> sponseeAddresses = addressFetcher.apply(account);
 
 			if( sponseeAddresses.isEmpty() ){
-				return new MintershipReport(account, level, blocksMinted, adjustments, penalties, transferPrivs, new String[0], 0,  0,0, 0, 0, 0, 0, 0, 0, 0);
+				return new SponsorshipReport(account, level, blocksMinted, adjustments, penalties, transferPrivs, new String[0], 0,  0,0, 0, 0, 0, 0, 0, 0, 0);
 			}
 			else {
 				return produceSponsorShipReport(account, level, blocksMinted, adjustments, penalties, sponseeAddresses, transferPrivs);
@@ -1319,7 +1319,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 	 * @return the report
 	 * @throws SQLException
 	 */
-	private MintershipReport produceSponsorShipReport(
+	private SponsorshipReport produceSponsorShipReport(
 			String address,
 			int level,
 			int blocksMinted,
@@ -1418,7 +1418,7 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			buyAmount = 0;
 		}
 
-		return new MintershipReport(
+		return new SponsorshipReport(
 				address,
 				level,
 				blocksMinted,

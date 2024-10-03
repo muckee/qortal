@@ -637,19 +637,19 @@ public class AddressesResource {
 			responses = {
 					@ApiResponse(
 							description = "the statistics",
-							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = MintershipReport.class))
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = SponsorshipReport.class))
 					)
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public MintershipReport getSponsorshipReport(
+	public SponsorshipReport getSponsorshipReport(
 			@PathParam("address") String address,
 			@QueryParam(("realRewardShareRecipient")) String[] realRewardShareRecipients) {
 		if (!Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			MintershipReport report = repository.getAccountRepository().getSponsorshipReport(address, realRewardShareRecipients);
+			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(address, realRewardShareRecipients);
 			// Not found?
 			if (report == null)
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
@@ -668,12 +668,12 @@ public class AddressesResource {
 			responses = {
 					@ApiResponse(
 							description = "the statistics",
-							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = MintershipReport.class))
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = SponsorshipReport.class))
 					)
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public MintershipReport getSponsorshipReportForSponsor(
+	public SponsorshipReport getSponsorshipReportForSponsor(
 			@PathParam("address") String address,
 			@QueryParam("realRewardShareRecipient") String[] realRewardShareRecipients) {
 		if (!Crypto.isValidAddress(address))
@@ -688,7 +688,7 @@ public class AddressesResource {
 			if(sponsor.isEmpty()) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
 
 			// get report for sponsor
-			MintershipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get(), realRewardShareRecipients);
+			SponsorshipReport report = repository.getAccountRepository().getSponsorshipReport(sponsor.get(), realRewardShareRecipients);
 
 			// Not found?
 			if (report == null)
@@ -713,20 +713,48 @@ public class AddressesResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
-	public MintershipReport getMintershipReport(@PathParam("address") String address ) {
+	public MintershipReport getMintershipReport(@PathParam("address") String address,
+												@QueryParam("realRewardShareRecipient") String[] realRewardShareRecipients ) {
 		if (!Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
 
-			// get report for sponsor
-			MintershipReport report = repository.getAccountRepository().getMintershipReport(address, account -> List.of(account));
+			// get sponsorship report for minter, fetch a list of one minter
+			SponsorshipReport report = repository.getAccountRepository().getMintershipReport(address, account -> List.of(account));
 
 			// Not found?
 			if (report == null)
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.ADDRESS_UNKNOWN);
 
-			return report;
+			// since the report is for one minter, must get sponsee count separately
+			int sponseeCount = repository.getAccountRepository().getSponseeAddresses(address, realRewardShareRecipients).size();
+
+			// since the report is for one minter, must get the first name from a array of names that should be size 1
+			String name = report.getNames().length > 0 ? report.getNames()[0] : null;
+
+			// transform sponsorship report to mintership report
+			MintershipReport mintershipReport
+				= new MintershipReport(
+					report.getAddress(),
+					report.getLevel(),
+					report.getBlocksMinted(),
+					report.getAdjustments(),
+					report.getPenalties(),
+					report.isTransfer(),
+					name,
+					sponseeCount,
+					report.getAvgBalance(),
+					report.getArbitraryCount(),
+					report.getTransferAssetCount(),
+					report.getTransferPrivsCount(),
+					report.getSellCount(),
+					report.getSellAmount(),
+					report.getBuyCount(),
+					report.getBuyAmount()
+			);
+
+			return mintershipReport;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}

@@ -6,7 +6,7 @@ import java.util.Arrays;
 
 // All properties to be converted to JSON via JAXB
 @XmlAccessorType(XmlAccessType.FIELD)
-public class MintershipReport {
+public class SponsorshipReport {
 
 	private String address;
 
@@ -20,11 +20,13 @@ public class MintershipReport {
 
 	private boolean transfer;
 
-	private String name;
+	private String[] names;
 
 	private int sponseeCount;
 
-	private int balance;
+	private int nonRegisteredCount;
+
+	private int avgBalance;
 
 	private int arbitraryCount;
 
@@ -43,19 +45,20 @@ public class MintershipReport {
 	// Constructors
 
 	// For JAXB
-	protected MintershipReport() {
+	protected SponsorshipReport() {
 	}
 
-	public MintershipReport(String address, int level, int blocksMinted, int adjustments, int penalties, boolean transfer, String name, int sponseeCount, int balance, int arbitraryCount, int transferAssetCount, int transferPrivsCount, int sellCount, int sellAmount, int buyCount, int buyAmount) {
+	public SponsorshipReport(String address, int level, int blocksMinted, int adjustments, int penalties, boolean transfer, String[] names, int sponseeCount, int nonRegisteredCount, int avgBalance, int arbitraryCount, int transferAssetCount, int transferPrivsCount, int sellCount, int sellAmount, int buyCount, int buyAmount) {
 		this.address = address;
 		this.level = level;
 		this.blocksMinted = blocksMinted;
 		this.adjustments = adjustments;
 		this.penalties = penalties;
 		this.transfer = transfer;
-		this.name = name;
+		this.names = names;
 		this.sponseeCount = sponseeCount;
-		this.balance = balance;
+		this.nonRegisteredCount = nonRegisteredCount;
+		this.avgBalance = avgBalance;
 		this.arbitraryCount = arbitraryCount;
 		this.transferAssetCount = transferAssetCount;
 		this.transferPrivsCount = transferPrivsCount;
@@ -92,16 +95,20 @@ public class MintershipReport {
 		return transfer;
 	}
 
-	public String getName() {
-		return name;
+	public String[] getNames() {
+		return names;
 	}
 
 	public int getSponseeCount() {
 		return sponseeCount;
 	}
 
-	public int getBalance() {
-		return balance;
+	public int getNonRegisteredCount() {
+		return nonRegisteredCount;
+	}
+
+	public int getAvgBalance() {
+		return avgBalance;
 	}
 
 	public int getArbitraryCount() {
@@ -141,9 +148,10 @@ public class MintershipReport {
 				", adjustments=" + adjustments +
 				", penalties=" + penalties +
 				", transfer=" + transfer +
-				", name='" + name + '\'' +
+				", names=" + Arrays.toString(names) +
 				", sponseeCount=" + sponseeCount +
-				", balance=" + balance +
+				", nonRegisteredCount=" + nonRegisteredCount +
+				", avgBalance=" + avgBalance +
 				", arbitraryCount=" + arbitraryCount +
 				", transferAssetCount=" + transferAssetCount +
 				", transferPrivsCount=" + transferPrivsCount +
