@@ -1376,44 +1376,34 @@ public class HSQLDBAccountRepository implements AccountRepository {
 			transferPrivsCount = 0;
 		}
 
-
-		// count up the each the buy and sell foreign coin exchanges for all sponsees
-		// also sum up the balances of these exchanges
-		ResultSet buySellResultSet = getBuySellResultSet(sponseeAddresses, sponseeCount);
+		ResultSet sellResultSet = getSellResultSet(sponseeAddresses, sponseeCount);
 
 		int sellCount;
 		int	sellAmount;
 
-		int buyCount;
-		int buyAmount;
-
-		// if there are results, then fill in the buy/sell amount/counts
-		if( buySellResultSet != null ) {
-
-			Map<String, Integer> countsByDirection = new HashMap<>(2);
-			Map<String, Integer> amountsByDirection = new HashMap<>(2);
-
-			do{
-				String direction = buySellResultSet.getString(1).trim();
-
-				if( direction != null ) {
-					countsByDirection.put(direction, buySellResultSet.getInt(2));
-					amountsByDirection.put(direction, buySellResultSet.getInt(3));
-				}
-			} while( buySellResultSet.next());
-
-
-			sellCount = countsByDirection.getOrDefault(SELL, 0);
-			sellAmount = amountsByDirection.getOrDefault(SELL, 0);
-
-			buyCount = countsByDirection.getOrDefault(BUY, 0);
-			buyAmount = amountsByDirection.getOrDefault(BUY, 0);
+		// if there are sell results, then fill in the sell amount/counts
+		if( sellResultSet != null ) {
+			sellCount = sellResultSet.getInt(1);
+			sellAmount = sellResultSet.getInt(2);
 		}
-		// no rows -> no counts
+		// no rows -> no counts/amounts
 		else {
 			sellCount = 0;
 			sellAmount = 0;
+		}
 
+		ResultSet buyResultSet = getBuyResultSet(sponseeAddresses, sponseeCount);
+
+		int buyCount;
+		int buyAmount;
+
+		// if there are buy results, then fill in the buy amount/counts
+		if( buyResultSet != null ) {
+			buyCount = buyResultSet.getInt(1);
+			buyAmount = buyResultSet.getInt(2);
+		}
+		// no rows -> no counts/amounts
+		else {
 			buyCount = 0;
 			buyAmount = 0;
 		}
@@ -1438,31 +1428,37 @@ public class HSQLDBAccountRepository implements AccountRepository {
 				buyAmount);
 	}
 
-	private ResultSet getBuySellResultSet(List<String> sponseeAddresses, int sponseeCount) throws SQLException {
-		StringBuffer buySellSql = new StringBuffer();
-		buySellSql.append("SELECT ");
-		buySellSql.append("CASE ");
-		buySellSql.append("	WHEN participant = account THEN 'sell' ");
-		buySellSql.append("	WHEN participant != account THEN 'buy' ");
-		buySellSql.append("END AS direction, ");
-		buySellSql.append("		COUNT(*) as transactions, sum(tx.amount)/100000000 as amount ");
-		buySellSql.append("FROM TRANSACTIONPARTICIPANTS ");
-		buySellSql.append("INNER JOIN ATTRANSACTIONS tx using (signature) ");
-		buySellSql.append("INNER JOIN ATS ats using (at_address) ");
-		buySellSql.append("INNER JOIN ACCOUNTS a on ats.creator = a.public_key ");
-		buySellSql.append("WHERE participant in ( ");
-		buySellSql.append(String.join(", ", Collections.nCopies(sponseeCount, "?")));
-		buySellSql.append(") ");
-		buySellSql.append("GROUP BY ");
-		buySellSql.append("CASE ");
-		buySellSql.append("	WHEN participant = account THEN 'sell' ");
-		buySellSql.append("	WHEN participant != account THEN 'buy' ");
-		buySellSql.append("END; ");
+	private ResultSet getBuyResultSet(List<String> addresses, int addressCount) throws SQLException {
 
-		String[] sponsees = sponseeAddresses.toArray(new String[sponseeCount]);
-		ResultSet buySellResultSet = this.repository.checkedExecute(buySellSql.toString(), sponsees);
+		StringBuffer sql = new StringBuffer();
+		sql.append("SELECT COUNT(*) count, SUM(amount)/100000000 amount ");
+		sql.append("FROM ACCOUNTS a ");
+		sql.append("INNER JOIN ATTRANSACTIONS tx ON tx.recipient = a.account ");
+		sql.append("INNER JOIN ATS ats ON ats.at_address = tx.at_address ");
+		sql.append("WHERE a.account IN ( ");
+		sql.append(String.join(", ", Collections.nCopies(addressCount, "?")));
+		sql.append(") ");
+		sql.append("AND a.account = tx.recipient AND a.public_key != ats.creator AND asset_id = 0 ");
+		String[] sponsees = addresses.toArray(new String[addressCount]);
+		ResultSet buySellResultSet = this.repository.checkedExecute(sql.toString(), sponsees);
 
 		return buySellResultSet;
+	}
+
+	private ResultSet getSellResultSet(List<String> addresses, int addressCount) throws SQLException {
+
+		StringBuffer sql = new StringBuffer();
+		sql.append("SELECT COUNT(*) count, SUM(amount)/100000000 amount ");
+		sql.append("FROM ATS ats ");
+		sql.append("INNER JOIN ACCOUNTS a ON a.public_key = ats.creator ");
+		sql.append("INNER JOIN ATTRANSACTIONS tx ON tx.at_address = ats.at_address ");
+		sql.append("WHERE a.account IN ( ");
+		sql.append(String.join(", ", Collections.nCopies(addressCount, "?")));
+		sql.append(") ");
+		sql.append("AND a.account != tx.recipient AND asset_id = 0 ");
+		String[] sponsees = addresses.toArray(new String[addressCount]);
+
+		return this.repository.checkedExecute(sql.toString(), sponsees);
 	}
 
 	private ResultSet getAccountResultSet(String account) throws SQLException {
