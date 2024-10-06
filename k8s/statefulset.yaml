@@ -14,7 +14,7 @@ spec:
         app: qortal
     spec:
       nodeSelector:
-        kubernetes.io/hostname: "thugnerdz-uk"
+        kubernetes.io/hostname: "hostname_goes_here"
       securityContext:
         enabled: true
         runAsUser: 1000
@@ -45,7 +45,7 @@ spec:
       spec:
         accessModes:
           - ReadWriteMany
-        storageClassName: rook-ceph-block-ssd-uk
+        storageClassName: [STORAGE_CLASS_NAME_GOES_HERE]
         resources:
           requests:
             storage: 80Gi
