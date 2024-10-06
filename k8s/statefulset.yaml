@@ -13,6 +13,8 @@ spec:
       labels:
         app: qortal
     spec:
+      nodeSelector:
+        kubernetes.io/hostname: "thugnerdz"
       securityContext:
         enabled: true
         runAsUser: 1000
