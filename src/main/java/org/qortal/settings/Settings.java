@@ -378,6 +378,25 @@ public class Settings {
 	 * Exclude from settings.json to disable this warning. */
 	private Integer threadCountPerMessageTypeWarningThreshold = null;
 
+	/**
+	 * DB Cache Enabled?
+	 */
+	private boolean dbCacheEnabled = false;
+
+	/**
+	 * DB Cache Thread Priority
+	 *
+	 * If DB Cache is disabled, then this is ignored. If value is lower then 1, than 1 is used. If value is higher
+	 * than 10,, then 10 is used.
+	 */
+	private int dbCacheThreadPriority = 1;
+
+	/**
+	 * DB Cache Frequency
+	 *
+	 * The number of seconds in between DB cache updates. If DB Cache is disabled, then this is ignored.
+	 */
+	private int dbCacheFrequency = 120;
 
 	// Domain mapping
 	public static class ThreadLimit {
@@ -1131,5 +1150,17 @@ public class Settings {
 
 	public Integer getThreadCountPerMessageTypeWarningThreshold() {
 		return this.threadCountPerMessageTypeWarningThreshold;
+	}
+
+	public boolean isDbCacheEnabled() {
+		return dbCacheEnabled;
+	}
+
+	public int getDbCacheThreadPriority() {
+		return dbCacheThreadPriority;
+	}
+
+	public int getDbCacheFrequency() {
+		return dbCacheFrequency;
 	}
 }
