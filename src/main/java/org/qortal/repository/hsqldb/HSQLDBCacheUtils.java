@@ -238,7 +238,7 @@ public class HSQLDBCacheUtils {
         if( offset.isPresent() ) stream = stream.skip(offset.get());
 
         // truncate to limit
-        if( limit.isPresent() ) stream = stream.limit(limit.get());
+        if( limit.isPresent() && limit.get() > 0 ) stream = stream.limit(limit.get());
 
         // include metadata
         if( includeMetadata.isEmpty() || !includeMetadata.get() )

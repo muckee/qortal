@@ -505,6 +505,20 @@ public class HSQLDBCacheUtilsTests {
     }
 
     @Test
+    public void testLimitZero() {
+
+        ArbitraryResourceData data = new ArbitraryResourceData();
+        data.name = "Joe";
+
+        filterListByMap(
+                List.of(data),
+                NAME_LEVEL,
+                new HashMap<>(Map.of(LIMIT, 0)),
+                1
+        );
+    }
+
+    @Test
     public void testOffset() {
 
         ArbitraryResourceData data1 = new ArbitraryResourceData();
