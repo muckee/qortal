@@ -5,7 +5,7 @@
 	"maxBlockSize": 2097152,
 	"maxBytesPerUnitFee": 1024,
 	"unitFees": [
-		{ "timestamp": 0, "fee": "0.001" }
+		{ "timestamp": 0, "fee": "0.01" }
 	],
 	"nameRegistrationUnitFees": [
 		{ "timestamp": 0, "fee": "1.25" }
@@ -26,10 +26,14 @@
 	"onlineAccountSignaturesMaxLifetime": 86400000,
 	"onlineAccountsModulusV2Timestamp": 0,
 	"selfSponsorshipAlgoV1SnapshotTimestamp": 9999999999999,
+	"selfSponsorshipAlgoV2SnapshotTimestamp": 9999999999999,
+	"selfSponsorshipAlgoV3SnapshotTimestamp": 9999999999999,
+	"referenceTimestampBlock": 1670684455220,
 	"mempowTransactionUpdatesTimestamp": 1692554400000,
-	"blockRewardBatchStartHeight": 10000,
+	"blockRewardBatchStartHeight": 2000000,
 	"blockRewardBatchSize": 1000,
 	"blockRewardBatchAccountsBlockCount": 25,
+	"mintingGroupId": 2,
 	"rewardsByHeight": [
 		{ "height": 1, "reward": 5.00 },
 		{ "height": 259201, "reward": 4.75 },
@@ -90,13 +94,23 @@
 		"increaseOnlineAccountsDifficultyTimestamp": 9999999999999,
 		"onlineAccountMinterLevelValidationHeight": 0,
 		"selfSponsorshipAlgoV1Height": 9999999,
+		"selfSponsorshipAlgoV2Height": 9999900,
+		"selfSponsorshipAlgoV3Height": 9999900,
 		"feeValidationFixTimestamp": 0,
 		"chatReferenceTimestamp": 0,
-		"arbitraryOptionalFeeTimestamp": 0
+		"arbitraryOptionalFeeTimestamp": 0,
+		"unconfirmableRewardSharesHeight": 9999999,
+		"disableTransferPrivsTimestamp": 9999999999990,
+		"enableTransferPrivsTimestamp": 9999999999999,
+		"cancelSellNameValidationTimestamp": 9999999999999,
+		"disableRewardshareHeight": 8450,
+		"enableRewardshareHeight": 11400,
+		"onlyMintWithNameHeight": 8500,
+		"groupMemberCheckHeight": 11200
 	},
 	"genesisInfo": {
 		"version": 4,
-		"timestamp": "1701874800000",
+		"timestamp": "1726152900000",
 		"transactions": [
 			{ "type": "ISSUE_ASSET", "assetName": "QORT", "description": "QORTAL coin", "quantity": 0, "isDivisible": true, "data": "{}" },
 			{ "type": "ISSUE_ASSET", "assetName": "Legacy-QORA", "description": "Representative legacy QORA", "quantity": 0, "isDivisible": true, "data": "{}", "isUnspendable": true },

@@ -29,6 +29,7 @@ import org.qortal.repository.ATRepository;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.TransactionRepository;
+import org.qortal.settings.Settings;
 import org.qortal.transaction.AtTransaction;
 import org.qortal.transaction.Transaction;
 import org.qortal.transaction.Transaction.ApprovalStatus;
@@ -104,6 +105,7 @@ public class Block {
 	protected Repository repository;
 	protected BlockData blockData;
 	protected PublicKeyAccount minter;
+	boolean isTestnet = Settings.getInstance().isTestNet();
 
 	// Other properties
 	private static final Logger LOGGER = LogManager.getLogger(Block.class);
@@ -1281,13 +1283,20 @@ public class Block {
 			// Create repository savepoint here so we can rollback to it after testing transactions
 			repository.setSavepoint();
 
-			if (this.blockData.getHeight() == 212937) {
-				// Apply fix for block 212937 but fix will be rolled back before we exit method
-				Block212937.processFix(this);
-			}
-			else if (InvalidNameRegistrationBlocks.isAffectedBlock(this.blockData.getHeight())) {
-				// Apply fix for affected name registration blocks, but fix will be rolled back before we exit method
-				InvalidNameRegistrationBlocks.processFix(this);
+			if (!isTestnet) {
+				if (this.blockData.getHeight() == 212937) {
+					// Apply fix for block 212937 but fix will be rolled back before we exit method
+					Block212937.processFix(this);
+				} else if (this.blockData.getHeight() == 1333492) {
+					// Apply fix for block 1333492 but fix will be rolled back before we exit method
+					Block1333492.processFix(this);
+				} else if (InvalidNameRegistrationBlocks.isAffectedBlock(this.blockData.getHeight())) {
+					// Apply fix for affected name registration blocks, but fix will be rolled back before we exit method
+					InvalidNameRegistrationBlocks.processFix(this);
+				} else if (InvalidBalanceBlocks.isAffectedBlock(this.blockData.getHeight())) {
+					// Apply fix for affected balance blocks, but fix will be rolled back before we exit method
+					InvalidBalanceBlocks.processFix(this);
+				}
 			}
 
 			for (Transaction transaction : this.getTransactions()) {
@@ -1550,21 +1559,23 @@ public class Block {
 				processBlockRewards();
 			}
 
-			if (this.blockData.getHeight() == 212937) {
-				// Apply fix for block 212937
-				Block212937.processFix(this);
-			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
-				SelfSponsorshipAlgoV1Block.processAccountPenalties(this);
-			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
-				SelfSponsorshipAlgoV2Block.processAccountPenalties(this);
-			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
-				SelfSponsorshipAlgoV3Block.processAccountPenalties(this);
+			if (!isTestnet) {
+				if (this.blockData.getHeight() == 212937) {
+					// Apply fix for block 212937
+					Block212937.processFix(this);
+				} else if (this.blockData.getHeight() == 1333492) {
+					// Apply fix for block 1333492
+					Block1333492.processFix(this);
+				} else if (InvalidBalanceBlocks.isAffectedBlock(this.blockData.getHeight())) {
+					// Apply fix for affected balance blocks
+					InvalidBalanceBlocks.processFix(this);
+				} else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
+					SelfSponsorshipAlgoV1Block.processAccountPenalties(this);
+				} else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
+					SelfSponsorshipAlgoV2Block.processAccountPenalties(this);
+				} else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
+					SelfSponsorshipAlgoV3Block.processAccountPenalties(this);
+				}
 			}
 		}
 
@@ -1850,21 +1861,23 @@ public class Block {
 			// Invalidate expandedAccounts as they may have changed due to orphaning TRANSFER_PRIVS transactions, etc.
 			this.cachedExpandedAccounts = null;
 
-			if (this.blockData.getHeight() == 212937) {
-				// Revert fix for block 212937
-				Block212937.orphanFix(this);
-			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
-				SelfSponsorshipAlgoV1Block.orphanAccountPenalties(this);
-			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
-				SelfSponsorshipAlgoV2Block.orphanAccountPenalties(this);
-			}
-
-			if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
-				SelfSponsorshipAlgoV3Block.orphanAccountPenalties(this);
+			if (!isTestnet) {
+				if (this.blockData.getHeight() == 212937) {
+					// Revert fix for block 212937
+					Block212937.orphanFix(this);
+				} else if (this.blockData.getHeight() == 1333492) {
+					// Revert fix for block 1333492
+					Block1333492.orphanFix(this);
+				} else if (InvalidBalanceBlocks.isAffectedBlock(this.blockData.getHeight())) {
+					// Revert fix for affected balance blocks
+					InvalidBalanceBlocks.orphanFix(this);
+				} else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV1Height()) {
+					SelfSponsorshipAlgoV1Block.orphanAccountPenalties(this);
+				} else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV2Height()) {
+					SelfSponsorshipAlgoV2Block.orphanAccountPenalties(this);
+				} else if (this.blockData.getHeight() == BlockChain.getInstance().getSelfSponsorshipAlgoV3Height()) {
+					SelfSponsorshipAlgoV3Block.orphanAccountPenalties(this);
+				}
 			}
 			
 			// Account levels and block rewards are only processed/orphaned on block reward distribution blocks
