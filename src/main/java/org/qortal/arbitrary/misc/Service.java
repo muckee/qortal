@@ -167,7 +167,7 @@ public enum Service {
     COMMENT(1800, true, 500*1024L, true, false, null),
     CHAIN_COMMENT(1810, true, 239L, true, false, null),
     MAIL(1900, true, 1024*1024L, true, false, null),
-    MAIL_PRIVATE(1901, true, 1024*1024L, true, true, null),
+    MAIL_PRIVATE(1901, true, 5*1024*1024L, true, true, null),
     MESSAGE(1910, true, 1024*1024L, true, false, null),
     MESSAGE_PRIVATE(1911, true, 1024*1024L, true, true, null);
 

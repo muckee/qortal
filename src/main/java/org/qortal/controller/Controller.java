@@ -33,6 +33,7 @@ import org.qortal.gui.Gui;
 import org.qortal.gui.SysTray;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerAddress;
 import org.qortal.network.message.*;
 import org.qortal.repository.*;
 import org.qortal.repository.hsqldb.HSQLDBRepository;
@@ -50,8 +51,11 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.SecureRandom;
 import java.security.Security;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -603,6 +607,73 @@ public class Controller extends Thread {
 				}
 			}
 		}, 10*60*1000, 10*60*1000);
+
+		// Check if we need sync from genesis and start syncing
+		Timer syncFromGenesis = new Timer();
+		syncFromGenesis.schedule(new TimerTask() {
+			@Override
+			public void run() {
+				LOGGER.debug("Start sync from genesis check.");
+				boolean canBootstrap = Settings.getInstance().getBootstrap();
+				boolean needsArchiveRebuild = false;
+				int checkHeight = 0;
+				Repository repository = null;
+
+				try {
+					repository = RepositoryManager.getRepository();
+					needsArchiveRebuild = (repository.getBlockArchiveRepository().fromHeight(2) == null);
+					checkHeight = repository.getBlockRepository().getBlockchainHeight();
+				} catch (DataException e) {
+					throw new RuntimeException(e);
+				}
+
+				if (canBootstrap || !needsArchiveRebuild || checkHeight > 3) {
+					LOGGER.debug("Bootstrapping is enabled or we have more than 2 blocks, cancel sync from genesis check.");
+					syncFromGenesis.cancel();
+					return;
+				}
+
+				if (needsArchiveRebuild && !canBootstrap) {
+					LOGGER.info("Start syncing from genesis!");
+					List<Peer> seeds = new ArrayList<>(Network.getInstance().getImmutableHandshakedPeers());
+
+					// Check if have a qualified peer to sync
+					if (seeds.isEmpty()) {
+						LOGGER.info("No connected peers, will try again later.");
+						return;
+					}
+
+					int index = new SecureRandom().nextInt(seeds.size());
+					String syncNode = String.valueOf(seeds.get(index));
+					PeerAddress peerAddress = PeerAddress.fromString(syncNode);
+					InetSocketAddress resolvedAddress = null;
+
+					try {
+						resolvedAddress = peerAddress.toSocketAddress();
+					} catch (UnknownHostException e) {
+						throw new RuntimeException(e);
+					}
+
+					InetSocketAddress finalResolvedAddress = resolvedAddress;
+					Peer targetPeer = seeds.stream().filter(peer -> peer.getResolvedAddress().equals(finalResolvedAddress)).findFirst().orElse(null);
+					Synchronizer.SynchronizationResult syncResult;
+
+					try {
+						do {
+							try {
+								syncResult = Synchronizer.getInstance().actuallySynchronize(targetPeer, true);
+							} catch (InterruptedException e) {
+								throw new RuntimeException(e);
+							}
+						}
+						while (syncResult == Synchronizer.SynchronizationResult.OK);
+					} finally {
+						// We are syncing now, so can cancel the check
+						syncFromGenesis.cancel();
+					}
+				}
+			}
+		}, 3*60*1000, 3*60*1000);
 	}
 
 	/** Called by AdvancedInstaller's launch EXE in single-instance mode, when an instance is already running. */

@@ -1,5 +1,11 @@
 {
+  "listenPort": 62392,
+  "apiPort": 62391,
+  "bindAddress": "0.0.0.0",
   "isTestNet": true,
+  "singleNodeTestnet": false,
+  "minPeerVersion": "4.5.2",
+  "allowConnectionsWithOlderPeerVersions": false,
   "bitcoinNet": "TEST3",
   "litecoinNet": "TEST3",
   "dogecoinNet": "TEST3",
@@ -13,6 +19,17 @@
   "bootstrap": false,
   "maxPeerConnectionTime": 999999999,
   "localAuthBypassEnabled": true,
-  "singleNodeTestnet": false,
-  "recoveryModeTimeout": 0
+  "recoveryModeTimeout": 0,
+  "uiLocalServers": [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0/0",
+    "::/0"
+  ],
+  "apiWhitelist": [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0/0",
+    "::/0"
+  ]
 }
