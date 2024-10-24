@@ -109,11 +109,11 @@ public class AtStatesPruner implements Runnable {
 						}
 					}
 				} catch (Exception e) {
-					LOGGER.warn("Pruning stopped working. Trying again. Report this error immediately to the developers.", e);
+					LOGGER.warn("AT States Pruning stopped working. Trying again. Report this error immediately to the developers.", e);
 				}
 			}
 		} catch (Exception e) {
-			LOGGER.error("Pruning is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
+			LOGGER.error("AT States Pruning is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
 		}
 	}
 
