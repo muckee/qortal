@@ -156,10 +156,9 @@ public class BlockArchiveWriter {
             if (Controller.isStopping()) {
                 return BlockArchiveWriteResult.STOPPING;
             }
-            if (Synchronizer.getInstance().isSynchronizing()) {
-                Thread.sleep(1000L);
-                continue;
-            }
+
+            // pause, since this can be a long process and other processes need to execute
+            Thread.sleep(Settings.getInstance().getArchivingPause());
 
             int currentHeight = startHeight + i;
             if (currentHeight > endHeight) {

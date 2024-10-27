@@ -398,6 +398,47 @@ public class Settings {
 	 */
 	private int dbCacheFrequency = 120;
 
+	/**
+	 * Network Thread Priority
+	 *
+	 * The Network Thread Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the threads used for network peer connections. This is the
+	 * main thread connecting to a peer in the network.
+	 */
+    private int networkThreadPriority = 5;
+
+	/**
+	 * The Handshake Thread Priority
+	 *
+	 * The thread priority (1 i slowest, 10 is highest) of the threads used for peer handshake messaging. This is a
+	 * secondary thread to exchange status messaging to a peer in the network.
+	 */
+	private int handshakeThreadPriority = 5;
+
+	/**
+	 * Pruning Thread Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the threads used for database pruning and trimming.
+	 */
+	private int pruningThreadPriority = 1;
+
+	/**
+	 * Sychronizer Thread Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the threads used for synchronizing with the others peers.
+	 */
+	private int synchronizerThreadPriority = 10;
+
+	/**
+	 * Archiving Pause
+	 *
+	 * In milliseconds
+	 *
+	 * The pause in between archiving blocks to allow other processes to execute.
+	 */
+	private long archivingPause = 3000;
+
 	// Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
@@ -1162,5 +1203,25 @@ public class Settings {
 
 	public int getDbCacheFrequency() {
 		return dbCacheFrequency;
+	}
+
+	public int getNetworkThreadPriority() {
+		return networkThreadPriority;
+	}
+
+	public int getHandshakeThreadPriority() {
+		return handshakeThreadPriority;
+	}
+
+	public int getPruningThreadPriority() {
+		return pruningThreadPriority;
+	}
+
+	public int getSynchronizerThreadPriority() {
+		return synchronizerThreadPriority;
+	}
+
+	public long getArchivingPause() {
+		return archivingPause;
 	}
 }
