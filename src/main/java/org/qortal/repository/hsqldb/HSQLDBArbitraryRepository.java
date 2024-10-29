@@ -770,9 +770,6 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 				LOGGER.info("Db Enabled Cache has zero candidates.");
 			}
 		}
-		else {
-			LOGGER.info("Db Cache Disabled.");
-		}
 
 		StringBuilder sql = new StringBuilder(512);
 		List<Object> bindParams = new ArrayList<>();

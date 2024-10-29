@@ -76,6 +76,13 @@ public class OnlineAccountsSignaturesTrimmer implements Runnable {
 							LOGGER.info(() -> String.format("Bumping online accounts signatures base trim height to %d", finalTrimStartHeight));
 						}
 					}
+				} catch (InterruptedException e) {
+					if(Controller.isStopping()) {
+						LOGGER.info("Online Accounts Signatures Trimming Shutting Down");
+					}
+					else {
+						LOGGER.warn("Online Accounts Signatures Trimming interrupted. Trying again. Report this error immediately to the developers.", e);
+					}
 				} catch (Exception e) {
 					LOGGER.warn("Online Accounts Signatures Trimming stopped working. Trying again. Report this error immediately to the developers.", e);
 				}

@@ -153,12 +153,16 @@ public class BlockArchiveWriter {
         int i = 0;
         while (headerBytes.size() + bytes.size() < this.fileSizeTarget) {
 
+            // pause, since this can be a long process and other processes need to execute
+            Thread.sleep(Settings.getInstance().getArchivingPause());
+
             if (Controller.isStopping()) {
                 return BlockArchiveWriteResult.STOPPING;
             }
 
-            // pause, since this can be a long process and other processes need to execute
-            Thread.sleep(Settings.getInstance().getArchivingPause());
+            // wait until the Synchronizer stops
+            if( Synchronizer.getInstance().isSynchronizing() )
+                continue;
 
             int currentHeight = startHeight + i;
             if (currentHeight > endHeight) {

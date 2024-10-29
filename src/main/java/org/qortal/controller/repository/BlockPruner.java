@@ -110,6 +110,13 @@ public class BlockPruner implements Runnable {
 							Thread.sleep(10*60*1000L);
 						}
 					}
+				} catch (InterruptedException e) {
+					if(Controller.isStopping()) {
+						LOGGER.info("Block Pruning Shutting Down");
+					}
+					else {
+						LOGGER.warn("Block Pruning interrupted. Trying again. Report this error immediately to the developers.", e);
+					}
 				} catch (Exception e) {
 					LOGGER.warn("Block Pruning stopped working. Trying again. Report this error immediately to the developers.", e);
 				}

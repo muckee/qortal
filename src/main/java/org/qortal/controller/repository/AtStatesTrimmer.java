@@ -80,6 +80,13 @@ public class AtStatesTrimmer implements Runnable {
 							LOGGER.info(() -> String.format("Bumping AT state base trim height to %d", finalTrimStartHeight));
 						}
 					}
+				} catch (InterruptedException e) {
+					if(Controller.isStopping()) {
+						LOGGER.info("AT States Trimming Shutting Down");
+					}
+					else {
+						LOGGER.warn("AT States Trimming interrupted. Trying again. Report this error immediately to the developers.", e);
+					}
 				} catch (Exception e) {
 					LOGGER.warn("AT States Trimming stopped working. Trying again. Report this error immediately to the developers.", e);
 				}

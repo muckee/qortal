@@ -105,6 +105,13 @@ public class BlockArchiver implements Runnable {
 					} catch (IOException | TransformationException e) {
 						LOGGER.info("Caught exception when creating block cache", e);
 					}
+				} catch (InterruptedException e) {
+					if(Controller.isStopping()) {
+						LOGGER.info("Block Archiving Shutting Down");
+					}
+					else {
+						LOGGER.warn("Block Archiving interrupted. Trying again. Report this error immediately to the developers.", e);
+					}
 				} catch (Exception e) {
 					LOGGER.warn("Block Archiving stopped working. Trying again. Report this error immediately to the developers.", e);
 				}

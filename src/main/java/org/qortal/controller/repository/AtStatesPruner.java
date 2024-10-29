@@ -108,6 +108,13 @@ public class AtStatesPruner implements Runnable {
 							Thread.sleep(5*60*1000L);
 						}
 					}
+				} catch (InterruptedException e) {
+					if(Controller.isStopping()) {
+						LOGGER.info("AT States Pruning Shutting Down");
+					}
+					else {
+						LOGGER.warn("AT States Pruning interrupted. Trying again. Report this error immediately to the developers.", e);
+					}
 				} catch (Exception e) {
 					LOGGER.warn("AT States Pruning stopped working. Trying again. Report this error immediately to the developers.", e);
 				}
