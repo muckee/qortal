@@ -20,7 +20,6 @@ public class AtStatesTrimmer implements Runnable {
 	@Override
 	public void run() {
 		Thread.currentThread().setName("AT States trimmer");
-		Thread.currentThread().setPriority(MIN_PRIORITY);
 
 		if (Settings.getInstance().isLite()) {
 			// Nothing to trim in lite mode

@@ -22,7 +22,6 @@ public class OnlineAccountsSignaturesTrimmer implements Runnable {
 
 	public void run() {
 		Thread.currentThread().setName("Online Accounts trimmer");
-		Thread.currentThread().setPriority(NORM_PRIORITY);
 
 		if (Settings.getInstance().isLite()) {
 			// Nothing to trim in lite mode

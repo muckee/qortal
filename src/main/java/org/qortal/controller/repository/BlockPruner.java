@@ -20,7 +20,6 @@ public class BlockPruner implements Runnable {
 	@Override
 	public void run() {
 		Thread.currentThread().setName("Block pruner");
-		Thread.currentThread().setPriority(NORM_PRIORITY);
 
 		if (Settings.getInstance().isLite()) {
 			// Nothing to prune in lite mode

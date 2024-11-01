@@ -20,7 +20,6 @@ public class AtStatesPruner implements Runnable {
 	@Override
 	public void run() {
 		Thread.currentThread().setName("AT States pruner");
-		Thread.currentThread().setPriority(MIN_PRIORITY);
 
 		if (Settings.getInstance().isLite()) {
 			// Nothing to prune in lite mode
