@@ -6,6 +6,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.jsse.provider.BouncyCastleJsseProvider;
 import org.qortal.api.ApiKey;
 import org.qortal.api.ApiRequest;
+import org.qortal.controller.Controller;
 import org.qortal.controller.RestartNode;
 import org.qortal.settings.Settings;
 
@@ -16,6 +17,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.Security;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import static org.qortal.controller.RestartNode.AGENTLIB_JVM_HOLDER_ARG;
@@ -56,6 +59,18 @@ public class ApplyRestart {
 		// Shutdown node using API
 		if (!shutdownNode())
 			return;
+
+		// Give some time after shutdown
+		try {
+			TimeUnit.SECONDS.sleep(10);
+		} catch (InterruptedException e) {
+			LOGGER.error("Unable to restart", e);
+		}
+
+		// Remove blockchain lock if it exist
+		ReentrantLock blockchainLock = Controller.getInstance().getBlockchainLock();
+		if (blockchainLock.isLocked())
+			blockchainLock.unlock();
 
 		// Restart node
 		restartNode(args);
@@ -150,9 +165,10 @@ public class ApplyRestart {
 
 		List<String> javaCmd;
 		if (Files.exists(exeLauncher)) {
-			javaCmd = Arrays.asList(exeLauncher.toString());
+			javaCmd = List.of(exeLauncher.toString());
 		} else {
 			javaCmd = new ArrayList<>();
+
 			// Java runtime binary itself
 			javaCmd.add(javaBinary.toString());
 

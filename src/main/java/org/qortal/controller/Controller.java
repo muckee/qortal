@@ -489,7 +489,6 @@ public class Controller extends Thread {
 			@Override
 			public void run() {
 				Thread.currentThread().setName("Shutdown hook");
-
 				Controller.getInstance().shutdown();
 			}
 		});
@@ -569,10 +568,31 @@ public class Controller extends Thread {
 		// If GUI is enabled, we're no longer starting up but actually running now
 		Gui.getInstance().notifyRunning();
 
-		// Check every 10 minutes to see if the block minter is running
-		Timer timer = new Timer();
+		// Check every 10 minutes if we have enough connected peers
+		Timer checkConnectedPeers = new Timer();
 
-		timer.schedule(new TimerTask() {
+		checkConnectedPeers.schedule(new TimerTask() {
+			@Override
+			public void run() {
+				// Get the connected peers
+				int myConnectedPeers = Network.getInstance().getImmutableHandshakedPeers().size();
+				LOGGER.debug("Node have {} connected peers", myConnectedPeers);
+				if (myConnectedPeers == 0) {
+					// Restart node if we have 0 peers
+					LOGGER.info("Node have no connected peers, restarting node");
+					try {
+						RestartNode.attemptToRestart();
+					} catch (Exception e) {
+						LOGGER.error("Unable to restart the node", e);
+					}
+				}
+			}
+		}, 10*60*1000, 10*60*1000);
+
+		// Check every 10 minutes to see if the block minter is running
+		Timer checkBlockMinter = new Timer();
+
+		checkBlockMinter.schedule(new TimerTask() {
 			@Override
 			public void run() {
 				if (blockMinter.isAlive()) {
