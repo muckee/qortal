@@ -197,21 +197,21 @@ public class Settings {
 	/** Target number of outbound connections to peers we should make. */
 	private int minOutboundPeers = 32;
 	/** Maximum number of peer connections we allow. */
-	private int maxPeers = 60;
+	private int maxPeers = 64;
 	/** Number of slots to reserve for short-lived QDN data transfers */
 	private int maxDataPeers = 5;
 	/** Maximum number of threads for network engine. */
-	private int maxNetworkThreadPoolSize = 620;
+	private int maxNetworkThreadPoolSize = 512;
 	/** Maximum number of threads for network proof-of-work compute, used during handshaking. */
-	private int networkPoWComputePoolSize = 2;
+	private int networkPoWComputePoolSize = 4;
 	/** Maximum number of retry attempts if a peer fails to respond with the requested data */
-	private int maxRetries = 2;
+	private int maxRetries = 3;
 
 	/** The number of seconds of no activity before recovery mode begins */
 	public long recoveryModeTimeout = 9999999999999L;
 
 	/** Minimum peer version number required in order to sync with them */
-	private String minPeerVersion = "4.5.2";
+	private String minPeerVersion = "4.6.0";
 	/** Whether to allow connections with peers below minPeerVersion
 	 * If true, we won't sync with them but they can still sync with us, and will show in the peers list
 	 * If false, sync will be blocked both ways, and they will not appear in the peers list */

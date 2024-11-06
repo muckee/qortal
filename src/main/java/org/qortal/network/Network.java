@@ -53,7 +53,7 @@ public class Network {
     /**
      * How long between informational broadcasts to all connected peers, in milliseconds.
      */
-    private static final long BROADCAST_INTERVAL = 60 * 1000L; // ms
+    private static final long BROADCAST_INTERVAL = 30 * 1000L; // ms
     /**
      * Maximum time since last successful connection for peer info to be propagated, in milliseconds.
      */
@@ -83,12 +83,12 @@ public class Network {
             "node6.qortalnodes.live", "node7.qortalnodes.live", "node8.qortalnodes.live"
     };
 
-    private static final long NETWORK_EPC_KEEPALIVE = 10L; // seconds
+    private static final long NETWORK_EPC_KEEPALIVE = 5L; // seconds
 
     public static final int MAX_SIGNATURES_PER_REPLY = 500;
     public static final int MAX_BLOCK_SUMMARIES_PER_REPLY = 500;
 
-    private static final long DISCONNECTION_CHECK_INTERVAL = 10 * 1000L; // milliseconds
+    private static final long DISCONNECTION_CHECK_INTERVAL = 20 * 1000L; // milliseconds
 
     private static final int BROADCAST_CHAIN_TIP_DEPTH = 7; // Just enough to fill a SINGLE TCP packet (~1440 bytes)
 
