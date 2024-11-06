@@ -52,29 +52,9 @@ public class BlockArchiver implements Runnable {
 
 					Thread.sleep(Settings.getInstance().getArchiveInterval());
 
-<<<<<<< HEAD
 					BlockData chainTip = Controller.getInstance().getChainTip();
 					if (chainTip == null || NTP.getTime() == null) {
 						continue;
-=======
-							// We've reached the limit of the blocks we can archive
-							// Sleep for a while to allow more to become available
-						case NOT_ENOUGH_BLOCKS:
-							// We didn't reach our file size target, so that must mean that we don't have enough blocks
-							// yet or something went wrong. Sleep for a while and then try again.
-							repository.discardChanges();
-							Thread.sleep(2 * 60 * 60 * 1000L); // 2 hour around 100 blocks
-							break;
-
-						case BLOCK_NOT_FOUND:
-							// We tried to archive a block that didn't exist. This is a major failure and likely means
-							// that a bootstrap or re-sync is needed. Try again every minute until then.
-							LOGGER.info("Error: block not found when building archive. If this error persists, " +
-									"a bootstrap or re-sync may be needed.");
-							repository.discardChanges();
-							Thread.sleep(60 * 1000L); // 1 minute
-							break;
->>>>>>> alphax/master
 					}
 
 					// Don't even attempt if we're mid-sync as our repository requests will be delayed for ages
@@ -87,7 +67,6 @@ public class BlockArchiver implements Runnable {
 					if (minLatestBlockTimestamp == null || chainTip.getTimestamp() < minLatestBlockTimestamp) {
 						continue;
 					}
-
 
 					// Build cache of blocks
 					try {
@@ -111,7 +90,7 @@ public class BlockArchiver implements Runnable {
 								// We didn't reach our file size target, so that must mean that we don't have enough blocks
 								// yet or something went wrong. Sleep for a while and then try again.
 								repository.discardChanges();
-								Thread.sleep(60 * 60 * 1000L); // 1 hour
+								Thread.sleep(2 * 60 * 60 * 1000L); // 1 hour
 								break;
 
 							case BLOCK_NOT_FOUND:
@@ -120,7 +99,7 @@ public class BlockArchiver implements Runnable {
 								LOGGER.info("Error: block not found when building archive. If this error persists, " +
 										"a bootstrap or re-sync may be needed.");
 								repository.discardChanges();
-								Thread.sleep( 60 * 1000L); // 1 minute
+								Thread.sleep(60 * 1000L); // 1 minute
 								break;
 						}
 
