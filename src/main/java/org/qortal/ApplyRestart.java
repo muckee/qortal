@@ -1,5 +1,6 @@
 package org.qortal;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -10,6 +11,7 @@ import org.qortal.controller.Controller;
 import org.qortal.controller.RestartNode;
 import org.qortal.settings.Settings;
 
+import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Files;
@@ -60,27 +62,32 @@ public class ApplyRestart {
 		if (!shutdownNode())
 			return;
 
-		// Give some time after shutdown
 		try {
-			TimeUnit.SECONDS.sleep(10);
+			// Give some time for shutdown
+			TimeUnit.SECONDS.sleep(30);
+
+			// Remove blockchain lock if exist
+			ReentrantLock blockchainLock = Controller.getInstance().getBlockchainLock();
+			if (blockchainLock.isLocked())
+				blockchainLock.unlock();
+
+			// Remove blockchain lock file if exist
+			TimeUnit.SECONDS.sleep(60);
+			deleteLock();
+
+			// Restart node
+			TimeUnit.SECONDS.sleep(30);
+			restartNode(args);
+
+			LOGGER.info("Restarting...");
 		} catch (InterruptedException e) {
 			LOGGER.error("Unable to restart", e);
 		}
-
-		// Remove blockchain lock if it exist
-		ReentrantLock blockchainLock = Controller.getInstance().getBlockchainLock();
-		if (blockchainLock.isLocked())
-			blockchainLock.unlock();
-
-		// Restart node
-		restartNode(args);
-
-		LOGGER.info("Restarting...");
 	}
 
 	private static boolean shutdownNode() {
 		String baseUri = "http://localhost:" + Settings.getInstance().getApiPort() + "/";
-		LOGGER.info(() -> String.format("Shutting down node using API via %s", baseUri));
+		LOGGER.debug(() -> String.format("Shutting down node using API via %s", baseUri));
 
 		// The /admin/stop endpoint requires an API key, which may or may not be already generated
 		boolean apiKeyNewlyGenerated = false;
@@ -149,7 +156,22 @@ public class ApplyRestart {
 			apiKey.delete();
 
 		} catch (IOException e) {
-			LOGGER.info("Error loading or deleting API key: {}", e.getMessage());
+			LOGGER.error("Error loading or deleting API key: {}", e.getMessage());
+		}
+	}
+
+	private static void deleteLock() {
+		// Get the repository path from settings
+		String repositoryPath = Settings.getInstance().getRepositoryPath();
+		LOGGER.debug(String.format("Repository path is: %s", repositoryPath));
+
+		try {
+			Path root = Paths.get(repositoryPath);
+			File lockFile = new File(root.resolve("blockchain.lck").toUri());
+			LOGGER.debug("Lockfile is: {}", lockFile);
+			FileUtils.forceDelete(FileUtils.getFile(lockFile));
+		} catch (IOException e) {
+			LOGGER.error("Error deleting blockchain lock file: {}", e.getMessage());
 		}
 	}
 
