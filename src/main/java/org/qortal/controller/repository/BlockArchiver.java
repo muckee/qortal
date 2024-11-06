@@ -21,7 +21,7 @@ public class BlockArchiver implements Runnable {
 
 	private static final Logger LOGGER = LogManager.getLogger(BlockArchiver.class);
 
-	private static final long INITIAL_SLEEP_PERIOD = 5 * 60 * 1000L + 1234L; // ms
+	private static final long INITIAL_SLEEP_PERIOD = 15 * 60 * 1000L; // ms
 
 	public void run() {
 		Thread.currentThread().setName("Block archiver");
@@ -91,7 +91,7 @@ public class BlockArchiver implements Runnable {
 							// We didn't reach our file size target, so that must mean that we don't have enough blocks
 							// yet or something went wrong. Sleep for a while and then try again.
 							repository.discardChanges();
-							Thread.sleep(60 * 60 * 1000L); // 1 hour
+							Thread.sleep(2 * 60 * 60 * 1000L); // 2 hour around 100 blocks
 							break;
 
 						case BLOCK_NOT_FOUND:
@@ -100,7 +100,7 @@ public class BlockArchiver implements Runnable {
 							LOGGER.info("Error: block not found when building archive. If this error persists, " +
 									"a bootstrap or re-sync may be needed.");
 							repository.discardChanges();
-							Thread.sleep( 60 * 1000L); // 1 minute
+							Thread.sleep(60 * 1000L); // 1 minute
 							break;
 					}
 
