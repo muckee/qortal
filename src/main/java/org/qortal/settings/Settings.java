@@ -114,6 +114,8 @@ public class Settings {
 
 	/** Whether we check, fetch and install auto-updates */
 	private boolean autoUpdateEnabled = true;
+	/** Whether we check, restart node without connected peers */
+	private boolean autoRestartEnabled = false;
 	/** How long between repository backups (ms), or 0 if disabled. */
 	private long repositoryBackupInterval = 0; // ms
 	/** Whether to show a notification when we backup repository. */
@@ -971,6 +973,10 @@ public class Settings {
 
 	public boolean isAutoUpdateEnabled() {
 		return this.autoUpdateEnabled;
+	}
+
+	public boolean isAutoRestartEnabled() {
+		return this.autoRestartEnabled;
 	}
 
 	public String[] getAutoUpdateRepos() {
