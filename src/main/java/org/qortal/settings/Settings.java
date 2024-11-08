@@ -114,6 +114,8 @@ public class Settings {
 
 	/** Whether we check, fetch and install auto-updates */
 	private boolean autoUpdateEnabled = true;
+	/** Whether we check, restart node without connected peers */
+	private boolean autoRestartEnabled = false;
 	/** How long between repository backups (ms), or 0 if disabled. */
 	private long repositoryBackupInterval = 0; // ms
 	/** Whether to show a notification when we backup repository. */
@@ -406,7 +408,7 @@ public class Settings {
 	 * The thread priority (1 is lowest, 10 is highest) of the threads used for network peer connections. This is the
 	 * main thread connecting to a peer in the network.
 	 */
-    private int networkThreadPriority = 5;
+    private int networkThreadPriority = 7;
 
 	/**
 	 * The Handshake Thread Priority
@@ -414,14 +416,14 @@ public class Settings {
 	 * The thread priority (1 i slowest, 10 is highest) of the threads used for peer handshake messaging. This is a
 	 * secondary thread to exchange status messaging to a peer in the network.
 	 */
-	private int handshakeThreadPriority = 5;
+	private int handshakeThreadPriority = 7;
 
 	/**
 	 * Pruning Thread Priority
 	 *
 	 * The thread priority (1 is lowest, 10 is highest) of the threads used for database pruning and trimming.
 	 */
-	private int pruningThreadPriority = 1;
+	private int pruningThreadPriority = 2;
 
 	/**
 	 * Sychronizer Thread Priority
@@ -971,6 +973,10 @@ public class Settings {
 
 	public boolean isAutoUpdateEnabled() {
 		return this.autoUpdateEnabled;
+	}
+
+	public boolean isAutoRestartEnabled() {
+		return this.autoRestartEnabled;
 	}
 
 	public String[] getAutoUpdateRepos() {

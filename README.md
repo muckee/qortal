@@ -43,4 +43,3 @@ https://qortal.dev - secondary and development focused website with links to man
 https://wiki.qortal.org - community built and managed wiki with detailed information regarding the project
 
 links to telegram and discord communities are at the top of https://qortal.org as well. 
-
