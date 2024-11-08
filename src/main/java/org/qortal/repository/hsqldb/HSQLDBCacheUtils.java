@@ -12,6 +12,7 @@ import org.qortal.data.arbitrary.ArbitraryResourceStatus;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.SQLNonTransientConnectionException;
 import java.sql.Statement;
 import java.time.format.DateTimeFormatter;
 import java.util.AbstractMap;
@@ -355,9 +356,7 @@ public class HSQLDBCacheUtils {
      *
      * @return the data cache
      */
-    public static ArbitraryResourceCache startCaching(int priorityRequested, int frequency, HSQLDBRepository respository) {
-
-        final ArbitraryResourceCache cache = ArbitraryResourceCache.getInstance();
+    public static void startCaching(int priorityRequested, int frequency, HSQLDBRepository respository) {
 
         // ensure priority is in between 1-10
         final int priority = Math.max(0, Math.min(10, priorityRequested));
@@ -388,8 +387,6 @@ public class HSQLDBCacheUtils {
 
         // delay 1 second
         timer.scheduleAtFixedRate(task, 1000, frequency * 1000);
-
-        return cache;
     }
 
     /**
@@ -417,6 +414,9 @@ public class HSQLDBCacheUtils {
             }
 
             fillNamepMap(cache.getLevelByName(), repository);
+        }
+        catch (SQLNonTransientConnectionException e ) {
+            LOGGER.warn("Connection problems. Retry later.");
         }
         catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
