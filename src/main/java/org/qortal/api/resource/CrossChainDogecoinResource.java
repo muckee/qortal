@@ -502,10 +502,10 @@ public class CrossChainDogecoinResource {
 	}
 
 	@GET
-	@Path("/feerequired")
+	@Path("/feeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking DOGE to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Returns Dogecoin fee per Kb.",
+			description = "Returns Dogecoin fee per Kb.",
 			responses = {
 					@ApiResponse(
 							content = @Content(
@@ -516,17 +516,17 @@ public class CrossChainDogecoinResource {
 					)
 			}
 	)
-	public String getDogecoinFeeRequired() {
+	public String getDogecoinFeeCeiling() {
 		Dogecoin dogecoin = Dogecoin.getInstance();
 
-		return String.valueOf(dogecoin.getFeeRequired());
+		return String.valueOf(dogecoin.getFeeCeiling());
 	}
 
 	@POST
-	@Path("/updatefeerequired")
+	@Path("/updatefeeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking DOGE to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Sets Dogecoin fee ceiling.",
+			description = "Sets Dogecoin fee ceiling.",
 			requestBody = @RequestBody(
 					required = true,
 					content = @Content(
@@ -545,13 +545,13 @@ public class CrossChainDogecoinResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_PRIVATE_KEY, ApiError.INVALID_CRITERIA})
-	public String setDogecoinFeeRequired(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
+	public String setDogecoinFeeCeiling(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
 		Security.checkApiCallAllowed(request);
 
 		Dogecoin dogecoin = Dogecoin.getInstance();
 
 		try {
-			return CrossChainUtils.setFeeRequired(dogecoin, fee);
+			return CrossChainUtils.setFeeCeiling(dogecoin, fee);
 		}
 		catch (IllegalArgumentException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
