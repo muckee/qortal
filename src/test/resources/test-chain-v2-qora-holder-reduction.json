@@ -30,9 +30,6 @@
 	"blockRewardBatchStartHeight": 999999000,
 	"blockRewardBatchSize": 10,
 	"blockRewardBatchAccountsBlockCount": 3,
-	"mintingGroupIds": [
-		{ "height": 0, "ids": [ 1 ]}
-	],
 	"rewardsByHeight": [
 		{ "height": 1, "reward": 100 },
 		{ "height": 11, "reward": 10 },
@@ -89,7 +86,7 @@
 		"transactionV6Timestamp": 0,
 		"disableReferenceTimestamp": 9999999999999,
 		"aggregateSignatureTimestamp": 0,
-		"increaseOnlineAccountsDifficultyTimestamp": 9999999999990,
+		"increaseOnlineAccountsDifficultyTimestamp": 9999999999999,
 		"onlineAccountMinterLevelValidationHeight": 0,
 		"selfSponsorshipAlgoV1Height": 999999999,
 		"selfSponsorshipAlgoV2Height": 999999999,
@@ -99,19 +96,7 @@
 		"arbitraryOptionalFeeTimestamp": 0,
 		"unconfirmableRewardSharesHeight": 99999999,
 		"disableTransferPrivsTimestamp": 9999999999500,
-		"enableTransferPrivsTimestamp": 9999999999950,
-		"cancelSellNameValidationTimestamp": 9999999999999,
-		"disableRewardshareHeight": 9999999999990,
-		"enableRewardshareHeight": 9999999999999,
-		"onlyMintWithNameHeight": 9999999999990,
-		"groupMemberCheckHeight": 9999999999999,
-		"decreaseOnlineAccountsDifficultyTimestamp": 9999999999999,
-		"removeOnlyMintWithNameHeight": 9999999999999,
-		"fixBatchRewardHeight": 9999999999999,
-		"adminsReplaceFoundersHeight": 9999999999999,
-		"ignoreLevelForRewardShareHeight": 9999999999999,
-		"nullGroupMembershipHeight": 20,
-		"adminQueryFixHeight": 9999999999999
+		"enableTransferPrivsTimestamp": 9999999999950
 	},
 	"genesisInfo": {
 		"version": 4,

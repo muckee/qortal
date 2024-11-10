@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: qortal
+spec:
+  serviceName: "qortal"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qortal
+  template:
+    metadata:
+      labels:
+        app: qortal
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: "hostname_goes_here"
+      securityContext:
+        enabled: true
+        runAsUser: 1000
+        runAsGroup: 100
+        fsGroup: 100
+        allowPrivilegeEscalation: false
+      containers:
+        - name: qortal
+          image: quay.io/muck/qortal-maven:latest
+          ports:
+            - containerPort: 12391  # Admin port
+            - containerPort: 12392  # Another service port
+          volumeMounts:
+            - name: qortal-data-pvc
+              mountPath: /qortal
+          env:
+            - name: JAVA_OPTS  # Optional: Customize Java options if needed
+              value: "-Djava.net.preferIPv4Stack=false"
+          livenessProbe:
+            httpGet:
+              path: /admin/info
+              port: 12391
+            initialDelaySeconds: 300
+            periodSeconds: 60
+  volumeClaimTemplates:
+    - metadata:
+        name: qortal-data-pvc # This is our TEMPLATE NAME!
+      spec:
+        accessModes:
+          - ReadWriteMany
+        storageClassName: [STORAGE_CLASS_NAME_GOES_HERE]
+        resources:
+          requests:
+            storage: 80Gi

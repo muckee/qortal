@@ -16,7 +16,6 @@ import org.qortal.utils.Unicode;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 
 public class BuyNameTransaction extends Transaction {
 
@@ -49,15 +48,6 @@ public class BuyNameTransaction extends Transaction {
 
 	@Override
 	public ValidationResult isValid() throws DataException {
-		Optional<String> buyerPrimaryName = this.getBuyer().getPrimaryName();
-		if( buyerPrimaryName.isPresent()  ) {
-
-			NameData nameData = repository.getNameRepository().fromName(buyerPrimaryName.get());
-			if (nameData.isForSale()) {
-				return ValidationResult.NOT_SUPPORTED;
-			}
-		}
-
 		String name = this.buyNameTransactionData.getName();
 
 		// Check seller address is valid
@@ -89,7 +79,7 @@ public class BuyNameTransaction extends Transaction {
 			return ValidationResult.BUYER_ALREADY_OWNER;
 
 		// If accounts are only allowed one registered name then check for this
-		if (BlockChain.getInstance().oneNamePerAccount(this.repository.getBlockRepository().getBlockchainHeight())
+		if (BlockChain.getInstance().oneNamePerAccount()
 				&& !this.repository.getNameRepository().getNamesByOwner(buyer.getAddress()).isEmpty())
 			return ValidationResult.MULTIPLE_NAMES_FORBIDDEN;
 
@@ -102,7 +92,7 @@ public class BuyNameTransaction extends Transaction {
 			return ValidationResult.INVALID_AMOUNT;
 
 		// Check buyer has enough funds
-		if (buyer.getConfirmedBalance(Asset.QORT) < this.buyNameTransactionData.getFee() + this.buyNameTransactionData.getAmount())
+		if (buyer.getConfirmedBalance(Asset.QORT) < this.buyNameTransactionData.getFee())
 			return ValidationResult.NO_BALANCE;
 
 		return ValidationResult.OK;
@@ -138,4 +128,5 @@ public class BuyNameTransaction extends Transaction {
 		// Save this transaction, with previous "name reference"
 		this.repository.getTransactionRepository().save(this.buyNameTransactionData);
 	}
+
 }

@@ -31,5 +31,3 @@
 /data*
 /src/test/resources/arbitrary/*/.qortal/cache
 apikey.txt
-/.env
-/.m2-local
