@@ -4,7 +4,6 @@ import org.qortal.controller.Controller;
 import org.qortal.controller.OnlineAccountsManager;
 import org.qortal.controller.Synchronizer;
 import org.qortal.network.Network;
-import org.qortal.network.NetworkData;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -20,8 +19,6 @@ public class NodeStatus {
 
 	public final int numberOfConnections;
 
-	public final int numberOfDataConnections;
-
 	public final int height;
 
 	public NodeStatus() {
@@ -31,8 +28,6 @@ public class NodeStatus {
 		this.isSynchronizing = Synchronizer.getInstance().isSynchronizing();
 
 		this.numberOfConnections = Network.getInstance().getImmutableHandshakedPeers().size();
-
-		this.numberOfDataConnections = NetworkData.getInstance().getImmutableHandshakedPeers().size();
 
 		this.height = Controller.getInstance().getChainHeight();
 	}

@@ -2,7 +2,6 @@ package org.qortal.crosschain;
 
 import org.qortal.crypto.TrustlessSSLSocketFactory;
 
-import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import java.io.IOException;
 import java.net.Socket;
@@ -19,7 +18,6 @@ public class ElectrumServer {
     private Socket socket;
     private Scanner scanner;
     private int nextId = 1;
-    private String clientName;
 
     private ChainableServerConnectionRecorder recorder;
 
@@ -40,16 +38,11 @@ public class ElectrumServer {
 
         this.socket = new Socket();
         this.socket.connect(endpoint, timeout);
-        this.socket.setSoTimeout(timeout);
         this.socket.setTcpNoDelay(true);
 
         if (this.server.getConnectionType() == ElectrumX.Server.ConnectionType.SSL) {
             SSLSocketFactory factory = TrustlessSSLSocketFactory.getSocketFactory();
             this.socket = factory.createSocket(this.socket, server.getHostName(), server.getPort(), true);
-            this.socket.setSoTimeout(timeout);
-            this.socket.setTcpNoDelay(true);
-            this.socket.getOutputStream().flush();
-            ((SSLSocket) this.socket).startHandshake();
         }
 
         this.scanner = new Scanner(this.socket.getInputStream());
@@ -64,14 +57,6 @@ public class ElectrumServer {
 
     public int incrementNextId() {
         return nextId++;
-    }
-
-    public String getClientName() {
-        return this.clientName;
-    }
-
-    public void setClientName(String clientName) {
-        this.clientName = clientName;
     }
 
     public String write(byte[] bytes, String id) throws IOException {
