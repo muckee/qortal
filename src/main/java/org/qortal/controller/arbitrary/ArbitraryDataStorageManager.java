@@ -47,15 +47,15 @@ public class ArbitraryDataStorageManager extends Thread {
 
     private static final long DIRECTORY_SIZE_CHECK_INTERVAL = 10 * 60 * 1000L; // 10 minutes
 
-    /** Treat storage as full at 80% usage, to reduce risk of going over the limit.
+    /** Treat storage as full at 90% usage, to reduce risk of going over the limit.
      * This is necessary because we don't calculate total storage values before every write.
      * It also helps avoid a fetch/delete loop, as we will stop fetching before the hard limit.
      * This must be lower than DELETION_THRESHOLD. */
-    private static final double STORAGE_FULL_THRESHOLD = 0.8f; // 80%
+    private static final double STORAGE_FULL_THRESHOLD = 0.90f; // 90%
 
-    /** Start deleting files once we reach 90% usage.
+    /** Start deleting files once we reach 98% usage.
      * This must be higher than STORAGE_FULL_THRESHOLD in order to avoid a fetch/delete loop. */
-    public static final double DELETION_THRESHOLD = 0.9f; // 90%
+    public static final double DELETION_THRESHOLD = 0.98f; // 98%
 
     private static final long PER_NAME_STORAGE_MULTIPLIER = 4L;
 
@@ -155,24 +155,31 @@ public class ArbitraryDataStorageManager extends Thread {
      * @param arbitraryTransactionData - the transaction
      * @return boolean - whether to prefetch or not
      */
-    public ArbitraryDataExamination shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
+    public boolean shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
         String name = arbitraryTransactionData.getName();
 
         // Only fetch data associated with hashes, as we already have RAW_DATA
         if (arbitraryTransactionData.getDataType() != ArbitraryTransactionData.DataType.DATA_HASH) {
-            return new ArbitraryDataExamination(false, "Only fetch data associated with hashes");
+            return false;
         }
 
         // Don't fetch anything more if we're (nearly) out of space
         // Make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
         // avoid a fetch/delete loop
         if (!this.isStorageSpaceAvailable(STORAGE_FULL_THRESHOLD)) {
-            return new ArbitraryDataExamination(false,"Don't fetch anything more if we're (nearly) out of space");
+            return false;
+        }
+
+        // Don't fetch anything if we're (nearly) out of space for this name
+        // Again, make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
+        // avoid a fetch/delete loop
+        if (!this.isStorageSpaceAvailableForName(repository, arbitraryTransactionData.getName(), STORAGE_FULL_THRESHOLD)) {
+            return false;
         }
 
         // Don't store data unless it's an allowed type (public/private)
         if (!this.isDataTypeAllowed(arbitraryTransactionData)) {
-            return new ArbitraryDataExamination(false, "Don't store data unless it's an allowed type (public/private)");
+            return false;
         }
 
         // Handle transactions without names differently
@@ -182,21 +189,21 @@ public class ArbitraryDataStorageManager extends Thread {
 
         // Never fetch data from blocked names, even if they are followed
         if (ListUtils.isNameBlocked(name)) {
-            return new ArbitraryDataExamination(false, "blocked name");
+            return false;
         }
 
         switch (Settings.getInstance().getStoragePolicy()) {
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
-                return new ArbitraryDataExamination(ListUtils.isFollowingName(name), Settings.getInstance().getStoragePolicy().name());
+                return ListUtils.isFollowingName(name);
                 
             case ALL:
-                return new ArbitraryDataExamination(true, Settings.getInstance().getStoragePolicy().name());
+                return true;
 
             case NONE:
             case VIEWED:
             default:
-                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
+                return false;
         }
     }
 
@@ -207,17 +214,17 @@ public class ArbitraryDataStorageManager extends Thread {
      *
      * @return boolean - whether the storage policy allows for unnamed data
      */
-    private ArbitraryDataExamination shouldPreFetchDataWithoutName() {
+    private boolean shouldPreFetchDataWithoutName() {
         switch (Settings.getInstance().getStoragePolicy()) {
             case ALL:
-                return new ArbitraryDataExamination(true, "Fetching all data");
+                return true;
 
             case NONE:
             case VIEWED:
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
             default:
-                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
+                return false;
         }
     }
 
@@ -474,6 +481,51 @@ public class ArbitraryDataStorageManager extends Thread {
         if (this.totalDirectorySize >= maxStorageCapacity) {
             return false;
         }
+        return true;
+    }
+
+    public boolean isStorageSpaceAvailableForName(Repository repository, String name, double threshold) {
+        if (!this.isStorageSpaceAvailable(threshold)) {
+            // No storage space available at all, so no need to check this name
+            return false;
+        }
+
+        if (Settings.getInstance().getStoragePolicy() == StoragePolicy.ALL) {
+            // Using storage policy ALL, so don't limit anything per name
+            return true;
+        }
+
+        if (name == null) {
+            // This transaction doesn't have a name, so fall back to total space limitations
+            return true;
+        }
+
+        int followedNamesCount = ListUtils.followedNamesCount();
+        if (followedNamesCount == 0) {
+            // Not following any names, so we have space
+            return true;
+        }
+
+        long totalSizeForName = 0;
+        long maxStoragePerName = this.storageCapacityPerName(threshold);
+
+        // Fetch all hosted transactions
+        List<ArbitraryTransactionData> hostedTransactions = this.listAllHostedTransactions(repository, null, null);
+        for (ArbitraryTransactionData transactionData : hostedTransactions) {
+            String transactionName = transactionData.getName();
+            if (!Objects.equals(name, transactionName)) {
+                // Transaction relates to a different name
+                continue;
+            }
+
+            totalSizeForName += transactionData.getSize();
+        }
+
+        // Have we reached the limit for this name?
+        if (totalSizeForName > maxStoragePerName) {
+            return false;
+        }
+
         return true;
     }
 
