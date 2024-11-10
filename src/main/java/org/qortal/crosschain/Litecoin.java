@@ -14,7 +14,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class Litecoin extends Bitcoiny {
 
@@ -64,7 +63,7 @@ public class Litecoin extends Bitcoiny {
 
 			@Override
 			public long getP2shFee(Long timestamp) {
-				return this.getFeeRequired();
+				return this.getFeeCeiling();
 			}
 		},
 		TEST3 {
@@ -117,14 +116,14 @@ public class Litecoin extends Bitcoiny {
 			}
 		};
 
-		private AtomicLong feeRequired = new AtomicLong(MAINNET_FEE);
+		private long feeCeiling = MAINNET_FEE;
 
-		public long getFeeRequired() {
-			return feeRequired.get();
+		public long getFeeCeiling() {
+			return feeCeiling;
 		}
 
-		public void setFeeRequired(long feeRequired) {
-			this.feeRequired.set(feeRequired);
+		public void setFeeCeiling(long feeCeiling) {
+			this.feeCeiling = feeCeiling;
 		}
 
 		public abstract NetworkParameters getParams();
@@ -186,13 +185,13 @@ public class Litecoin extends Bitcoiny {
 	}
 
 	@Override
-	public long getFeeRequired() {
-		return this.litecoinNet.getFeeRequired();
+	public long getFeeCeiling() {
+		return this.litecoinNet.getFeeCeiling();
 	}
 
 	@Override
-	public void setFeeRequired(long fee) {
+	public void setFeeCeiling(long fee) {
 
-		this.litecoinNet.setFeeRequired( fee );
+		this.litecoinNet.setFeeCeiling( fee );
 	}
 }

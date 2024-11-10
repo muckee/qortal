@@ -83,7 +83,6 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 		return this.bitcoinjContext;
 	}
 
-	@Override
 	public String getCurrencyCode() {
 		return this.currencyCode;
 	}
@@ -840,9 +839,9 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 		} while (true);
 	}
 
-	public abstract long getFeeRequired();
+	public abstract long getFeeCeiling();
 
-	public abstract void setFeeRequired(long fee);
+	public abstract void setFeeCeiling(long fee);
 
 	// UTXOProvider support
 
