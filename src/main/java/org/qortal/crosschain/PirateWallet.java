@@ -8,7 +8,6 @@ import org.bouncycastle.util.encoders.DecoderException;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.controller.PirateChainWalletController;
 import org.qortal.crypto.Crypto;
 import org.qortal.settings.Settings;
@@ -68,8 +67,8 @@ public class PirateWallet {
             }
 
             // Pick a random server
-            ChainableServer server = PirateChain.getInstance().blockchainProvider.getCurrentServer();
-            String serverUri = String.format("https://%s:%d/", server.getHostName(), server.getPort());
+            PirateLightClient.Server server = this.getRandomServer();
+            String serverUri = String.format("https://%s:%d/", server.hostname, server.port);
 
             // Pirate library uses base64 encoding
             String entropy64 = Base64.toBase64String(this.entropyBytes);
