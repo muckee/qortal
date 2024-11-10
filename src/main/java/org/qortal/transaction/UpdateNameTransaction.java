@@ -3,7 +3,6 @@ package org.qortal.transaction;
 import com.google.common.base.Utf8;
 import org.qortal.account.Account;
 import org.qortal.asset.Asset;
-import org.qortal.block.BlockChain;
 import org.qortal.controller.repository.NamesDatabaseIntegrityCheck;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.naming.NameData;
@@ -49,12 +48,6 @@ public class UpdateNameTransaction extends Transaction {
 	@Override
 	public ValidationResult isValid() throws DataException {
 		String name = this.updateNameTransactionData.getName();
-
-		// if the account has more than one name, then they cannot update their primary name
-		if( this.repository.getNameRepository().getNamesByOwner(this.getOwner().getAddress()).size() > 1 &&
-				this.getOwner().getPrimaryName().get().equals(name) ) {
-			return ValidationResult.NOT_SUPPORTED;
-		}
 
 		// Check name size bounds
 		int nameLength = Utf8.encodedLength(name);

@@ -1,7 +1,3 @@
 {
-  "apiDocumentationEnabled": true,
-  "apiWhitelistEnabled": false,
-  "apiRestricted": false,
-  "allowConnectionsWithOlderPeerVersions": false
+  "apiDocumentationEnabled": true
 }
-

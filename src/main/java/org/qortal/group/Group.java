@@ -2,7 +2,6 @@ package org.qortal.group;
 
 import org.qortal.account.Account;
 import org.qortal.account.PublicKeyAccount;
-import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.group.*;
@@ -151,12 +150,7 @@ public class Group {
 	// Adminship
 
 	private GroupAdminData getAdmin(String admin) throws DataException {
-		if( repository.getBlockRepository().getBlockchainHeight() < BlockChain.getInstance().getAdminQueryFixHeight()) {
-			return groupRepository.getAdminFaulty(this.groupData.getGroupId(), admin);
-		}
-		else {
-			return groupRepository.getAdmin(this.groupData.getGroupId(), admin);
-		}
+		return groupRepository.getAdmin(this.groupData.getGroupId(), admin);
 	}
 
 	private boolean adminExists(String admin) throws DataException {
@@ -674,8 +668,8 @@ public class Group {
 	public void uninvite(GroupInviteTransactionData groupInviteTransactionData) throws DataException {
 		String invitee = groupInviteTransactionData.getInvitee();
 
-		// If member exists and the join request is present then they were added when invite matched join request
-		if (this.memberExists(invitee) && groupInviteTransactionData.getJoinReference() != null) {
+		// If member exists then they were added when invite matched join request
+		if (this.memberExists(invitee)) {
 			// Rebuild join request using cached reference to transaction that created join request.
 			this.rebuildJoinRequest(invitee, groupInviteTransactionData.getJoinReference());
 
@@ -706,9 +700,7 @@ public class Group {
 
 		// Save reference to invite transaction so invite can be rebuilt during orphaning.
 		GroupInviteData groupInviteData = this.getInvite(invitee);
-		if( groupInviteData != null) {
-			cancelGroupInviteTransactionData.setInviteReference(groupInviteData.getReference());
-		}
+		cancelGroupInviteTransactionData.setInviteReference(groupInviteData.getReference());
 
 		// Delete invite
 		this.deleteInvite(invitee);
@@ -717,9 +709,7 @@ public class Group {
 	public void uncancelInvite(CancelGroupInviteTransactionData cancelGroupInviteTransactionData) throws DataException {
 		// Reinstate invite
 		TransactionData transactionData = this.repository.getTransactionRepository().fromSignature(cancelGroupInviteTransactionData.getInviteReference());
-		if( transactionData != null ) {
-			this.addInvite((GroupInviteTransactionData) transactionData);
-		}
+		this.addInvite((GroupInviteTransactionData) transactionData);
 
 		// Clear cached reference to invite transaction
 		cancelGroupInviteTransactionData.setInviteReference(null);
