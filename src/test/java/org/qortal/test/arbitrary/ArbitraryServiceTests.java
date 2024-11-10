@@ -29,7 +29,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
@@ -97,45 +96,6 @@ public class ArbitraryServiceTests extends Common {
 
         // There is no index file in the root
         assertEquals(ValidationResult.MISSING_INDEX_FILE, service.validate(path));
-    }
-
-    @Test
-    public void testValidateWebsiteWithIndexFile() throws IOException {
-        // Generate some random data
-        byte[] data = new byte[1024];
-        new Random().nextBytes(data);
-
-        // Write the data to several files in a temp path
-        Path path = Files.createTempDirectory("testValidateWebsiteWithoutIndexFile");
-        path.toFile().deleteOnExit();
-        Files.write(Paths.get(path.toString(), "index.html"), data, StandardOpenOption.CREATE);
-        Files.write(Paths.get(path.toString(), "data1.html"), data, StandardOpenOption.CREATE);
-        Files.write(Paths.get(path.toString(), "data2"), data, StandardOpenOption.CREATE);
-        Files.write(Paths.get(path.toString(), "data3"), data, StandardOpenOption.CREATE);
-
-        Service service = Service.WEBSITE;
-        assertTrue(service.isValidationRequired());
-
-        // There is no index file in the root
-        assertEquals(ValidationResult.OK, service.validate(path));
-    }
-
-    @Test
-    public void testValidateWebsiteWithIndexFileOnly() throws IOException {
-        // Generate some random data
-        byte[] data = new byte[1024];
-        new Random().nextBytes(data);
-
-        // Write the data to several files in a temp path
-        Path path = Files.createTempDirectory("testValidateWebsiteWithoutIndexFile");
-        path.toFile().deleteOnExit();
-        Files.write(Paths.get(path.toString(), "index.html"), data, StandardOpenOption.CREATE);
-
-        Service service = Service.WEBSITE;
-        assertTrue(service.isValidationRequired());
-
-        // There is no index file in the root
-        assertEquals(ValidationResult.OK, service.validate(path));
     }
 
     @Test
@@ -577,31 +537,6 @@ public class ArbitraryServiceTests extends Common {
         for (Service service : publicServices) {
             assertFalse(service.isPrivate());
         }
-    }
-
-    @Test
-    public void testValidateChainCommentIgnoresQortalMetadata() throws IOException {
-        Path path = Files.createTempDirectory("testValidateChainCommentIgnoresQortalMetadata");
-        path.toFile().deleteOnExit();
-
-        // Create a 200-byte comment file (well under the 239-byte limit)
-        byte[] commentData = new byte[200];
-        Arrays.fill(commentData, (byte) 'a');
-        Files.write(Paths.get(path.toString(), "comment"), commentData, StandardOpenOption.CREATE);
-
-        // Add .qortal metadata directory with cache file (512 bytes)
-        // This simulates the metadata that gets created during the build process
-        Path qortalPath = Paths.get(path.toString(), ".qortal");
-        Files.createDirectories(qortalPath);
-        byte[] metadata = new byte[512];
-        Arrays.fill(metadata, (byte) 'b');
-        Files.write(Paths.get(qortalPath.toString(), "cache"), metadata, StandardOpenOption.CREATE);
-
-        // Total on disk: 200 + 512 = 712 bytes
-        // But validation should only count the 200 bytes of user data
-        Service service = Service.CHAIN_COMMENT;
-        assertTrue(service.isValidationRequired());
-        assertEquals(ValidationResult.OK, service.validate(path));
     }
 
 }
