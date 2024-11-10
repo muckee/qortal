@@ -37,7 +37,7 @@ public enum Service {
             if (files != null && files[0] != null) {
                 final String extension = FilenameUtils.getExtension(files[0].getName()).toLowerCase();
                 // We must allow blank file extensions because these are used by data published from a plaintext or base64-encoded string
-                final List<String> allowedExtensions = Arrays.asList("qortal", "zip", "pdf", "txt", "odt", "ods", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "");
+                final List<String> allowedExtensions = Arrays.asList("zip", "pdf", "txt", "odt", "ods", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "");
                 if (extension == null || !allowedExtensions.contains(extension)) {
                     return ValidationResult.INVALID_FILE_EXTENSION;
                 }
@@ -62,17 +62,7 @@ public enum Service {
 
             // Custom validation function to require an index HTML file in the root directory
             List<String> fileNames = ArbitraryDataRenderer.indexFiles();
-            List<String> files;
-
-            // single files are paackaged differently
-            if( path.toFile().isFile() ) {
-                files = new ArrayList<>(1);
-                files.add(path.getFileName().toString());
-            }
-            else {
-                files = new ArrayList<>(Arrays.asList(path.toFile().list()));
-            }
-
+            String[] files = path.toFile().list();
             if (files != null) {
                 for (String file : files) {
                     Path fileName = Paths.get(file).getFileName();
@@ -214,9 +204,7 @@ public enum Service {
         // Load the first 25KB of data. This only needs to be long enough to check the prefix
         // and also to allow for possible additional future validation of smaller files.
         byte[] data = FilesystemUtils.getSingleFileContents(path, 25*1024);
-        // Exclude .qortal metadata from size calculation - it's system metadata,
-        // not user content, and shouldn't count against service size limits
-        long size = FilesystemUtils.getDirectorySize(path, true);
+        long size = FilesystemUtils.getDirectorySize(path);
 
         // Validate max size if needed
         if (this.maxSize != null) {
@@ -261,10 +249,6 @@ public enum Service {
     public boolean isValidationRequired() {
         // We must always validate single file resources, to ensure they are actually a single file
         return this.requiresValidation || this.single;
-    }
-
-    public Long getMaxSize() {
-        return this.maxSize;
     }
 
     public boolean isPrivate() {

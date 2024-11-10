@@ -1,7 +1,6 @@
 package org.qortal.repository;
 
 import java.io.IOException;
-import java.sql.Connection;
 import java.util.concurrent.TimeoutException;
 
 public interface Repository extends AutoCloseable {
@@ -38,13 +37,6 @@ public interface Repository extends AutoCloseable {
 
 	public void discardChanges() throws DataException;
 
-	/**
-	 * Commit changes and immediately checkpoint to ensure durability.
-	 * Use this ONLY for critical state that must survive restarts (e.g., DatabaseInfo flags).
-	 * Regular transactions should use saveChanges() which relies on periodic checkpoints.
-	 */
-	public void saveChangesAndCheckpoint() throws DataException;
-
 	public void setSavepoint() throws DataException;
 
 	public void rollbackToSavepoint() throws DataException;
@@ -70,5 +62,4 @@ public interface Repository extends AutoCloseable {
 
 	public static void attemptRecovery(String connectionUrl, String name) throws DataException {}
 
-    public Connection getConnection();
 }
