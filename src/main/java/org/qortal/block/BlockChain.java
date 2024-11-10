@@ -71,7 +71,6 @@ public class BlockChain {
 		transactionV6Timestamp,
 		disableReferenceTimestamp,
 		increaseOnlineAccountsDifficultyTimestamp,
-		decreaseOnlineAccountsDifficultyTimestamp,
 		onlineAccountMinterLevelValidationHeight,
 		selfSponsorshipAlgoV1Height,
 		selfSponsorshipAlgoV2Height,
@@ -86,9 +85,7 @@ public class BlockChain {
 		disableRewardshareHeight,
 		enableRewardshareHeight,
 		onlyMintWithNameHeight,
-		removeOnlyMintWithNameHeight,
-		groupMemberCheckHeight,
-		fixBatchRewardHeight
+		groupMemberCheckHeight
 	}
 
 	// Custom transaction fees
@@ -219,10 +216,6 @@ public class BlockChain {
 	/** Feature trigger timestamp for ONLINE_ACCOUNTS_MODULUS time interval increase. Can't use
 	 * featureTriggers because unit tests need to set this value via Reflection. */
 	private long onlineAccountsModulusV2Timestamp;
-
-	/** Feature trigger timestamp for ONLINE_ACCOUNTS_MODULUS time interval decrease. Can't use
-	 * featureTriggers because unit tests need to set this value via Reflection. */
-	private long onlineAccountsModulusV3Timestamp;
 
 	/** Snapshot timestamp for self sponsorship algo V1 */
 	private long selfSponsorshipAlgoV1SnapshotTimestamp;
@@ -410,10 +403,6 @@ public class BlockChain {
 		return this.onlineAccountsModulusV2Timestamp;
 	}
 
-	public long getOnlineAccountsModulusV3Timestamp() {
-		return this.onlineAccountsModulusV3Timestamp;
-	}
-
 	/* Block reward batching */
 	public long getBlockRewardBatchStartHeight() {
 		return this.blockRewardBatchStartHeight;
@@ -590,10 +579,6 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.increaseOnlineAccountsDifficultyTimestamp.name()).longValue();
 	}
 
-	public long getDecreaseOnlineAccountsDifficultyTimestamp() {
-		return this.featureTriggers.get(FeatureTrigger.decreaseOnlineAccountsDifficultyTimestamp.name()).longValue();
-	}
-
 	public int getSelfSponsorshipAlgoV1Height() {
 		return this.featureTriggers.get(FeatureTrigger.selfSponsorshipAlgoV1Height.name()).intValue();
 	}
@@ -650,16 +635,8 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.onlyMintWithNameHeight.name()).intValue();
 	}
 
-	public int getRemoveOnlyMintWithNameHeight() {
-		return this.featureTriggers.get(FeatureTrigger.removeOnlyMintWithNameHeight.name()).intValue();
-	}
-
 	public int getGroupMemberCheckHeight() {
 		return this.featureTriggers.get(FeatureTrigger.groupMemberCheckHeight.name()).intValue();
-	}
-
-	public int getFixBatchRewardHeight() {
-		return this.featureTriggers.get(FeatureTrigger.fixBatchRewardHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp
