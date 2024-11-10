@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.TimeZone;
-import java.util.concurrent.locks.Lock;
 
 /**
  * Database helper for building, and executing, INSERT INTO ... ON DUPLICATE KEY UPDATE ... statements.
@@ -62,18 +61,15 @@ public class HSQLDBSaver {
 	public boolean execute(HSQLDBRepository repository) throws SQLException {
 		String sql = this.formatInsertWithPlaceholders();
 
-		Lock readLock = HSQLDBRepository.CHECKPOINT_GATE.readLock();
-		readLock.lock();
-		try {
-			repository.markTransactionStarted();
-			PreparedStatement preparedStatement = repository.prepareStatement(sql);
-			this.bindValues(preparedStatement);
+		synchronized (HSQLDBRepository.CHECKPOINT_LOCK) {
+			try {
+				PreparedStatement preparedStatement = repository.prepareStatement(sql);
+				this.bindValues(preparedStatement);
 
-			return preparedStatement.execute();
-		} catch (SQLException e) {
-			throw repository.examineException(e);
-		} finally {
-			readLock.unlock();
+				return preparedStatement.execute();
+			} catch (SQLException e) {
+				throw repository.examineException(e);
+			}
 		}
 	}
 

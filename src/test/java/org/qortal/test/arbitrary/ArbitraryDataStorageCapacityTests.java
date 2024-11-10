@@ -5,12 +5,25 @@ import org.apache.commons.lang3.reflect.FieldUtils;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.qortal.account.PrivateKeyAccount;
+import org.qortal.arbitrary.ArbitraryDataFile;
+import org.qortal.arbitrary.misc.Service;
+import org.qortal.controller.arbitrary.ArbitraryDataCleanupManager;
 import org.qortal.controller.arbitrary.ArbitraryDataManager;
 import org.qortal.controller.arbitrary.ArbitraryDataStorageManager;
+import org.qortal.data.transaction.ArbitraryTransactionData;
+import org.qortal.data.transaction.RegisterNameTransactionData;
 import org.qortal.list.ResourceListManager;
 import org.qortal.repository.DataException;
+import org.qortal.repository.Repository;
+import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
+import org.qortal.test.common.ArbitraryUtils;
 import org.qortal.test.common.Common;
+import org.qortal.test.common.TransactionUtils;
+import org.qortal.test.common.transaction.TestTransaction;
+import org.qortal.transaction.RegisterNameTransaction;
+import org.qortal.utils.Base58;
 import org.qortal.utils.ListUtils;
 import org.qortal.utils.NTP;
 
@@ -55,7 +68,7 @@ public class ArbitraryDataStorageCapacityTests extends Common {
 
         // We need to calculate the directory size because we haven't yet
         assertTrue(storageManager.shouldCalculateDirectorySize(now));
-        storageManager.getDataDirectorySize(now);
+        storageManager.calculateDirectorySize(now);
         assertTrue(storageManager.isStorageCapacityCalculated());
 
         // Storage capacity should equal the value specified in settings
@@ -86,7 +99,7 @@ public class ArbitraryDataStorageCapacityTests extends Common {
 
         // We need to calculate the total directory size because we haven't yet
         assertTrue(storageManager.shouldCalculateDirectorySize(now));
-        storageManager.getDataDirectorySize(now);
+        storageManager.calculateDirectorySize(now);
         assertTrue(storageManager.isStorageCapacityCalculated());
 
         // Storage capacity should initially equal the total
@@ -128,6 +141,56 @@ public class ArbitraryDataStorageCapacityTests extends Common {
         try {
             FileUtils.deleteDirectory(tempDataPath.toFile());
         } catch (IOException e) {
+
+        }
+    }
+
+    @Test
+    public void testDeleteRandomFilesForName() throws DataException, IOException, InterruptedException, IllegalAccessException {
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            String identifier = null; // Not used for this test
+            Service service = Service.ARBITRARY_DATA;
+            int chunkSize = 100;
+            int dataLength = 900; // Actual data length will be longer due to encryption
+
+            // Set originalCopyIndicatorFileEnabled to false, otherwise nothing will be deleted as it all originates from this node
+            FieldUtils.writeField(Settings.getInstance(), "originalCopyIndicatorFileEnabled", false, true);
+
+            // Alice hosts some data (with 10 chunks)
+            PrivateKeyAccount alice = Common.getTestAccount(repository, "alice");
+            String aliceName = "alice";
+            RegisterNameTransactionData transactionData = new RegisterNameTransactionData(TestTransaction.generateBase(alice), aliceName, "");
+            transactionData.setFee(new RegisterNameTransaction(null, null).getUnitFee(transactionData.getTimestamp()));
+            TransactionUtils.signAndMint(repository, transactionData, alice);
+            Path alicePath = ArbitraryUtils.generateRandomDataPath(dataLength);
+            ArbitraryDataFile aliceArbitraryDataFile = ArbitraryUtils.createAndMintTxn(repository, Base58.encode(alice.getPublicKey()), alicePath, aliceName, identifier, ArbitraryTransactionData.Method.PUT, service, alice, chunkSize);
+
+            // Bob hosts some data too (also with 10 chunks)
+            PrivateKeyAccount bob = Common.getTestAccount(repository, "bob");
+            String bobName = "bob";
+            transactionData = new RegisterNameTransactionData(TestTransaction.generateBase(bob), bobName, "");
+            transactionData.setFee(new RegisterNameTransaction(null, null).getUnitFee(transactionData.getTimestamp()));
+            TransactionUtils.signAndMint(repository, transactionData, bob);
+            Path bobPath = ArbitraryUtils.generateRandomDataPath(dataLength);
+            ArbitraryDataFile bobArbitraryDataFile = ArbitraryUtils.createAndMintTxn(repository, Base58.encode(bob.getPublicKey()), bobPath, bobName, identifier, ArbitraryTransactionData.Method.PUT, service, bob, chunkSize);
+
+            // All 20 chunks should exist
+            assertEquals(10, aliceArbitraryDataFile.chunkCount());
+            assertTrue(aliceArbitraryDataFile.allChunksExist());
+            assertEquals(10, bobArbitraryDataFile.chunkCount());
+            assertTrue(bobArbitraryDataFile.allChunksExist());
+
+            // Now pretend that Bob has reached his storage limit - this should delete random files
+            // Run it 10 times to remove the likelihood of the randomizer always picking Alice's files
+            for (int i=0; i<10; i++) {
+                ArbitraryDataCleanupManager.getInstance().storageLimitReachedForName(repository, bobName);
+            }
+
+            // Alice should still have all chunks
+            assertTrue(aliceArbitraryDataFile.allChunksExist());
+
+            // Bob should be missing some chunks
+            assertFalse(bobArbitraryDataFile.allChunksExist());
 
         }
     }

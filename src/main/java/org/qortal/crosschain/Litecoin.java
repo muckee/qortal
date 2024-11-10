@@ -1,12 +1,8 @@
 package org.qortal.crosschain;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Context;
-import org.bitcoinj.core.LegacyAddress;
 import org.bitcoinj.core.NetworkParameters;
-import org.bitcoinj.script.Script;
 import org.libdohj.params.LitecoinMainNetParams;
 import org.libdohj.params.LitecoinRegTestParams;
 import org.libdohj.params.LitecoinTestNet3Params;
@@ -18,7 +14,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class Litecoin extends Bitcoiny {
 
@@ -33,8 +28,6 @@ public class Litecoin extends Bitcoiny {
 	private static final long NON_MAINNET_FEE = 1000L; // enough for TESTNET3 and should be OK for REGTEST
 
 	private static final Map<ElectrumX.Server.ConnectionType, Integer> DEFAULT_ELECTRUMX_PORTS = new EnumMap<>(ElectrumX.Server.ConnectionType.class);
-	public static final LitecoinMainNetParamsP2ShOverride MAIN_NET_PARAMS_P2SH_OVERRIDE = new LitecoinMainNetParamsP2ShOverride(50);
-
 	static {
 		DEFAULT_ELECTRUMX_PORTS.put(ConnectionType.TCP, 50001);
 		DEFAULT_ELECTRUMX_PORTS.put(ConnectionType.SSL, 50002);
@@ -53,24 +46,13 @@ public class Litecoin extends Bitcoiny {
 					// Servers chosen on NO BASIS WHATSOEVER from various sources!
 					// Status verified at https://1209k.com/bitcoin-eye/ele.php?chain=ltc
 					new Server("backup.electrum-ltc.org", Server.ConnectionType.SSL, 443),
-					new Server("backup.electrum-ltc.org", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.ltc.xurious.com", Server.ConnectionType.SSL, 50002),
-					new Server("electrum.jochen-hoenicke.de", Server.ConnectionType.SSL, 50091),
+					new Server("electrum.qortal.link", Server.ConnectionType.SSL, 50002),
 					new Server("electrum-ltc.petrkr.net", Server.ConnectionType.SSL, 60002),
-					new Server("electrum.petrkr.net", Server.ConnectionType.SSL, 60002),
-					new Server("electrum-ltc.bysh.me", Server.ConnectionType.SSL, 50002),
-					new Server("fury.fiatfaucet.com", Server.ConnectionType.SSL, 50002),
-					new Server("ltc-electrum.cakewallet.com", Server.ConnectionType.SSL, 50002),
-					new Server("litecoin.stackwallet.com", Server.ConnectionType.SSL, 20063),
-					new Server("ltc.aftrek.org", Server.ConnectionType.SSL, 50002),
-					new Server("137.184.250.112", Server.ConnectionType.SSL, 50002),
-					new Server("146.190.15.65", Server.ConnectionType.SSL, 50002),
-					new Server("157.230.64.188", Server.ConnectionType.SSL, 50002),
-					new Server("209.38.53.75", Server.ConnectionType.SSL, 50002),
-					new Server("24.199.78.132", Server.ConnectionType.SSL, 50002),
-					new Server("5.78.97.174", Server.ConnectionType.SSL, 50002),
-					new Server("188.166.208.106", Server.ConnectionType.SSL, 50002),
-					new Server("5.161.216.180", Server.ConnectionType.SSL, 50002)
+					new Server("electrum1.cipig.net", Server.ConnectionType.SSL, 20063),
+					new Server("electrum2.cipig.net", Server.ConnectionType.SSL, 20063),
+					new Server("electrum3.cipig.net", Server.ConnectionType.SSL, 20063),
+					new Server("ltc.rentonrisk.com", Server.ConnectionType.SSL, 50002)
 				);
 			}
 
@@ -81,7 +63,7 @@ public class Litecoin extends Bitcoiny {
 
 			@Override
 			public long getP2shFee(Long timestamp) {
-				return this.getFeeRequired();
+				return this.getFeeCeiling();
 			}
 		},
 		TEST3 {
@@ -134,14 +116,14 @@ public class Litecoin extends Bitcoiny {
 			}
 		};
 
-		private AtomicLong feeRequired = new AtomicLong(MAINNET_FEE);
+		private long feeCeiling = MAINNET_FEE;
 
-		public long getFeeRequired() {
-			return feeRequired.get();
+		public long getFeeCeiling() {
+			return feeCeiling;
 		}
 
-		public void setFeeRequired(long feeRequired) {
-			this.feeRequired.set(feeRequired);
+		public void setFeeCeiling(long feeCeiling) {
+			this.feeCeiling = feeCeiling;
 		}
 
 		public abstract NetworkParameters getParams();
@@ -164,7 +146,7 @@ public class Litecoin extends Bitcoiny {
 	}
 
 	public static synchronized Litecoin getInstance() {
-		if (instance == null && Settings.getInstance().isWalletEnabled("LTC")) {
+		if (instance == null) {
 			LitecoinNet litecoinNet = Settings.getInstance().getLitecoinNet();
 
 			BitcoinyBlockchainProvider electrumX = new ElectrumX("Litecoin-" + litecoinNet.name(), litecoinNet.getGenesisHash(), litecoinNet.getServers(), DEFAULT_ELECTRUMX_PORTS);
@@ -203,81 +185,13 @@ public class Litecoin extends Bitcoiny {
 	}
 
 	@Override
-	public long getFeeRequired() {
-		return this.litecoinNet.getFeeRequired();
+	public long getFeeCeiling() {
+		return this.litecoinNet.getFeeCeiling();
 	}
 
 	@Override
-	public void setFeeRequired(long fee) {
+	public void setFeeCeiling(long fee) {
 
-		this.litecoinNet.setFeeRequired( fee );
-	}
-
-	/**
-	 * Is P2SH Address Current?
-	 *
-	 * Is the address conforming to the current p2sh standard, prefix 'M'?
-	 *
-	 * @param address the address
-	 *
-	 * @return true if conforms to the standard, otherwise false
-	 */
-	public boolean isCurrentP2ShAddress(String address) {
-		try {
-			Script.ScriptType addressType = Address.fromString(MAIN_NET_PARAMS_P2SH_OVERRIDE, address).getOutputScriptType();
-
-			return addressType == Script.ScriptType.P2SH;
-		} catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
-			return false;
-		}
-	}
-
-	/**
-	 * Convert Current P2SH Address
-	 *
-	 * Convert a p2sh address conforming the current standard prefix 'M', to the internal standard here
-	 * using prefix '3'
-	 *
-	 * @param address the p2sh address, starts with 'M'
-	 *
-	 * @return the conversted p2sh address, starts with '3'
-	 */
-	public String convertCurrentP2ShAddress(String address) {
-
-		if( isCurrentP2ShAddress(address) ) {
-			return convertP2SHAddress(address, MAIN_NET_PARAMS_P2SH_OVERRIDE, this.params);
-		}
-		else {
-			throw new AddressFormatException("this is not a current p2sh address for Litecoin");
-		}
-	}
-
-	/**
-	 * Convert P2SH Address
-	 *
-	 * Convert p2sh address from one network standard to another.
-	 *
-	 * @param p2shAddress the p2sh address
-	 * @param fromParams the existing standard
-	 * @param toParams the desired standard
-	 *
-	 * @return the p2sh conforming to the desired standard
-	 */
-	private static String convertP2SHAddress(String p2shAddress, NetworkParameters fromParams, NetworkParameters toParams) {
-		try {
-			// decode the P2SH address
-			Address address = LegacyAddress.fromBase58(fromParams, p2shAddress);
-			byte[] hash = address.getHash();
-
-			// create a new address with the target network parameters
-			Address fromScriptHash = LegacyAddress.fromScriptHash(toParams, hash);
-
-			// return the new address as a string
-			return fromScriptHash.toString();
-		} catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
-			return null;
-		}
+		this.litecoinNet.setFeeCeiling( fee );
 	}
 }

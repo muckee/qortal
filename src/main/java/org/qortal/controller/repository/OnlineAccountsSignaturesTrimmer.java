@@ -28,28 +28,13 @@ public class OnlineAccountsSignaturesTrimmer implements Runnable {
 			return;
 		}
 
-		int trimStartHeight;
-
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			// Don't even start trimming until initial rush has ended
 			Thread.sleep(INITIAL_SLEEP_PERIOD);
 
-			trimStartHeight = repository.getBlockRepository().getOnlineAccountsSignaturesTrimHeight();
-		} catch (InterruptedException e) {
-			if (Controller.isStopping()) {
-				LOGGER.info("Online Accounts Signatures Trimming shutting down");
-			} else {
-				LOGGER.error("Online Accounts Signatures Trimming interrupted during initialization. Restart ASAP. Report this error immediately to the developers.", e);
-			}
-			return;
-		} catch (Exception e) {
-			LOGGER.error("Online Accounts Signatures Trimming is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
-			return;
-		}
+			int trimStartHeight = repository.getBlockRepository().getOnlineAccountsSignaturesTrimHeight();
 
-		while (!Controller.isStopping()) {
-			try (final Repository repository = RepositoryManager.getRepository()) {
-
+			while (!Controller.isStopping()) {
 				try {
 					repository.discardChanges();
 
@@ -103,9 +88,10 @@ public class OnlineAccountsSignaturesTrimmer implements Runnable {
 				} catch (Exception e) {
 					LOGGER.warn("Online Accounts Signatures Trimming stopped working. Trying again. Report this error immediately to the developers.", e);
 				}
-			} catch (Exception e) {
-				LOGGER.error("Online Accounts Signatures Trimming is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
 			}
+		} catch (Exception e) {
+			LOGGER.error("Online Accounts Signatures Trimming is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
 		}
 	}
+
 }

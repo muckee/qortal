@@ -1,9 +1,8 @@
 package org.qortal.api.websocket;
 
 import org.eclipse.jetty.websocket.api.Session;
-import org.eclipse.jetty.websocket.api.WriteCallback;
 import org.eclipse.jetty.websocket.api.annotations.*;
-import org.eclipse.jetty.websocket.server.JettyWebSocketServletFactory;
+import org.eclipse.jetty.websocket.servlet.WebSocketServletFactory;
 import org.qortal.controller.tradebot.TradeBot;
 import org.qortal.crosschain.SupportedBlockchain;
 import org.qortal.data.crosschain.TradeBotData;
@@ -24,104 +23,110 @@ import java.util.stream.Collectors;
 @SuppressWarnings("serial")
 public class TradeBotWebSocket extends ApiWebSocket implements Listener {
 
-    /** Cache of trade-bot entry states, keyed by trade-bot entry's "trade private key" (base58) */
-    private static final Map<String, Integer> PREVIOUS_STATES = new HashMap<>();
+	/** Cache of trade-bot entry states, keyed by trade-bot entry's "trade private key" (base58) */
+	private static final Map<String, Integer> PREVIOUS_STATES = new HashMap<>();
 
-    private static final Map<Session, String> sessionBlockchain = Collections.synchronizedMap(new HashMap<>());
+	private static final Map<Session, String> sessionBlockchain = Collections.synchronizedMap(new HashMap<>());
 
-    /**
-     * Updated for Jetty 10.
-     */
-    @Override
-    protected void configure(JettyWebSocketServletFactory factory) {
-        // Map the current instance to handle upgrades
-        factory.addMapping("/", (req, res) -> this);
+	@Override
+	public void configure(WebSocketServletFactory factory) {
+		factory.register(TradeBotWebSocket.class);
 
-        try (final Repository repository = RepositoryManager.getRepository()) {
-            List<TradeBotData> tradeBotEntries = repository.getCrossChainRepository().getAllTradeBotData();
-            if (tradeBotEntries != null) {
-                synchronized (PREVIOUS_STATES) {
-                    PREVIOUS_STATES.putAll(tradeBotEntries.stream().collect(Collectors.toMap(
-                            entry -> Base58.encode(entry.getTradePrivateKey()),
-                            TradeBotData::getStateValue)));
-                }
-            }
-        } catch (DataException e) {
-            // No initial state cache available
-        }
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			List<TradeBotData> tradeBotEntries = repository.getCrossChainRepository().getAllTradeBotData();
+			if (tradeBotEntries == null)
+				// How do we properly fail here?
+				return;
 
-        EventBus.INSTANCE.addListener(this);
-    }
+			PREVIOUS_STATES.putAll(tradeBotEntries.stream().collect(Collectors.toMap(entry -> Base58.encode(entry.getTradePrivateKey()), TradeBotData::getStateValue)));
+		} catch (DataException e) {
+			// No output this time
+		}
 
-    @Override
-    public void listen(Event event) {
-        if (!(event instanceof TradeBot.StateChangeEvent))
-            return;
+		EventBus.INSTANCE.addListener(this);
+	}
 
-        TradeBotData tradeBotData = ((TradeBot.StateChangeEvent) event).getTradeBotData();
-        String tradePrivateKey58 = Base58.encode(tradeBotData.getTradePrivateKey());
+	@Override
+	public void listen(Event event) {
+		if (!(event instanceof TradeBot.StateChangeEvent))
+			return;
 
-        synchronized (PREVIOUS_STATES) {
-            Integer previousStateValue = PREVIOUS_STATES.get(tradePrivateKey58);
-            if (previousStateValue != null && previousStateValue == tradeBotData.getStateValue())
-                return;
+		TradeBotData tradeBotData = ((TradeBot.StateChangeEvent) event).getTradeBotData();
+		String tradePrivateKey58 = Base58.encode(tradeBotData.getTradePrivateKey());
 
-            PREVIOUS_STATES.put(tradePrivateKey58, tradeBotData.getStateValue());
-        }
+		synchronized (PREVIOUS_STATES) {
+			Integer previousStateValue = PREVIOUS_STATES.get(tradePrivateKey58);
+			if (previousStateValue != null && previousStateValue == tradeBotData.getStateValue())
+				// Not changed
+				return;
 
-        List<TradeBotData> tradeBotEntries = Collections.singletonList(tradeBotData);
+			PREVIOUS_STATES.put(tradePrivateKey58, tradeBotData.getStateValue());
+		}
 
-        for (Session session : getSessions()) {
-            String preferredBlockchain = sessionBlockchain.get(session);
-            if (preferredBlockchain == null || preferredBlockchain.equals(tradeBotData.getForeignBlockchain()))
-                sendEntries(session, tradeBotEntries);
-        }
-    }
+		List<TradeBotData> tradeBotEntries = Collections.singletonList(tradeBotData);
 
-    @OnWebSocketConnect
-    @Override
-    public void onWebSocketConnect(Session session) {
-        super.onWebSocketConnect(session);
+		for (Session session : getSessions()) {
+			// Only send if this session has this/no preferred blockchain
+			String preferredBlockchain = sessionBlockchain.get(session);
 
-        Map<String, List<String>> queryParams = session.getUpgradeRequest().getParameterMap();
-        final boolean excludeInitialData = queryParams.containsKey("excludeInitialData");
+			if (preferredBlockchain == null || preferredBlockchain.equals(tradeBotData.getForeignBlockchain()))
+				sendEntries(session, tradeBotEntries);
+		}
+	}
 
-        List<String> foreignBlockchains = queryParams.get("foreignBlockchain");
-        final String foreignBlockchain = (foreignBlockchains == null || foreignBlockchains.isEmpty()) ? null : foreignBlockchains.get(0);
+	@OnWebSocketConnect
+	@Override
+	public void onWebSocketConnect(Session session) {
+		Map<String, List<String>> queryParams = session.getUpgradeRequest().getParameterMap();
+		final boolean excludeInitialData = queryParams.get("excludeInitialData") != null;
 
-        if (foreignBlockchain != null && SupportedBlockchain.fromString(foreignBlockchain) == null) {
-            session.close(4003, "unknown blockchain: " + foreignBlockchain);
-            return;
-        }
+		List<String> foreignBlockchains = queryParams.get("foreignBlockchain");
+		final String foreignBlockchain = foreignBlockchains == null ? null : foreignBlockchains.get(0);
 
-        if (foreignBlockchain != null)
-            sessionBlockchain.put(session, foreignBlockchain);
+		// Make sure blockchain (if any) is valid
+		if (foreignBlockchain != null && SupportedBlockchain.fromString(foreignBlockchain) == null) {
+			session.close(4003, "unknown blockchain: " + foreignBlockchain);
+			return;
+		}
 
-        try (final Repository repository = RepositoryManager.getRepository()) {
-            List<TradeBotData> tradeBotEntries = new ArrayList<>();
+		// save session's preferred blockchain (if any)
+		sessionBlockchain.put(session, foreignBlockchain);
 
-            if (!excludeInitialData) {
-                tradeBotEntries = repository.getCrossChainRepository().getAllTradeBotData();
-                if (foreignBlockchain != null) {
-                    tradeBotEntries = tradeBotEntries.stream()
-                            .filter(tradeBotData -> tradeBotData.getForeignBlockchain().equals(foreignBlockchain))
-                            .collect(Collectors.toList());
-                }
-            }
 
-            if (!sendEntries(session, tradeBotEntries)) {
-                session.close(4002, "websocket issue");
-            }
-        } catch (DataException e) {
-            session.close(4001, "repository issue fetching trade-bot entries");
-        }
-    }
+
+		// Maybe send all known trade-bot entries
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			List<TradeBotData> tradeBotEntries = new ArrayList<>();
+
+			// We might need to exclude the initial data from the response
+			if (!excludeInitialData) {
+				tradeBotEntries = repository.getCrossChainRepository().getAllTradeBotData();
+
+				// Optional filtering
+				if (foreignBlockchain != null)
+					tradeBotEntries = tradeBotEntries.stream()
+							.filter(tradeBotData -> tradeBotData.getForeignBlockchain().equals(foreignBlockchain))
+							.collect(Collectors.toList());
+			}
+
+			if (!sendEntries(session, tradeBotEntries)) {
+				session.close(4002, "websocket issue");
+				return;
+			}
+		} catch (DataException e) {
+			session.close(4001, "repository issue fetching trade-bot entries");
+			return;
+		}
+
+		super.onWebSocketConnect(session);
+	}
 
 	@OnWebSocketClose
 	@Override
 	public void onWebSocketClose(Session session, int statusCode, String reason) {
 		// clean up
 		sessionBlockchain.remove(session);
+
 		super.onWebSocketClose(session, statusCode, reason);
 	}
 
@@ -132,25 +137,22 @@ public class TradeBotWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
-		if (Objects.equals(message, "ping") && session.isOpen()) {
-			session.getRemote().sendString("pong", WriteCallback.NOOP);
-		}
+		/* ignored */
 	}
 
-    private boolean sendEntries(Session session, List<TradeBotData> tradeBotEntries) {
-        if (session.isOpen()) {
-            try {
-                StringWriter stringWriter = new StringWriter();
-                marshall(stringWriter, tradeBotEntries);
-                String output = stringWriter.toString();
+	private boolean sendEntries(Session session, List<TradeBotData> tradeBotEntries) {
+		try {
+			StringWriter stringWriter = new StringWriter();
+			marshall(stringWriter, tradeBotEntries);
 
-                // Updated from sendStringByFuture to Jetty 10 async send pattern
-                session.getRemote().sendString(output, WriteCallback.NOOP);
-                return true;
-            } catch (IOException e) {
-                return false;
-            }
-        }
-        return false;
-    }
+			String output = stringWriter.toString();
+			session.getRemote().sendStringByFuture(output);
+		} catch (IOException e) {
+			// No output this time?
+			return false;
+		}
+
+		return true;
+	}
+
 }

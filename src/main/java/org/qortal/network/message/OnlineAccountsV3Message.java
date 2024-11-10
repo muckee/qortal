@@ -21,10 +21,6 @@ import java.util.Map;
 public class OnlineAccountsV3Message extends Message {
 
 	public static final long MIN_PEER_VERSION = 0x300060000L; // 3.6.0
-	private static final long ENTRY_SIZE
-			= Transformer.SIGNATURE_LENGTH +
-				Transformer.PUBLIC_KEY_LENGTH +
-				Transformer.INT_LENGTH; // nonce
 
 	private List<OnlineAccountData> onlineAccounts;
 
@@ -88,13 +84,11 @@ public class OnlineAccountsV3Message extends Message {
 	}
 
 	public static Message fromByteBuffer(int id, ByteBuffer bytes) throws MessageException {
-		int accountCount = GroupedMessageUtils.readInitialGroupCount(bytes, ENTRY_SIZE, "invalid online accounts count");
-		if (accountCount == 0)
-			return new OnlineAccountsV3Message(id, List.of());
+		int accountCount = bytes.getInt();
 
 		List<OnlineAccountData> onlineAccounts = new ArrayList<>(accountCount);
 
-		while (true) {
+		while (accountCount > 0) {
 			long timestamp = bytes.getLong();
 
 			for (int i = 0; i < accountCount; ++i) {
@@ -114,10 +108,12 @@ public class OnlineAccountsV3Message extends Message {
 				onlineAccounts.add(new OnlineAccountData(timestamp, signature, publicKey, nonce));
 			}
 
-			if (!bytes.hasRemaining())
-				break;
-
-			accountCount = GroupedMessageUtils.readNextGroupCount(bytes, ENTRY_SIZE, "invalid online accounts count");
+			if (bytes.hasRemaining()) {
+				accountCount = bytes.getInt();
+			} else {
+				// we've finished
+				accountCount = 0;
+			}
 		}
 
 		return new OnlineAccountsV3Message(id, onlineAccounts);

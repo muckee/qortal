@@ -3,7 +3,6 @@ package org.qortal.repository;
 import org.qortal.api.resource.TransactionsResource.ConfirmationStatus;
 import org.qortal.arbitrary.misc.Service;
 import org.qortal.data.group.GroupApprovalData;
-import org.qortal.data.group.GroupKickSummaryData;
 import org.qortal.data.transaction.GroupApprovalTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.data.transaction.TransferAssetTransactionData;
@@ -18,8 +17,6 @@ public interface TransactionRepository {
 	// Fetching transactions / transaction height
 
 	public TransactionData fromSignature(byte[] signature) throws DataException;
-
-	public List<TransactionData> fromSignatures(List<byte[]> signatures) throws DataException;
 
 	public TransactionData fromReference(byte[] reference) throws DataException;
 
@@ -200,23 +197,6 @@ public interface TransactionRepository {
 			throws DataException;
 
 	/**
-	 * Returns list of group kick transactions where the given address was kicked.
-	 * Only confirmed (block-included) kicks are returned.
-	 *
-	 * @param memberAddress address of the kicked member (required)
-	 * @param groupId optional group ID to filter by
-	 * @param before optional: only kicks with timestamp strictly before this (ms)
-	 * @param after optional: only kicks with timestamp strictly after this (ms)
-	 * @param limit maximum number of results
-	 * @param offset result offset for pagination
-	 * @param reverse if true, newest first
-	 * @return list of kick summaries (member, groupId, reason, timestamp)
-	 * @throws DataException
-	 */
-	public List<GroupKickSummaryData> getGroupKicks(String memberAddress, Integer groupId,
-			Long before, Long after, Integer limit, Integer offset, Boolean reverse) throws DataException;
-
-	/**
 	 * Returns list of reward share transaction creators, excluding self shares.
 	 * This uses confirmed transactions only.
 	 *
@@ -233,40 +213,6 @@ public interface TransactionRepository {
 	 * @throws DataException
 	 */
 	public List<String> getConfirmedTransferAssetCreators() throws DataException;
-
-	/**
-	 * Returns payment transactions between a specific recipient and sender.
-	 * <p>
-	 * This is optimized for querying PAYMENT transactions where we need to filter
-	 * by recipient address and/or sender's address. At least one address is required.
-	 * 
-	 * @param recipientAddress the recipient's address (optional, but at least one address required)
-	 * @param senderAddress the sender's address (optional, but at least one address required)
-	 * @param amount the payment amount to filter by (optional)
-	 * @param startBlock height of first block to check (optional)
-	 * @param blockLimit number of blocks from startBlock to check (optional)
-	 * @param confirmationStatus whether to include confirmed, unconfirmed or both
-	 * @param limit maximum number of results
-	 * @param offset result offset for pagination
-	 * @param reverse whether to reverse the sort order
-	 * @return list of payment transaction data
-	 * @throws DataException
-	 */
-	public List<TransactionData> getPaymentsBetweenAddresses(String recipientAddress, String senderAddress,
-			Long amount, Integer startBlock, Integer blockLimit, ConfirmationStatus confirmationStatus, 
-			Integer limit, Integer offset, Boolean reverse) throws DataException;
-
-	/**
-	 * Lightweight payment history fetch for notifications.
-	 * <p>
-	 * Returns at most {@code limit} confirmed payments to {@code recipient} after
-	 * {@code after} (epoch ms, optional), sorted most-recent-first.  Each entry is
-	 * a String array: {@code [senderAddress, recipientAddress, amountPretty, timestampMs]}.
-	 * <p>
-	 * This is a single indexed query with no per-row hydration — much faster than
-	 * {@link #getPaymentsBetweenAddresses} for notification history use.
-	 */
-	public List<String[]> getReceivedPaymentsForNotifications(String recipient, Long after, int limit) throws DataException;
 
 	/**
 	 * Returns list of transactions pending approval, with optional txGgroupId filtering.
@@ -380,16 +326,6 @@ public interface TransactionRepository {
 	public List<TransactionData> getUnconfirmedTransactions(EnumSet<TransactionType> excludedTxTypes, Integer limit) throws DataException;
 
 	/**
-	 * Returns list of unconfirmed transactions created before the given timestamp.
-	 * Used to efficiently pre-filter expiry candidates without loading the full pool.
-	 *
-	 * @param timestamp only return transactions with created_when &lt; this value
-	 * @return list of transactions, or empty if none.
-	 * @throws DataException
-	 */
-	public List<TransactionData> getUnconfirmedTransactionsCreatedBefore(long timestamp) throws DataException;
-
-	/**
 	 * Remove transaction from unconfirmed transactions pile.
 	 * 
 	 * @param signature
@@ -414,6 +350,5 @@ public interface TransactionRepository {
 	public void save(TransactionData transactionData) throws DataException;
 
 	public void delete(TransactionData transactionData) throws DataException;
-
 
 }

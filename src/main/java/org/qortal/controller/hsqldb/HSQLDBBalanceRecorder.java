@@ -2,19 +2,15 @@ package org.qortal.controller.hsqldb;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.util.PropertySource;
 import org.qortal.data.account.AccountBalanceData;
-import org.qortal.data.account.BlockHeightRange;
-import org.qortal.data.account.BlockHeightRangeAddressAmounts;
 import org.qortal.repository.hsqldb.HSQLDBCacheUtils;
 import org.qortal.settings.Settings;
-import org.qortal.utils.BalanceRecorderUtils;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 public class HSQLDBBalanceRecorder extends Thread{
@@ -26,8 +22,6 @@ public class HSQLDBBalanceRecorder extends Thread{
     private ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight = new ConcurrentHashMap<>();
 
     private ConcurrentHashMap<String, List<AccountBalanceData>> balancesByAddress = new ConcurrentHashMap<>();
-
-    private CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> balanceDynamics = new CopyOnWriteArrayList<>();
 
     private int priorityRequested;
     private int frequency;
@@ -45,12 +39,18 @@ public class HSQLDBBalanceRecorder extends Thread{
     public static Optional<HSQLDBBalanceRecorder> getInstance() {
 
         if( SINGLETON == null ) {
+
             SINGLETON
                 = new HSQLDBBalanceRecorder(
                     Settings.getInstance().getBalanceRecorderPriority(),
                     Settings.getInstance().getBalanceRecorderFrequency(),
                     Settings.getInstance().getBalanceRecorderCapacity()
             );
+
+        }
+        else if( SINGLETON == null ) {
+
+            return Optional.empty();
         }
 
         return Optional.of(SINGLETON);
@@ -61,50 +61,36 @@ public class HSQLDBBalanceRecorder extends Thread{
 
         Thread.currentThread().setName("Balance Recorder");
 
-        HSQLDBCacheUtils.startRecordingBalances(this.balancesByHeight, this.balanceDynamics, this.priorityRequested, this.frequency, this.capacity);
+        HSQLDBCacheUtils.startRecordingBalances(this.balancesByHeight, this.balancesByAddress, this.priorityRequested, this.frequency, this.capacity);
     }
 
-    public List<BlockHeightRangeAddressAmounts> getLatestDynamics(int limit, long offset) {
+    public List<AccountBalanceData> getLatestRecordings(int limit, long offset) {
+        ArrayList<AccountBalanceData> data;
 
-        return this.balanceDynamics.stream()
-                .sorted(BalanceRecorderUtils.BLOCK_HEIGHT_RANGE_ADDRESS_AMOUNTS_COMPARATOR.reversed())
-                .skip(offset)
-                .limit(limit)
-                .collect(Collectors.toList());
-    }
+        Optional<Integer> lastHeight = getLastHeight();
 
-    public List<BlockHeightRange> getRanges(Integer offset, Integer limit, Boolean reverse) {
+        if(lastHeight.isPresent() ) {
+            List<AccountBalanceData> latest = this.balancesByHeight.get(lastHeight.get());
 
-        if( reverse ) {
-            return this.balanceDynamics.stream()
-                    .map(BlockHeightRangeAddressAmounts::getRange)
-                    .sorted(BalanceRecorderUtils.BLOCK_HEIGHT_RANGE_COMPARATOR.reversed())
-                    .skip(offset)
-                    .limit(limit)
-                    .collect(Collectors.toList());
+            if( latest != null ) {
+                data = new ArrayList<>(latest.size());
+                data.addAll(
+                    latest.stream()
+                        .sorted(Comparator.comparingDouble(AccountBalanceData::getBalance).reversed())
+                        .skip(offset)
+                        .limit(limit)
+                        .collect(Collectors.toList())
+                );
+            }
+            else {
+                data = new ArrayList<>(0);
+            }
         }
         else {
-            return this.balanceDynamics.stream()
-                    .map(BlockHeightRangeAddressAmounts::getRange)
-                    .sorted(BalanceRecorderUtils.BLOCK_HEIGHT_RANGE_COMPARATOR)
-                    .skip(offset)
-                    .limit(limit)
-                    .collect(Collectors.toList());
+            data = new ArrayList<>(0);
         }
-    }
 
-    public Optional<BlockHeightRangeAddressAmounts> getAddressAmounts(BlockHeightRange range) {
-
-        return this.balanceDynamics.stream()
-            .filter( dynamic -> dynamic.getRange().equals(range))
-            .findAny();
-    }
-
-    public Optional<BlockHeightRange> getRange( int height ) {
-        return this.balanceDynamics.stream()
-            .map(BlockHeightRangeAddressAmounts::getRange)
-            .filter( range -> range.getBegin() < height && range.getEnd() >= height )
-            .findAny();
+        return data;
     }
 
     private Optional<Integer> getLastHeight() {
