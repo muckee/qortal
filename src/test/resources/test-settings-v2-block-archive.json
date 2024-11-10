@@ -10,6 +10,5 @@
   "minPeers": 0,
   "pruneBlockLimit": 100,
   "repositoryPath": "dbtest",
-  "defaultArchiveVersion": 1,
-  "archivingPause": 5
+  "defaultArchiveVersion": 1
 }

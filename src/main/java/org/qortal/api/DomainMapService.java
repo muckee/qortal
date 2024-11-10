@@ -39,7 +39,6 @@ public class DomainMapService {
 	private DomainMapService() {
 		this.config = new ResourceConfig();
 		this.config.packages("org.qortal.api.resource", "org.qortal.api.domainmap.resource");
-		this.config.register(org.glassfish.jersey.media.multipart.MultiPartFeature.class);
 		this.config.register(OpenApiResource.class);
 		this.config.register(ApiDefinition.class);
 		this.config.register(AnnotationPostProcessor.class);

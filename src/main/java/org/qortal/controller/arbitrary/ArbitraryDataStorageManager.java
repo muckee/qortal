@@ -3,8 +3,6 @@ package org.qortal.controller.arbitrary;
 import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.qortal.arbitrary.ArbitraryDataFolderSizeEstimator;
-import org.qortal.arbitrary.LongFileHandler;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.repository.DataException;
@@ -13,31 +11,18 @@ import org.qortal.settings.Settings;
 import org.qortal.transaction.Transaction;
 import org.qortal.utils.*;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
-import java.time.ZonedDateTime;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 public class ArbitraryDataStorageManager extends Thread {
-
-    private static final File DATA_FILE = new File("qortal-backup/ArbitraryDataFolderSizeEstimate.dat");
-    private final ScheduledExecutorService scheduler;
-    private final ScheduledFuture<?> scheduledTask;
 
     public enum StoragePolicy {
         FOLLOWED_OR_VIEWED,
@@ -60,36 +45,21 @@ public class ArbitraryDataStorageManager extends Thread {
 
     private String searchQuery;
 
-    private AtomicBoolean recalculate = new AtomicBoolean(false);
-
     private static final long DIRECTORY_SIZE_CHECK_INTERVAL = 10 * 60 * 1000L; // 10 minutes
 
-    /** Treat storage as full at 80% usage, to reduce risk of going over the limit.
+    /** Treat storage as full at 90% usage, to reduce risk of going over the limit.
      * This is necessary because we don't calculate total storage values before every write.
      * It also helps avoid a fetch/delete loop, as we will stop fetching before the hard limit.
      * This must be lower than DELETION_THRESHOLD. */
-    private static final double STORAGE_FULL_THRESHOLD = 0.8f; // 80%
+    private static final double STORAGE_FULL_THRESHOLD = 0.90f; // 90%
 
-    /** Start deleting files once we reach 90% usage.
+    /** Start deleting files once we reach 98% usage.
      * This must be higher than STORAGE_FULL_THRESHOLD in order to avoid a fetch/delete loop. */
-    public static final double DELETION_THRESHOLD = 0.9f; // 90%
+    public static final double DELETION_THRESHOLD = 0.98f; // 98%
 
     private static final long PER_NAME_STORAGE_MULTIPLIER = 4L;
 
     public ArbitraryDataStorageManager() {
-        // Calculate initial delay until next target time
-        long initialDelay = calculateInitialDelay();
-
-        this.scheduler = Executors.newSingleThreadScheduledExecutor();
-
-        // Schedule the task to run initially and then every nth day (the frequency)
-        this.scheduledTask
-            = this.scheduler.scheduleAtFixedRate(
-                () -> this.recalculate.set(true),
-                initialDelay,
-                Settings.getInstance().getDataStorageSizeCalculationFrequency() * 24L,
-                TimeUnit.HOURS
-        );
     }
 
     public static ArbitraryDataStorageManager getInstance() {
@@ -108,24 +78,20 @@ public class ArbitraryDataStorageManager extends Thread {
             while (!isStopping) {
                 Thread.sleep(1000);
 
-                try {
-                    // Don't run if QDN is disabled
-                    if (!Settings.getInstance().isQdnEnabled()) {
-                        Thread.sleep(60 * 60 * 1000L);
-                        continue;
-                    }
+                // Don't run if QDN is disabled
+                if (!Settings.getInstance().isQdnEnabled()) {
+                    Thread.sleep(60 * 60 * 1000L);
+                    continue;
+                }
 
-                    Long now = NTP.getTime();
-                    if (now == null) {
-                        continue;
-                    }
+                Long now = NTP.getTime();
+                if (now == null) {
+                    continue;
+                }
 
-                    // Check the total directory size if we haven't in a while
-                    if (this.shouldCalculateDirectorySize(now)) {
-                        this.getDataDirectorySize(now);
-                    }
-                } catch (Exception e) {
-                    LOGGER.error(e.getMessage(), e);
+                // Check the total directory size if we haven't in a while
+                if (this.shouldCalculateDirectorySize(now)) {
+                    this.calculateDirectorySize(now);
                 }
 
                 Thread.sleep(59000);
@@ -139,19 +105,6 @@ public class ArbitraryDataStorageManager extends Thread {
         isStopping = true;
         this.interrupt();
         instance = null;
-
-        if (scheduledTask != null) {
-            scheduledTask.cancel(false);
-        }
-        scheduler.shutdown();
-        try {
-            if (!scheduler.awaitTermination(1, TimeUnit.SECONDS)) {
-                scheduler.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            scheduler.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 
     /**
@@ -202,24 +155,31 @@ public class ArbitraryDataStorageManager extends Thread {
      * @param arbitraryTransactionData - the transaction
      * @return boolean - whether to prefetch or not
      */
-    public ArbitraryDataExamination shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
+    public boolean shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
         String name = arbitraryTransactionData.getName();
 
         // Only fetch data associated with hashes, as we already have RAW_DATA
         if (arbitraryTransactionData.getDataType() != ArbitraryTransactionData.DataType.DATA_HASH) {
-            return new ArbitraryDataExamination(false, "Only fetch data associated with hashes");
+            return false;
         }
 
         // Don't fetch anything more if we're (nearly) out of space
         // Make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
         // avoid a fetch/delete loop
         if (!this.isStorageSpaceAvailable(STORAGE_FULL_THRESHOLD)) {
-            return new ArbitraryDataExamination(false,"Don't fetch anything more if we're (nearly) out of space");
+            return false;
+        }
+
+        // Don't fetch anything if we're (nearly) out of space for this name
+        // Again, make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
+        // avoid a fetch/delete loop
+        if (!this.isStorageSpaceAvailableForName(repository, arbitraryTransactionData.getName(), STORAGE_FULL_THRESHOLD)) {
+            return false;
         }
 
         // Don't store data unless it's an allowed type (public/private)
         if (!this.isDataTypeAllowed(arbitraryTransactionData)) {
-            return new ArbitraryDataExamination(false, "Don't store data unless it's an allowed type (public/private)");
+            return false;
         }
 
         // Handle transactions without names differently
@@ -229,21 +189,21 @@ public class ArbitraryDataStorageManager extends Thread {
 
         // Never fetch data from blocked names, even if they are followed
         if (ListUtils.isNameBlocked(name)) {
-            return new ArbitraryDataExamination(false, "blocked name");
+            return false;
         }
 
         switch (Settings.getInstance().getStoragePolicy()) {
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
-                return new ArbitraryDataExamination(ListUtils.isFollowingName(name), Settings.getInstance().getStoragePolicy().name());
+                return ListUtils.isFollowingName(name);
                 
             case ALL:
-                return new ArbitraryDataExamination(true, Settings.getInstance().getStoragePolicy().name());
+                return true;
 
             case NONE:
             case VIEWED:
             default:
-                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
+                return false;
         }
     }
 
@@ -254,17 +214,17 @@ public class ArbitraryDataStorageManager extends Thread {
      *
      * @return boolean - whether the storage policy allows for unnamed data
      */
-    private ArbitraryDataExamination shouldPreFetchDataWithoutName() {
+    private boolean shouldPreFetchDataWithoutName() {
         switch (Settings.getInstance().getStoragePolicy()) {
             case ALL:
-                return new ArbitraryDataExamination(true, "Fetching all data");
+                return true;
 
             case NONE:
             case VIEWED:
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
             default:
-                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
+                return false;
         }
     }
 
@@ -450,78 +410,24 @@ public class ArbitraryDataStorageManager extends Thread {
         return false;
     }
 
-    public void getDataDirectorySize(Long now) {
+    public void calculateDirectorySize(Long now) {
         if (now == null) {
             return;
         }
 
+        long totalSize = 0;
+        long remainingCapacity = 0;
+
+        // Calculate remaining capacity
         try {
-            long remainingCapacity = 0;
-
-            // Calculate remaining capacity
-            try {
-                remainingCapacity = this.getRemainingUsableStorageCapacity();
-            } catch (IOException e) {
-                LOGGER.info("Unable to calculate remaining storage capacity: {}", e.getMessage());
-                return;
-            }
-
-            // if it is time to recalculate
-            if( this.recalculate.getAndSet(false) ) {
-                calculateDirectorySize();
-            }
-            // if this is the first size check, then look at data file first
-            else if( lastDirectorySizeCheck == 0 ) {
-                long totalSize = LongFileHandler.readLongWithDefault(DATA_FILE, -1L);
-
-                // if there is no data file, then calculate
-                if( totalSize < 0) {
-                    calculateDirectorySize();
-                }
-                // if there is data, then set it to the estimator
-                else {
-                    ArbitraryDataFolderSizeEstimator.getInstance().set(totalSize);
-                }
-            }
-            // otherwise just get it from the estimator
-
-            long totalSize = ArbitraryDataFolderSizeEstimator.getInstance().get();
-
-            // store size in data file to be available after a restart
-            LongFileHandler.createFileIfNotExists(DATA_FILE);
-            LongFileHandler.writeLong(DATA_FILE, totalSize);
-
-            this.totalDirectorySize = totalSize;
-            this.lastDirectorySizeCheck = now;
-
-            // It's essential that used space (this.totalDirectorySize) is included in the storage capacity
-            LOGGER.trace("Calculating total storage capacity...");
-            long storageCapacity = remainingCapacity + this.totalDirectorySize;
-
-            // Make sure to limit the storage capacity if the user is overriding it in the settings
-            if (Settings.getInstance().getMaxStorageCapacity() != null) {
-                storageCapacity = Math.min(storageCapacity, Settings.getInstance().getMaxStorageCapacity());
-            }
-            this.storageCapacity = storageCapacity;
-        } catch (UncheckedIOException e) {
-            LOGGER.warn(e.getMessage(), e);
-        } catch (Exception e) {
-           LOGGER.error(e.getMessage(), e);
+            remainingCapacity = this.getRemainingUsableStorageCapacity();
+        } catch (IOException e) {
+            LOGGER.info("Unable to calculate remaining storage capacity: {}", e.getMessage());
+            return;
         }
 
-        LOGGER.info("Total used: {}, Total capacity: {}", StringUtils.formatBytes(this.totalDirectorySize), StringUtils.formatBytes(this.storageCapacity));
-    }
-
-    /**
-     * Calculate Directory Size
-     *
-     * Calculate directory size and set it to the estimator.
-     */
-    public static void calculateDirectorySize() {
-        long totalSize = 0;
-
         // Calculate total size of data directory
-        LOGGER.info("Calculating data directory size...");
+        LOGGER.trace("Calculating data directory size...");
         Path dataDirectoryPath = Paths.get(Settings.getInstance().getDataPath());
         if (dataDirectoryPath.toFile().exists()) {
             totalSize += FileUtils.sizeOfDirectory(dataDirectoryPath.toFile());
@@ -531,12 +437,25 @@ public class ArbitraryDataStorageManager extends Thread {
         Path tempDirectoryPath = Paths.get(Settings.getInstance().getTempDataPath());
         if (tempDirectoryPath.toFile().exists()) {
             if (!FilesystemUtils.isChild(tempDirectoryPath, dataDirectoryPath)) {
-                LOGGER.info("Calculating temp directory size...");
-                totalSize += FileUtils.sizeOfDirectory(tempDirectoryPath.toFile());
+                LOGGER.trace("Calculating temp directory size...");
+                totalSize += FileUtils.sizeOfDirectory(dataDirectoryPath.toFile());
             }
         }
 
-        ArbitraryDataFolderSizeEstimator.getInstance().set(totalSize);
+        this.totalDirectorySize = totalSize;
+        this.lastDirectorySizeCheck = now;
+
+        // It's essential that used space (this.totalDirectorySize) is included in the storage capacity
+        LOGGER.trace("Calculating total storage capacity...");
+        long storageCapacity = remainingCapacity + this.totalDirectorySize;
+
+        // Make sure to limit the storage capacity if the user is overriding it in the settings
+        if (Settings.getInstance().getMaxStorageCapacity() != null) {
+            storageCapacity = Math.min(storageCapacity, Settings.getInstance().getMaxStorageCapacity());
+        }
+        this.storageCapacity = storageCapacity;
+
+        LOGGER.info("Total used: {} bytes, Total capacity: {} bytes", this.totalDirectorySize, this.storageCapacity);
     }
 
     private long getRemainingUsableStorageCapacity() throws IOException {
@@ -562,6 +481,51 @@ public class ArbitraryDataStorageManager extends Thread {
         if (this.totalDirectorySize >= maxStorageCapacity) {
             return false;
         }
+        return true;
+    }
+
+    public boolean isStorageSpaceAvailableForName(Repository repository, String name, double threshold) {
+        if (!this.isStorageSpaceAvailable(threshold)) {
+            // No storage space available at all, so no need to check this name
+            return false;
+        }
+
+        if (Settings.getInstance().getStoragePolicy() == StoragePolicy.ALL) {
+            // Using storage policy ALL, so don't limit anything per name
+            return true;
+        }
+
+        if (name == null) {
+            // This transaction doesn't have a name, so fall back to total space limitations
+            return true;
+        }
+
+        int followedNamesCount = ListUtils.followedNamesCount();
+        if (followedNamesCount == 0) {
+            // Not following any names, so we have space
+            return true;
+        }
+
+        long totalSizeForName = 0;
+        long maxStoragePerName = this.storageCapacityPerName(threshold);
+
+        // Fetch all hosted transactions
+        List<ArbitraryTransactionData> hostedTransactions = this.listAllHostedTransactions(repository, null, null);
+        for (ArbitraryTransactionData transactionData : hostedTransactions) {
+            String transactionName = transactionData.getName();
+            if (!Objects.equals(name, transactionName)) {
+                // Transaction relates to a different name
+                continue;
+            }
+
+            totalSizeForName += transactionData.getSize();
+        }
+
+        // Have we reached the limit for this name?
+        if (totalSizeForName > maxStoragePerName) {
+            return false;
+        }
+
         return true;
     }
 
@@ -593,32 +557,5 @@ public class ArbitraryDataStorageManager extends Thread {
             return null;
         }
         return (long)(this.storageCapacity * threshold);
-    }
-
-    /**
-     * Calculate Initial Delay
-     *
-     * Calculate the time to delay the scheduling of the data storage size calculation.
-     *
-     * @return the time in milliseconds
-     */
-    private long calculateInitialDelay() {
-        // Get current time in the system's default timezone
-        ZonedDateTime now = ZonedDateTime.now();
-
-        // Create a target time for today with the specified hour
-        ZonedDateTime targetToday
-            = now.withHour(Settings.getInstance().getDataStorageSizeCalculationHour())
-                .withMinute(0)
-                .withSecond(0)
-                .withNano(0);
-
-        // If the target time has already passed today, schedule for tomorrow
-        if (now.isAfter(targetToday)) {
-            targetToday = targetToday.plusDays(1);
-        }
-
-        // Calculate the difference in hours
-        return Duration.between(now, targetToday).get(ChronoUnit.SECONDS) / 3600;
     }
 }

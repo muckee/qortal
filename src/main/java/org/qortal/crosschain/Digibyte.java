@@ -14,7 +14,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class Digibyte extends Bitcoiny {
 
@@ -47,7 +46,6 @@ public class Digibyte extends Bitcoiny {
 					// Servers chosen on NO BASIS WHATSOEVER from various sources!
 					// Status verified at https://1209k.com/bitcoin-eye/ele.php?chain=dgb
 					new Server("electrum.qortal.link", Server.ConnectionType.SSL, 55002),
-					new Server("electrum.cipig.net", Server.ConnectionType.SSL, 20059),
 					new Server("electrum1.cipig.net", Server.ConnectionType.SSL, 20059),
 					new Server("electrum2.cipig.net", Server.ConnectionType.SSL, 20059),
 					new Server("electrum3.cipig.net", Server.ConnectionType.SSL, 20059)
@@ -61,7 +59,7 @@ public class Digibyte extends Bitcoiny {
 
 			@Override
 			public long getP2shFee(Long timestamp) {
-				return this.getFeeRequired();
+				return this.getFeeCeiling();
 			}
 		},
 		TEST3 {
@@ -111,14 +109,14 @@ public class Digibyte extends Bitcoiny {
 			}
 		};
 
-		private AtomicLong feeRequired = new AtomicLong(MAINNET_FEE);
+		private long feeCeiling = MAINNET_FEE;
 
-		public long getFeeRequired() {
-			return feeRequired.get();
+		public long getFeeCeiling() {
+			return feeCeiling;
 		}
 
-		public void setFeeRequired(long feeRequired) {
-			this.feeRequired.set(feeRequired);
+		public void setFeeCeiling(long feeCeiling) {
+			this.feeCeiling = feeCeiling;
 		}
 
 		public abstract NetworkParameters getParams();
@@ -134,14 +132,14 @@ public class Digibyte extends Bitcoiny {
 	// Constructors and instance
 
 	private Digibyte(DigibyteNet digibyteNet, BitcoinyBlockchainProvider blockchain, Context bitcoinjContext, String currencyCode) {
-        super(blockchain, bitcoinjContext, currencyCode, DEFAULT_FEE_PER_KB);
-        this.digibyteNet = digibyteNet;
+		super(blockchain, bitcoinjContext, currencyCode, DEFAULT_FEE_PER_KB);
+		this.digibyteNet = digibyteNet;
 
-        LOGGER.info(() -> String.format("Starting Digibyte support using %s", this.digibyteNet.name()));
+		LOGGER.info(() -> String.format("Starting Digibyte support using %s", this.digibyteNet.name()));
 	}
 
 	public static synchronized Digibyte getInstance() {
-		if (instance == null && Settings.getInstance().isWalletEnabled("DGB")) {
+		if (instance == null) {
 			DigibyteNet digibyteNet = Settings.getInstance().getDigibyteNet();
 
 			BitcoinyBlockchainProvider electrumX = new ElectrumX("Digibyte-" + digibyteNet.name(), digibyteNet.getGenesisHash(), digibyteNet.getServers(), DEFAULT_ELECTRUMX_PORTS);
@@ -180,13 +178,13 @@ public class Digibyte extends Bitcoiny {
 	}
 
 	@Override
-	public long getFeeRequired() {
-		return this.digibyteNet.getFeeRequired();
+	public long getFeeCeiling() {
+		return this.digibyteNet.getFeeCeiling();
 	}
 
 	@Override
-	public void setFeeRequired(long fee) {
+	public void setFeeCeiling(long fee) {
 
-		this.digibyteNet.setFeeRequired( fee );
+		this.digibyteNet.setFeeCeiling( fee );
 	}
 }

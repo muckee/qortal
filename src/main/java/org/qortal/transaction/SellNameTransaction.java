@@ -24,32 +24,31 @@ public class SellNameTransaction extends Transaction {
 	private SellNameTransactionData sellNameTransactionData;
 
 	// Constructors
+
 	public SellNameTransaction(Repository repository, TransactionData transactionData) {
 		super(repository, transactionData);
+
 		this.sellNameTransactionData = (SellNameTransactionData) this.transactionData;
 	}
 
 	// More information
+
 	@Override
 	public List<String> getRecipientAddresses() throws DataException {
-		return Collections.emptyList(); // No direct recipient address for this transaction
+		return Collections.emptyList();
 	}
 
 	// Navigation
+
 	public Account getOwner() {
-		return this.getCreator(); // Owner is the creator of the transaction
+		return this.getCreator();
 	}
 
 	// Processing
+
 	@Override
 	public ValidationResult isValid() throws DataException {
 		String name = this.sellNameTransactionData.getName();
-
-		// if the account has more than one name, then they cannot sell their primary name
-		if( this.repository.getNameRepository().getNamesByOwner(this.getOwner().getAddress()).size() > 1 &&
-				this.getOwner().getPrimaryName().get().equals(name) ) {
-			return ValidationResult.NOT_SUPPORTED;
-		}
 
 		// Check name size bounds
 		int nameLength = Utf8.encodedLength(name);
@@ -60,54 +59,59 @@ public class SellNameTransaction extends Transaction {
 		if (!name.equals(Unicode.normalize(name)))
 			return ValidationResult.NAME_NOT_NORMALIZED;
 
-		// Retrieve name data from repository
 		NameData nameData = this.repository.getNameRepository().fromName(name);
 
-		// Check if name exists
+		// Check name exists
 		if (nameData == null)
 			return ValidationResult.NAME_DOES_NOT_EXIST;
 
-		// Check name is not already for sale
+		// Check name isn't currently for sale
 		if (nameData.isForSale())
 			return ValidationResult.NAME_ALREADY_FOR_SALE;
 
-		// Validate transaction's public key matches name's current owner
+		// Check transaction's public key matches name's current owner
 		Account owner = getOwner();
 		if (!owner.getAddress().equals(nameData.getOwner()))
 			return ValidationResult.INVALID_NAME_OWNER;
 
-		// Check amount is positive and within valid range
-		long amount = this.sellNameTransactionData.getAmount();
-		if (amount <= 0)
+		// Check amount is positive
+		if (this.sellNameTransactionData.getAmount() <= 0)
 			return ValidationResult.NEGATIVE_AMOUNT;
-		if (amount >= MAX_AMOUNT)
+
+		// Check amount within bounds
+		if (this.sellNameTransactionData.getAmount() >= MAX_AMOUNT)
 			return ValidationResult.INVALID_AMOUNT;
 
-		// Check if owner has enough balance for the transaction fee
+		// Check issuer has enough funds
 		if (owner.getConfirmedBalance(Asset.QORT) < this.sellNameTransactionData.getFee())
 			return ValidationResult.NO_BALANCE;
 
-		return ValidationResult.OK; // All validation checks passed
+		return ValidationResult.OK;
 	}
 
 	@Override
 	public void preProcess() throws DataException {
-		// Directly access class field rather than local variable for clarity
+		SellNameTransactionData sellNameTransactionData = (SellNameTransactionData) transactionData;
+
+		// Rebuild this name in the Names table from the transaction history
+		// This is necessary because in some rare cases names can be missing from the Names table after registration
+		// but we have been unable to reproduce the issue and track down the root cause
 		NamesDatabaseIntegrityCheck namesDatabaseIntegrityCheck = new NamesDatabaseIntegrityCheck();
-		namesDatabaseIntegrityCheck.rebuildName(this.sellNameTransactionData.getName(), this.repository);
+		namesDatabaseIntegrityCheck.rebuildName(sellNameTransactionData.getName(), this.repository);
 	}
 
 	@Override
 	public void process() throws DataException {
-		// Sell the name
+		// Sell Name
 		Name name = new Name(this.repository, this.sellNameTransactionData.getName());
 		name.sell(this.sellNameTransactionData);
 	}
 
 	@Override
 	public void orphan() throws DataException {
-		// Revert the name sale in case of orphaning
+		// Revert name
 		Name name = new Name(this.repository, this.sellNameTransactionData.getName());
 		name.unsell(this.sellNameTransactionData);
 	}
+
 }

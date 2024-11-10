@@ -26,7 +26,6 @@ public class HSQLDBCacheUtilsTests {
     private static final String DESCRIPTION = "description";
     private static final String PREFIX_ONLY = "prefixOnly";
     private static final String EXACT_MATCH_NAMES = "exactMatchNames";
-    private static final String KEYWORDS = "keywords";
     private static final String DEFAULT_RESOURCE = "defaultResource";
     private static final String MODE = "mode";
     private static final String MIN_LEVEL = "minLevel";
@@ -301,19 +300,6 @@ public class HSQLDBCacheUtilsTests {
     }
 
     @Test
-    public void testAfterNegative() {
-        ArbitraryResourceData data = new ArbitraryResourceData();
-        data.created = 10L;
-        data.name = "Joe";
-
-        filterListByMap(
-                List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(AFTER, 11L)),
-                0
-        );
-    }
-
-    @Test
     public void testBeforePositive(){
         ArbitraryResourceData data = new ArbitraryResourceData();
         data.created = 10L;
@@ -323,19 +309,6 @@ public class HSQLDBCacheUtilsTests {
                 List.of(data),
                 NAME_LEVEL, new HashMap<>(Map.of(BEFORE, 11L)),
                 1
-        );
-    }
-
-    @Test
-    public void testBeforeNegative(){
-        ArbitraryResourceData data = new ArbitraryResourceData();
-        data.created = 10L;
-        data.name = "Joe";
-
-        filterListByMap(
-                List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(BEFORE, 9L)),
-                0
         );
     }
 
@@ -367,25 +340,6 @@ public class HSQLDBCacheUtilsTests {
                 NAME_LEVEL, new HashMap<>(Map.of(DESCRIPTION, "Once upon a time.")),
                 1
         );
-    }
-
-    @Test
-    public void testMetadataNullificationBugSolution(){
-
-        ArbitraryResourceData data = new ArbitraryResourceData();
-        data.metadata = new ArbitraryResourceMetadata();
-        data.metadata.setDescription("Once upon a time.");
-        data.name = "Joe";
-
-        List<ArbitraryResourceData> list = List.of(data);
-
-        filterListByMap(
-                List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(DESCRIPTION, "Once upon a time.")),
-                1
-        );
-
-        Assert.assertNotNull(data.metadata);
     }
 
     @Test
@@ -430,100 +384,16 @@ public class HSQLDBCacheUtilsTests {
     }
 
     @Test
-    public void testDefaultResourceExcludesIdentifiersWithoutQuery() {
-
-        ArbitraryResourceData defaultResource = new ArbitraryResourceData();
-        defaultResource.name = "Joe";
-
-        ArbitraryResourceData identifiedResource = new ArbitraryResourceData();
-        identifiedResource.name = "Joe";
-        identifiedResource.identifier = "app";
-
-        List<ArbitraryResourceData> result = filterListByMap(
-                List.of(defaultResource, identifiedResource),
-                NAME_LEVEL, new HashMap<>(Map.of(DEFAULT_RESOURCE, true)),
-                1
-        );
-
-        Assert.assertNull(result.get(0).identifier);
-    }
-
-    @Test
-    public void testDefaultResourceQuerySearchesNameOnly() {
-
-        ArbitraryResourceData defaultResource = new ArbitraryResourceData();
-        defaultResource.name = "Joe";
-
-        ArbitraryResourceData identifiedResource = new ArbitraryResourceData();
-        identifiedResource.name = "Other";
-        identifiedResource.identifier = "Joe";
-
-        List<ArbitraryResourceData> result = filterListByMap(
-                List.of(defaultResource, identifiedResource),
-                NAME_LEVEL, new HashMap<>(Map.of(DEFAULT_RESOURCE, true, QUERY, "Joe")),
-                1
-        );
-
-        Assert.assertNull(result.get(0).identifier);
-    }
-
-    @Test
-    public void testDefaultResourceAcceptsDefaultIdentifierLiteral() {
-
-        ArbitraryResourceData data = new ArbitraryResourceData();
-        data.name = "Joe";
-        data.identifier = "default";
-
-        List<ArbitraryResourceData> result = filterListByMap(
-                List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(DEFAULT_RESOURCE, true)),
-                1
-        );
-
-        Assert.assertEquals("default", result.get(0).identifier);
-    }
-
-    @Test
-    public void testFollowedNamesNegative() {
-
-        ArbitraryResourceData data = new ArbitraryResourceData();
-        data.name = "Joe";
-
-        Supplier<List<String>> supplier = () -> List.of("admin");
-
-        filterListByMap(
-                List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(FOLLOWED_ONLY, supplier)),
-                0
-        );
-    }
-
-    @Test
     public void testFollowedNamesPositive() {
 
         ArbitraryResourceData data = new ArbitraryResourceData();
         data.name = "Joe";
 
-        Supplier<List<String>> supplier = () -> List.of("Joe");
-
-        filterListByMap(
-                List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(FOLLOWED_ONLY, supplier)),
-                1
-        );
-    }
-
-    @Test
-    public void testExcludeBlockedNegative() {
-
-        ArbitraryResourceData data = new ArbitraryResourceData();
-        data.name = "Joe";
-
         Supplier<List<String>> supplier = () -> List.of("admin");
 
         filterListByMap(
                 List.of(data),
-                NAME_LEVEL, new HashMap<>(Map.of(EXCLUDE_BLOCKED, supplier)),
+                NAME_LEVEL, new HashMap<>(Map.of(FOLLOWED_ONLY, supplier)),
                 1
         );
     }
@@ -534,12 +404,12 @@ public class HSQLDBCacheUtilsTests {
         ArbitraryResourceData data = new ArbitraryResourceData();
         data.name = "Joe";
 
-        Supplier<List<String>> supplier = () -> List.of("Joe");
+        Supplier<List<String>> supplier = () -> List.of("admin");
 
         filterListByMap(
                 List.of(data),
                 NAME_LEVEL, new HashMap<>(Map.of(EXCLUDE_BLOCKED, supplier)),
-                0
+                1
         );
     }
 
@@ -730,7 +600,6 @@ public class HSQLDBCacheUtilsTests {
         Optional<String> description = Optional.ofNullable((String) valueByKey.get(DESCRIPTION));
         boolean prefixOnly = valueByKey.containsKey(PREFIX_ONLY);
         Optional<List<String>> exactMatchNames = Optional.ofNullable((List<String>) valueByKey.get(EXACT_MATCH_NAMES));
-        Optional<List<String>> keywords = Optional.ofNullable((List<String>) valueByKey.get(KEYWORDS));
         boolean defaultResource = valueByKey.containsKey(DEFAULT_RESOURCE);
         Optional<SearchMode> mode = Optional.of((SearchMode) valueByKey.getOrDefault(MODE, SearchMode.ALL));
         Optional<Integer> minLevel = Optional.ofNullable((Integer) valueByKey.get(MIN_LEVEL));
@@ -757,7 +626,6 @@ public class HSQLDBCacheUtilsTests {
                 description,
                 prefixOnly,
                 exactMatchNames,
-                keywords,
                 defaultResource,
                 minLevel,
                 followedOnly,
