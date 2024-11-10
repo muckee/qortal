@@ -1,40 +1,29 @@
 package org.qortal.repository.hsqldb;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.qortal.block.BlockChain;
 import org.qortal.data.chat.ActiveChats;
 import org.qortal.data.chat.ActiveChats.DirectChat;
 import org.qortal.data.chat.ActiveChats.GroupChat;
 import org.qortal.data.chat.ChatMessage;
-import org.qortal.data.group.GroupMemberData;
 import org.qortal.data.transaction.ChatTransactionData;
 import org.qortal.repository.ChatRepository;
 import org.qortal.repository.DataException;
 import org.qortal.transaction.Transaction.TransactionType;
-import org.qortal.utils.NTP;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.qortal.data.chat.ChatMessage.Encoding;
 
 public class HSQLDBChatRepository implements ChatRepository {
-
-	private static final Logger LOGGER = LogManager.getLogger(HSQLDBChatRepository.class);
 
 	protected HSQLDBRepository repository;
 
 	public HSQLDBChatRepository(HSQLDBRepository repository) {
 		this.repository = repository;
 	}
-	
+
 	@Override
 	public List<ChatMessage> getMessagesMatchingCriteria(Long before, Long after, Integer txGroupId, byte[] referenceBytes,
 														 byte[] chatReferenceBytes, Boolean hasChatReference, List<String> involving, String senderAddress,
@@ -46,23 +35,13 @@ public class HSQLDBChatRepository implements ChatRepository {
 
 		StringBuilder sql = new StringBuilder(1024);
 
-		String tableName;
-
-		// if the PrimaryTable is available, then use it
-		if( this.repository.getBlockRepository().getBlockchainHeight() > BlockChain.getInstance().getMultipleNamesPerAccountHeight()) {
-			tableName = "PrimaryNames";
-		}
-		else {
-			tableName = "Names";
-		}
-
 		sql.append("SELECT created_when, tx_group_id, Transactions.reference, creator, "
 				+ "sender, SenderNames.name, recipient, RecipientNames.name, "
 				+ "chat_reference, data, is_text, is_encrypted, signature "
 				+ "FROM ChatTransactions "
 				+ "JOIN Transactions USING (signature) "
-				+ "LEFT OUTER JOIN " + tableName + " AS SenderNames ON SenderNames.owner = sender "
-				+ "LEFT OUTER JOIN " + tableName + " AS RecipientNames ON RecipientNames.owner = recipient ");
+				+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
+				+ "LEFT OUTER JOIN Names AS RecipientNames ON RecipientNames.owner = recipient ");
 
 		// WHERE clauses
 
@@ -155,17 +134,6 @@ public class HSQLDBChatRepository implements ChatRepository {
 				chatMessages.add(chatMessage);
 			} while (resultSet.next());
 
-			// if this is a group chat, then ensure that the sender is in the group
-			if( txGroupId != null && txGroupId > 0 ) {
-				List<String> members
-					= this.repository.getGroupRepository()
-						.getGroupMembers(txGroupId).stream()
-						.map(GroupMemberData::getMember)
-						.collect(Collectors.toList());
-
-				chatMessages.removeIf( data -> !members.contains(data.getSender()) );
-			}
-
 			return chatMessages;
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch matching chat transactions from repository", e);
@@ -174,21 +142,10 @@ public class HSQLDBChatRepository implements ChatRepository {
 
 	@Override
 	public ChatMessage toChatMessage(ChatTransactionData chatTransactionData, Encoding encoding) throws DataException {
-
-		String tableName;
-
-		// if the PrimaryTable is available, then use it
-		if( this.repository.getBlockRepository().getBlockchainHeight() > BlockChain.getInstance().getMultipleNamesPerAccountHeight()) {
-			tableName = "PrimaryNames";
-		}
-		else {
-			tableName = "Names";
-		}
-
 		String sql = "SELECT SenderNames.name, RecipientNames.name "
 				+ "FROM ChatTransactions "
-				+ "LEFT OUTER JOIN " + tableName + " AS SenderNames ON SenderNames.owner = sender "
-				+ "LEFT OUTER JOIN " + tableName + " AS RecipientNames ON RecipientNames.owner = recipient "
+				+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
+				+ "LEFT OUTER JOIN Names AS RecipientNames ON RecipientNames.owner = recipient "
 				+ "WHERE signature = ?";
 
 		try (ResultSet resultSet = this.repository.checkedExecute(sql, chatTransactionData.getSignature())) {
@@ -219,119 +176,65 @@ public class HSQLDBChatRepository implements ChatRepository {
 	}
 
 	@Override
-	public ActiveChats getActiveChats(String address, Encoding encoding, Boolean hasChatReference) throws DataException {
-		List<GroupChat> groupChats = getActiveGroupChats(address, encoding, hasChatReference);
-		List<DirectChat> directChats = getActiveDirectChats(address, hasChatReference);
+	public ActiveChats getActiveChats(String address, Encoding encoding) throws DataException {
+		List<GroupChat> groupChats = getActiveGroupChats(address, encoding);
+		List<DirectChat> directChats = getActiveDirectChats(address);
 
 		return new ActiveChats(groupChats, directChats);
 	}
-	
-	private List<GroupChat> getActiveGroupChats(String address, Encoding encoding, Boolean hasChatReference) throws DataException {
-		String tableName;
 
-		// if the PrimaryTable is available, then use it
-		if( this.repository.getBlockRepository().getBlockchainHeight() > BlockChain.getInstance().getMultipleNamesPerAccountHeight()) {
-			tableName = "PrimaryNames";
-		}
-		else {
-			tableName = "Names";
-		}
+	private List<GroupChat> getActiveGroupChats(String address, Encoding encoding) throws DataException {
+		// Find groups where address is a member and potential latest message details
+		String groupsSql = "SELECT group_id, group_name, latest_timestamp, sender, sender_name, signature, data "
+				+ "FROM GroupMembers "
+				+ "JOIN Groups USING (group_id) "
+				+ "LEFT OUTER JOIN LATERAL("
+					+ "SELECT created_when AS latest_timestamp, sender, name AS sender_name, signature, data "
+					+ "FROM ChatTransactions "
+					+ "JOIN Transactions USING (signature) "
+					+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
+					// NOTE: We need to qualify "Groups.group_id" here to avoid "General error" bug in HSQLDB v2.5.0
+					+ "WHERE tx_group_id = Groups.group_id AND type = " + TransactionType.CHAT.value + " "
+					+ "ORDER BY created_when DESC "
+					+ "LIMIT 1"
+				+ ") AS LatestMessages ON TRUE "
+				+ "WHERE address = ?";
 
-		Long now = NTP.getTime();
-		if (now == null)
-			return new ArrayList<>();
-
-		long cutoffTimestamp = now - BlockChain.getInstance().getTransactionExpiryPeriod();
-
-		// Step 1: Get all groups the user belongs to
-		String memberSql = "SELECT group_id, group_name FROM GroupMembers JOIN Groups USING (group_id) WHERE address = ?";
-
-		Map<Integer, String> userGroups = new LinkedHashMap<>();
-		try (ResultSet resultSet = this.repository.checkedExecute(memberSql, address)) {
-			if (resultSet != null) {
-				do {
-					userGroups.put(resultSet.getInt(1), resultSet.getString(2));
-				} while (resultSet.next());
-			}
-		} catch (SQLException e) {
-			throw new DataException("Unable to fetch group memberships from repository", e);
-		}
-
-		// Step 2: In one query, get all recent chat messages for the user's groups.
-		// Ordered by created_when DESC so first occurrence per group_id = latest message.
-		// This replaces 53 correlated lateral subqueries with a single efficient query.
-		String latestSql = "SELECT tx_group_id, created_when, CT.sender, SenderNames.name, CT.signature, CT.data "
-				+ "FROM Transactions "
-				+ "JOIN ChatTransactions CT ON CT.signature = Transactions.signature "
-				+ "LEFT OUTER JOIN " + tableName + " AS SenderNames ON SenderNames.owner = CT.sender "
-				+ "WHERE type = " + TransactionType.CHAT.value + " "
-				+ "AND created_when >= ? "
-				+ "AND tx_group_id IN (SELECT group_id FROM GroupMembers WHERE address = ?) ";
-
-		if (hasChatReference != null) {
-			if (hasChatReference) {
-				latestSql += "AND CT.chat_reference IS NOT NULL ";
-			} else {
-				latestSql += "AND CT.chat_reference IS NULL ";
-			}
-		}
-		latestSql += "ORDER BY created_when DESC";
-
-		Map<Integer, Object[]> latestPerGroup = new HashMap<>();
-		try (ResultSet resultSet = this.repository.checkedExecute(latestSql, cutoffTimestamp, address)) {
+		List<GroupChat> groupChats = new ArrayList<>();
+		try (ResultSet resultSet = this.repository.checkedExecute(groupsSql, address)) {
 			if (resultSet != null) {
 				do {
 					int groupId = resultSet.getInt(1);
-					if (!latestPerGroup.containsKey(groupId)) {
-						latestPerGroup.put(groupId, new Object[] {
-							resultSet.getLong(2),
-							resultSet.getString(3),
-							resultSet.getString(4),
-							resultSet.getBytes(5),
-							resultSet.getBytes(6)
-						});
-					}
+					String groupName = resultSet.getString(2);
+
+					Long timestamp = resultSet.getLong(3);
+					if (timestamp == 0 && resultSet.wasNull())
+						timestamp = null;
+
+					String sender = resultSet.getString(4);
+					String senderName = resultSet.getString(5);
+					byte[] signature = resultSet.getBytes(6);
+					byte[] data = resultSet.getBytes(7);
+
+					GroupChat groupChat = new GroupChat(groupId, groupName, timestamp, sender, senderName, signature, encoding, data);
+					groupChats.add(groupChat);
 				} while (resultSet.next());
 			}
 		} catch (SQLException e) {
-			throw new DataException("Unable to fetch latest group chat messages from repository", e);
+			throw new DataException("Unable to fetch active group chats from repository", e);
 		}
 
-		// Step 3: Merge groups with their latest messages
-		List<GroupChat> groupChats = new ArrayList<>();
-		for (Map.Entry<Integer, String> entry : userGroups.entrySet()) {
-			int groupId = entry.getKey();
-			String groupName = entry.getValue();
-			Object[] msg = latestPerGroup.get(groupId);
-
-			if (msg != null) {
-				groupChats.add(new GroupChat(groupId, groupName, (Long) msg[0], (String) msg[1], (String) msg[2], (byte[]) msg[3], encoding, (byte[]) msg[4]));
-			} else {
-				groupChats.add(new GroupChat(groupId, groupName, null, null, null, null, encoding, null));
-			}
-		}
-
-		// Groupless chat (group 0) — separate query since it has special recipient IS NULL filter
-		String grouplessSql = "SELECT created_when, CT.sender, SenderNames.name, CT.signature, CT.data "
-				+ "FROM Transactions "
-				+ "JOIN ChatTransactions CT ON CT.signature = Transactions.signature "
-				+ "LEFT OUTER JOIN " + tableName + " AS SenderNames ON SenderNames.owner = CT.sender "
-				+ "WHERE type = " + TransactionType.CHAT.value + " "
-				+ "AND tx_group_id = 0 "
-				+ "AND created_when >= ? "
-				+ "AND CT.recipient IS NULL ";
-
-		if (hasChatReference != null) {
-			if (hasChatReference) {
-				grouplessSql += "AND CT.chat_reference IS NOT NULL ";
-			} else {
-				grouplessSql += "AND CT.chat_reference IS NULL ";
-			}
-		}
-		grouplessSql += "ORDER BY created_when DESC "
+		// We need different SQL to handle group-less chat
+		String grouplessSql = "SELECT created_when, sender, SenderNames.name, signature, data "
+				+ "FROM ChatTransactions "
+				+ "JOIN Transactions USING (signature) "
+				+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
+				+ "WHERE tx_group_id = 0 "
+				+ "AND recipient IS NULL "
+				+ "ORDER BY created_when DESC "
 				+ "LIMIT 1";
 
-		try (ResultSet resultSet = this.repository.checkedExecute(grouplessSql, cutoffTimestamp)) {
+		try (ResultSet resultSet = this.repository.checkedExecute(grouplessSql)) {
 			Long timestamp = null;
 			String sender = null;
 			String senderName = null;
@@ -339,6 +242,7 @@ public class HSQLDBChatRepository implements ChatRepository {
 			byte[] data = null;
 
 			if (resultSet != null) {
+				// We found a recipient-less, group-less CHAT message, so report its details
 				timestamp = resultSet.getLong(1);
 				sender = resultSet.getString(2);
 				senderName = resultSet.getString(3);
@@ -355,58 +259,29 @@ public class HSQLDBChatRepository implements ChatRepository {
 		return groupChats;
 	}
 
-	private List<DirectChat> getActiveDirectChats(String address, Boolean hasChatReference) throws DataException {
-		String tableName;
-
-		// if the PrimaryTable is available, then use it
-		if( this.repository.getBlockRepository().getBlockchainHeight() > BlockChain.getInstance().getMultipleNamesPerAccountHeight()) {
-			tableName = "PrimaryNames";
-		}
-		else {
-			tableName = "Names";
-		}
-
-		Long now = NTP.getTime();
-		if (now == null)
-			return new ArrayList<>();
-
-		long cutoffTimestamp = now - BlockChain.getInstance().getTransactionExpiryPeriod();
-
+	private List<DirectChat> getActiveDirectChats(String address) throws DataException {
 		// Find chat messages involving address
 		String directSql = "SELECT other_address, name, latest_timestamp, sender, sender_name "
 				+ "FROM ("
 					+ "SELECT recipient FROM ChatTransactions "
-					+ "JOIN Transactions USING (signature) "
-					+ "WHERE sender = ? AND recipient IS NOT NULL AND created_when >= ? "
+					+ "WHERE sender = ? AND recipient IS NOT NULL "
 					+ "UNION "
 					+ "SELECT sender FROM ChatTransactions "
-					+ "JOIN Transactions USING (signature) "
-					+ "WHERE recipient = ? AND created_when >= ?"
+					+ "WHERE recipient = ?"
 				+ ") AS OtherParties (other_address) "
 				+ "CROSS JOIN LATERAL("
 					+ "SELECT created_when AS latest_timestamp, sender, name AS sender_name "
 					+ "FROM ChatTransactions "
 					+ "NATURAL JOIN Transactions "
-					+ "LEFT OUTER JOIN " + tableName + " AS SenderNames ON SenderNames.owner = sender "
-					+ "WHERE ((sender = other_address AND recipient = ?) "
-					+ "OR (sender = ? AND recipient = other_address)) "
-					+ "AND created_when >= ? ";
-
-			    // Apply hasChatReference filter
-			if (hasChatReference != null) {
-				if (hasChatReference) {
-					directSql += "AND chat_reference IS NOT NULL ";
-				} else {
-					directSql += "AND chat_reference IS NULL ";
-				}
-			}
-		
-			directSql += "ORDER BY created_when DESC "
+					+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
+					+ "WHERE (sender = other_address AND recipient = ?) "
+					+ "OR (sender = ? AND recipient = other_address) "
+					+ "ORDER BY created_when DESC "
 					+ "LIMIT 1"
-					+ ") AS LatestMessages "
-					+ "LEFT OUTER JOIN " + tableName + " ON owner = other_address";
+				+ ") AS LatestMessages "
+				+ "LEFT OUTER JOIN Names ON owner = other_address";
 
-		Object[] bindParams = new Object[] { address, cutoffTimestamp, address, cutoffTimestamp, address, address, cutoffTimestamp };
+		Object[] bindParams = new Object[] { address, address, address, address };
 
 		List<DirectChat> directChats = new ArrayList<>();
 		try (ResultSet resultSet = this.repository.checkedExecute(directSql, bindParams)) {
