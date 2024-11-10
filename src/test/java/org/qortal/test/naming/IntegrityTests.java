@@ -4,8 +4,6 @@ import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.qortal.account.PrivateKeyAccount;
-import org.qortal.api.resource.TransactionsResource;
-import org.qortal.block.BlockChain;
 import org.qortal.controller.repository.NamesDatabaseIntegrityCheck;
 import org.qortal.data.naming.NameData;
 import org.qortal.data.transaction.*;
@@ -15,7 +13,6 @@ import org.qortal.repository.RepositoryFactory;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.repository.hsqldb.HSQLDBRepositoryFactory;
 import org.qortal.settings.Settings;
-import org.qortal.test.common.BlockUtils;
 import org.qortal.test.common.Common;
 import org.qortal.test.common.TransactionUtils;
 import org.qortal.test.common.transaction.TestTransaction;
@@ -388,8 +385,6 @@ public class IntegrityTests extends Common {
     @Test
     public void testUpdateToMissingName() throws DataException {
         try (final Repository repository = RepositoryManager.getRepository()) {
-            BlockUtils.mintBlocks(repository, BlockChain.getInstance().getMultipleNamesPerAccountHeight());
-
             // Register-name
             PrivateKeyAccount alice = Common.getTestAccount(repository, "alice");
             String initialName = "test-name";
@@ -427,12 +422,7 @@ public class IntegrityTests extends Common {
             // Therefore the name that we are trying to rename TO already exists
             Transaction.ValidationResult result = transaction.importAsUnconfirmed();
             assertTrue("Transaction should be invalid", Transaction.ValidationResult.OK != result);
-
-            // this assertion has been updated, because the primary name logic now comes into play and you cannot update a primary name when there
-            // is other names registered and if your try a NOT SUPPORTED result will be given
-            assertTrue("Destination name should already exist", Transaction.ValidationResult.NOT_SUPPORTED == result);
-
-            assertEquals(alice.getPrimaryName(), alice.determinePrimaryName(TransactionsResource.ConfirmationStatus.CONFIRMED));
+            assertTrue("Destination name should already exist", Transaction.ValidationResult.NAME_ALREADY_REGISTERED == result);
         }
     }
 

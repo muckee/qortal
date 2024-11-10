@@ -37,7 +37,7 @@ public enum Service {
             if (files != null && files[0] != null) {
                 final String extension = FilenameUtils.getExtension(files[0].getName()).toLowerCase();
                 // We must allow blank file extensions because these are used by data published from a plaintext or base64-encoded string
-                final List<String> allowedExtensions = Arrays.asList("qortal", "zip", "pdf", "txt", "odt", "ods", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "");
+                final List<String> allowedExtensions = Arrays.asList("zip", "pdf", "txt", "odt", "ods", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "");
                 if (extension == null || !allowedExtensions.contains(extension)) {
                     return ValidationResult.INVALID_FILE_EXTENSION;
                 }
@@ -48,8 +48,8 @@ public enum Service {
     QCHAT_ATTACHMENT_PRIVATE(121, true, 1024*1024L, true, true, null),
     ATTACHMENT(130, false, 50*1024*1024L, true, false, null),
     ATTACHMENT_PRIVATE(131, true, 50*1024*1024L, true, true, null),
-    FILE(140, false, null, false, false, null),
-    FILE_PRIVATE(141, true, null, false, true, null),
+    FILE(140, false, null, true, false, null),
+    FILE_PRIVATE(141, true, null, true, true, null),
     FILES(150, false, null, false, false, null),
     CHAIN_DATA(160, true, 239L, true, false, null),
     WEBSITE(200, true, null, false, false, null) {
@@ -62,17 +62,7 @@ public enum Service {
 
             // Custom validation function to require an index HTML file in the root directory
             List<String> fileNames = ArbitraryDataRenderer.indexFiles();
-            List<String> files;
-
-            // single files are paackaged differently
-            if( path.toFile().isFile() ) {
-                files = new ArrayList<>(1);
-                files.add(path.getFileName().toString());
-            }
-            else {
-                files = new ArrayList<>(Arrays.asList(path.toFile().list()));
-            }
-
+            String[] files = path.toFile().list();
             if (files != null) {
                 for (String file : files) {
                     Path fileName = Paths.get(file).getFileName();
@@ -85,8 +75,8 @@ public enum Service {
         }
     },
     GIT_REPOSITORY(300, false, null, false, false, null),
-    IMAGE(400, true, 10*1024*1024L, false, false, null),
-    IMAGE_PRIVATE(401, true, 10*1024*1024L, false, true, null),
+    IMAGE(400, true, 10*1024*1024L, true, false, null),
+    IMAGE_PRIVATE(401, true, 10*1024*1024L, true, true, null),
     THUMBNAIL(410, true, 500*1024L, true, false, null),
     QCHAT_IMAGE(420, true, 500*1024L, true, false, null),
     VIDEO(500, false, null, true, false, null),
@@ -101,8 +91,8 @@ public enum Service {
     BLOG(700, false, null, false, false, null),
     BLOG_POST(777, false, null, true, false, null),
     BLOG_COMMENT(778, true, 500*1024L, true, false, null),
-    DOCUMENT(800, false, null, false, false, null),
-    DOCUMENT_PRIVATE(801, true, null, false, true, null),
+    DOCUMENT(800, false, null, true, false, null),
+    DOCUMENT_PRIVATE(801, true, null, true, true, null),
     LIST(900, true, null, true, false, null),
     PLAYLIST(910, true, null, true, false, null),
     APP(1000, true, 50*1024*1024L, false, false, null),
@@ -214,9 +204,7 @@ public enum Service {
         // Load the first 25KB of data. This only needs to be long enough to check the prefix
         // and also to allow for possible additional future validation of smaller files.
         byte[] data = FilesystemUtils.getSingleFileContents(path, 25*1024);
-        // Exclude .qortal metadata from size calculation - it's system metadata,
-        // not user content, and shouldn't count against service size limits
-        long size = FilesystemUtils.getDirectorySize(path, true);
+        long size = FilesystemUtils.getDirectorySize(path);
 
         // Validate max size if needed
         if (this.maxSize != null) {
@@ -261,10 +249,6 @@ public enum Service {
     public boolean isValidationRequired() {
         // We must always validate single file resources, to ensure they are actually a single file
         return this.requiresValidation || this.single;
-    }
-
-    public Long getMaxSize() {
-        return this.maxSize;
     }
 
     public boolean isPrivate() {

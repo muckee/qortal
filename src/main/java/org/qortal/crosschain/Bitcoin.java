@@ -1,6 +1,5 @@
 package org.qortal.crosschain;
 
-import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Context;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.core.Transaction;
@@ -15,21 +14,15 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class Bitcoin extends Bitcoiny {
 
 	public static final String CURRENCY_CODE = "BTC";
 
-	// Locking fee to lock in a QORT for BTC. This is the default value that the user should reset to
-	// a value inline with the BTC fee market. This is 5 sats per kB.
-	private static final Coin DEFAULT_FEE_PER_KB = Coin.valueOf(5_000); // 0.00005 BTC per 1000 bytes
+	private static final long MINIMUM_ORDER_AMOUNT = 100000; // 0.001 BTC minimum order, due to high fees
 
-	private static final long MINIMUM_ORDER_AMOUNT = 100_000; // 0.001 BTC minimum order, due to high fees
-
-	// Default value until user resets fee to compete with the current market. This is a total value for a
-	// p2sh transaction, size 300 kB, 5 sats per kB
-	private static final long NEW_FEE_AMOUNT = 1_500L;
+	// Temporary values until a dynamic fee system is written.
+	private static final long NEW_FEE_AMOUNT = 6_000L;
 
 	private static final long NON_MAINNET_FEE = 1000L; // enough for TESTNET3 and should be OK for REGTEST
 
@@ -78,6 +71,7 @@ public class Bitcoin extends Bitcoiny {
 					new Server("electrum.bitrefill.com", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.brainshome.de", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.emzy.de", Server.ConnectionType.SSL, 50002),
+					new Server("electrum.kcicom.net", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.kendigisland.xyz", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.thomasfischbach.de", Server.ConnectionType.SSL, 50002),
 					new Server("electrum-btc.leblancnet.us", Server.ConnectionType.SSL, 50002),
@@ -91,6 +85,7 @@ public class Bitcoin extends Bitcoiny {
 					new Server("electrumx-core.1209k.com", Server.ConnectionType.SSL, 50002),
 					new Server("elx.bitske.com", Server.ConnectionType.SSL, 50002),
 					new Server("exs.dyshek.org", Server.ConnectionType.SSL, 50002),
+					new Server("fortress.qtornado.com", Server.ConnectionType.SSL, 50002),
 					new Server("guichet.centure.cc", Server.ConnectionType.SSL, 50002),
 					new Server("hodl.artyomk13.me", Server.ConnectionType.SSL, 50002),
 					new Server("hodlers.beer", Server.ConnectionType.SSL, 50002),
@@ -116,7 +111,7 @@ public class Bitcoin extends Bitcoiny {
 
 			@Override
 			public long getP2shFee(Long timestamp) {
-				return this.getFeeRequired();
+				return this.getFeeCeiling();
 			}
 		},
 		TEST3 {
@@ -178,14 +173,14 @@ public class Bitcoin extends Bitcoiny {
 			}
 		};
 
-		private AtomicLong feeRequired = new AtomicLong(NEW_FEE_AMOUNT);
+		private long feeCeiling = NEW_FEE_AMOUNT;
 
-		public long getFeeRequired() {
-			return feeRequired.get();
+		public long getFeeCeiling() {
+			return feeCeiling;
 		}
 
-		public void setFeeRequired(long feeRequired) {
-			this.feeRequired.set(feeRequired);
+		public void setFeeCeiling(long feeCeiling) {
+			this.feeCeiling = feeCeiling;
 		}
 
 		public abstract NetworkParameters getParams();
@@ -201,14 +196,14 @@ public class Bitcoin extends Bitcoiny {
 	// Constructors and instance
 
 	private Bitcoin(BitcoinNet bitcoinNet, BitcoinyBlockchainProvider blockchain, Context bitcoinjContext, String currencyCode) {
-		super(blockchain, bitcoinjContext, currencyCode, DEFAULT_FEE_PER_KB);
+		super(blockchain, bitcoinjContext, currencyCode, bitcoinjContext.getFeePerKb());
 		this.bitcoinNet = bitcoinNet;
 
 		LOGGER.info(() -> String.format("Starting Bitcoin support using %s", this.bitcoinNet.name()));
 	}
 
 	public static synchronized Bitcoin getInstance() {
-		if (instance == null && Settings.getInstance().isWalletEnabled("BTC")) {
+		if (instance == null) {
 			BitcoinNet bitcoinNet = Settings.getInstance().getBitcoinNet();
 
 			BitcoinyBlockchainProvider electrumX = new ElectrumX("Bitcoin-" + bitcoinNet.name(), bitcoinNet.getGenesisHash(), bitcoinNet.getServers(), DEFAULT_ELECTRUMX_PORTS);
@@ -247,14 +242,14 @@ public class Bitcoin extends Bitcoiny {
 	}
 
 	@Override
-	public long getFeeRequired() {
-		return this.bitcoinNet.getFeeRequired();
+	public long getFeeCeiling() {
+		return this.bitcoinNet.getFeeCeiling();
 	}
 
 	@Override
-	public void setFeeRequired(long fee) {
+	public void setFeeCeiling(long fee) {
 
-		this.bitcoinNet.setFeeRequired( fee );
+		this.bitcoinNet.setFeeCeiling( fee );
 	}
 	/**
  	* Returns bitcoinj transaction sending <tt>amount</tt> to <tt>recipient</tt> using 20 sat/byte fee.
