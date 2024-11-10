@@ -420,7 +420,7 @@ public class CrossChainDigibyteResource {
 			}
 
 	)
-	@ApiErrors({ApiError.INVALID_DATA, ApiError.UNAUTHORIZED})
+	@ApiErrors({ApiError.INVALID_DATA})
 	@SecurityRequirement(name = "apiKey")
 	public ServerConnectionInfo setCurrentServer(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
 		Security.checkApiCallAllowed(request);
@@ -428,14 +428,7 @@ public class CrossChainDigibyteResource {
 		if( serverInfo.getConnectionType() == null ||
 				serverInfo.getHostName() == null) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
 		try {
-			ServerConnectionInfo serverConnectionInfo = CrossChainUtils.setCurrentServer(Digibyte.getInstance(), serverInfo);
-
-			if( serverConnectionInfo != null ) {
-				return serverConnectionInfo;
-			}
-			else {
-				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.UNAUTHORIZED);
-			}
+			return CrossChainUtils.setCurrentServer( Digibyte.getInstance(), serverInfo );
 		}
 		catch (IllegalArgumentException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
@@ -509,10 +502,10 @@ public class CrossChainDigibyteResource {
 	}
 
 	@GET
-	@Path("/feerequired")
+	@Path("/feeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking DGB to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Returns Digibyte fee per Kb.",
+			description = "Returns Digibyte fee per Kb.",
 			responses = {
 					@ApiResponse(
 							content = @Content(
@@ -523,17 +516,17 @@ public class CrossChainDigibyteResource {
 					)
 			}
 	)
-	public String getDigibyteFeeRequired() {
+	public String getDigibyteFeeCeiling() {
 		Digibyte digibyte = Digibyte.getInstance();
 
-		return String.valueOf(digibyte.getFeeRequired());
+		return String.valueOf(digibyte.getFeeCeiling());
 	}
 
 	@POST
-	@Path("/updatefeerequired")
+	@Path("/updatefeeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking DGB to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Sets Digibyte fee ceiling.",
+			description = "Sets Digibyte fee ceiling.",
 			requestBody = @RequestBody(
 					required = true,
 					content = @Content(
@@ -552,13 +545,13 @@ public class CrossChainDigibyteResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_PRIVATE_KEY, ApiError.INVALID_CRITERIA})
-	public String setDigibyteFeeRequired(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
+	public String setDigibyteFeeCeiling(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
 		Security.checkApiCallAllowed(request);
 
 		Digibyte digibyte = Digibyte.getInstance();
 
 		try {
-			return CrossChainUtils.setFeeRequired(digibyte, fee);
+			return CrossChainUtils.setFeeCeiling(digibyte, fee);
 		}
 		catch (IllegalArgumentException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
