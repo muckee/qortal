@@ -27,8 +27,6 @@
 
 package org.qortal.utils;
 
-import java.io.BufferedOutputStream;
-
 import org.qortal.controller.Controller;
 
 import java.io.File;
@@ -46,15 +44,11 @@ public class ZipUtils {
         File sourceFile = new File(sourcePath);
         boolean isSingleFile = Paths.get(sourcePath).toFile().isFile();
         FileOutputStream fileOutputStream = new FileOutputStream(destFilePath);
-        
-        // 🔧 Use best speed compression level
-        ZipOutputStream zipOutputStream = new ZipOutputStream(fileOutputStream);        
+        ZipOutputStream zipOutputStream = new ZipOutputStream(fileOutputStream);
         ZipUtils.zip(sourceFile, enclosingFolderName, zipOutputStream, isSingleFile);
-        
         zipOutputStream.close();
         fileOutputStream.close();
     }
-    
 
     public static void zip(final File fileToZip, final String enclosingFolderName, final ZipOutputStream zipOut, boolean isSingleFile) throws IOException, InterruptedException {
         if (Controller.isStopping()) {
@@ -88,7 +82,7 @@ public class ZipUtils {
         final FileInputStream fis = new FileInputStream(fileToZip);
         final ZipEntry zipEntry = new ZipEntry(enclosingFolderName);
         zipOut.putNextEntry(zipEntry);
-        final byte[] bytes = new byte[65536];
+        final byte[] bytes = new byte[1024];
         int length;
         while ((length = fis.read(bytes)) >= 0) {
             zipOut.write(bytes, 0, length);
@@ -98,34 +92,33 @@ public class ZipUtils {
 
     public static void unzip(String sourcePath, String destPath) throws IOException {
         final File destDir = new File(destPath);
-        final byte[] buffer = new byte[65536];
-        try (ZipInputStream zis = new ZipInputStream(new FileInputStream(sourcePath))) {
-            ZipEntry zipEntry = zis.getNextEntry();
-            while (zipEntry != null) {
-                final File newFile = ZipUtils.newFile(destDir, zipEntry);
-                if (zipEntry.isDirectory()) {
-                    if (!newFile.isDirectory() && !newFile.mkdirs()) {
-                        throw new IOException("Failed to create directory " + newFile);
-                    }
-                } else {
-                    File parent = newFile.getParentFile();
-                    if (!parent.isDirectory() && !parent.mkdirs()) {
-                        throw new IOException("Failed to create directory " + parent);
-                    }
-    
-                    try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(newFile), buffer.length)) {
-                        int len;
-                        while ((len = zis.read(buffer)) > 0) {
-                            bos.write(buffer, 0, len);
-                        }
-                    }
+        final byte[] buffer = new byte[1024];
+        final ZipInputStream zis = new ZipInputStream(new FileInputStream(sourcePath));
+        ZipEntry zipEntry = zis.getNextEntry();
+        while (zipEntry != null) {
+            final File newFile = ZipUtils.newFile(destDir, zipEntry);
+            if (zipEntry.isDirectory()) {
+                if (!newFile.isDirectory() && !newFile.mkdirs()) {
+                    throw new IOException("Failed to create directory " + newFile);
                 }
-                zipEntry = zis.getNextEntry();
+            } else {
+                File parent = newFile.getParentFile();
+                if (!parent.isDirectory() && !parent.mkdirs()) {
+                    throw new IOException("Failed to create directory " + parent);
+                }
+
+                final FileOutputStream fos = new FileOutputStream(newFile);
+                int len;
+                while ((len = zis.read(buffer)) > 0) {
+                    fos.write(buffer, 0, len);
+                }
+                fos.close();
             }
-            zis.closeEntry();
+            zipEntry = zis.getNextEntry();
         }
+        zis.closeEntry();
+        zis.close();
     }
-    
 
     /**
      * See: https://snyk.io/research/zip-slip-vulnerability
