@@ -1,0 +1,41 @@
+name: Sync with Upstream
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+  schedule:
+    - cron: '0 * * * *'  # Runs every hour. Adjust as needed.
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          ref: master  # Default branch
+
+      - name: Set up Git user
+        run: |
+          git config user.name "Muckee"
+          git config user.email "muckee@thugnerdz.com"
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/Qortal/qortal.git
+          git fetch upstream
+
+      - name: Rebase with upstream
+        run: |
+          # Rebase with upstream and resolve conflicts automatically using the "theirs" strategy
+          git checkout master
+          git rebase upstream/master --strategy=recursive --strategy-option=theirs
+
+      - name: Push changes to origin
+        run: |
+          git push origin master --force
