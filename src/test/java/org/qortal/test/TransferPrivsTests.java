@@ -74,7 +74,7 @@ public class TransferPrivsTests extends Common {
 	public void testAliceIntoNewAccountTransferPrivs() throws DataException {
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			TestAccount alice = Common.getTestAccount(repository, "alice");
-			assertTrue(alice.canMint(false));
+			assertTrue(alice.canMint());
 
 			PrivateKeyAccount aliceMintingAccount = Common.getTestAccount(repository, "alice-reward-share");
 
@@ -86,8 +86,8 @@ public class TransferPrivsTests extends Common {
 
 			combineAccounts(repository, alice, randomAccount, aliceMintingAccount);
 
-			assertFalse(alice.canMint(false));
-			assertTrue(randomAccount.canMint(false));
+			assertFalse(alice.canMint());
+			assertTrue(randomAccount.canMint());
 		}
 	}
 
@@ -97,8 +97,8 @@ public class TransferPrivsTests extends Common {
 			TestAccount alice = Common.getTestAccount(repository, "alice");
 			TestAccount dilbert = Common.getTestAccount(repository, "dilbert");
 
-			assertTrue(alice.canMint(false));
-			assertTrue(dilbert.canMint(false));
+			assertTrue(alice.canMint());
+			assertTrue(dilbert.canMint());
 
 			// Dilbert has level, Alice does not so we need Alice to mint enough blocks to bump Dilbert's level post-combine
 			final int expectedPostCombineLevel = dilbert.getLevel() + 1;
@@ -118,11 +118,11 @@ public class TransferPrivsTests extends Common {
 
 			// Post-combine sender checks
 			checkSenderPostTransfer(postCombineAliceData);
-			assertFalse(alice.canMint(false));
+			assertFalse(alice.canMint());
 
 			// Post-combine recipient checks
 			checkRecipientPostTransfer(preCombineAliceData, preCombineDilbertData, postCombineDilbertData, expectedPostCombineLevel);
-			assertTrue(dilbert.canMint(false));
+			assertTrue(dilbert.canMint());
 
 			// Orphan previous block
 			BlockUtils.orphanLastBlock(repository);
@@ -130,12 +130,12 @@ public class TransferPrivsTests extends Common {
 			// Sender checks
 			AccountData orphanedAliceData = repository.getAccountRepository().getAccount(alice.getAddress());
 			checkAccountDataRestored("sender", preCombineAliceData, orphanedAliceData);
-			assertTrue(alice.canMint(false));
+			assertTrue(alice.canMint());
 
 			// Recipient checks
 			AccountData orphanedDilbertData = repository.getAccountRepository().getAccount(dilbert.getAddress());
 			checkAccountDataRestored("recipient", preCombineDilbertData, orphanedDilbertData);
-			assertTrue(dilbert.canMint(false));
+			assertTrue(dilbert.canMint());
 		}
 	}
 
@@ -145,8 +145,8 @@ public class TransferPrivsTests extends Common {
 			TestAccount alice = Common.getTestAccount(repository, "alice");
 			TestAccount dilbert = Common.getTestAccount(repository, "dilbert");
 
-			assertTrue(dilbert.canMint(false));
-			assertTrue(alice.canMint(false));
+			assertTrue(dilbert.canMint());
+			assertTrue(alice.canMint());
 
 			// Dilbert has level, Alice does not so we need Alice to mint enough blocks to surpass Dilbert's level post-combine
 			final int expectedPostCombineLevel = dilbert.getLevel() + 1;
@@ -166,11 +166,11 @@ public class TransferPrivsTests extends Common {
 
 			// Post-combine sender checks
 			checkSenderPostTransfer(postCombineDilbertData);
-			assertFalse(dilbert.canMint(false));
+			assertFalse(dilbert.canMint());
 
 			// Post-combine recipient checks
 			checkRecipientPostTransfer(preCombineDilbertData, preCombineAliceData, postCombineAliceData, expectedPostCombineLevel);
-			assertTrue(alice.canMint(false));
+			assertTrue(alice.canMint());
 
 			// Orphan previous block
 			BlockUtils.orphanLastBlock(repository);
@@ -178,12 +178,12 @@ public class TransferPrivsTests extends Common {
 			// Sender checks
 			AccountData orphanedDilbertData = repository.getAccountRepository().getAccount(dilbert.getAddress());
 			checkAccountDataRestored("sender", preCombineDilbertData, orphanedDilbertData);
-			assertTrue(dilbert.canMint(false));
+			assertTrue(dilbert.canMint());
 
 			// Recipient checks
 			AccountData orphanedAliceData = repository.getAccountRepository().getAccount(alice.getAddress());
 			checkAccountDataRestored("recipient", preCombineAliceData, orphanedAliceData);
-			assertTrue(alice.canMint(false));
+			assertTrue(alice.canMint());
 		}
 	}
 
@@ -202,8 +202,8 @@ public class TransferPrivsTests extends Common {
 			TestAccount chloe = Common.getTestAccount(repository, "chloe");
 			TestAccount dilbert = Common.getTestAccount(repository, "dilbert");
 
-			assertTrue(dilbert.canMint(false));
-			assertFalse(chloe.canMint(false));
+			assertTrue(dilbert.canMint());
+			assertFalse(chloe.canMint());
 
 			// COMBINE DILBERT INTO CHLOE
 
@@ -225,16 +225,16 @@ public class TransferPrivsTests extends Common {
 
 			// Post-combine sender checks
 			checkSenderPostTransfer(post1stCombineDilbertData);
-			assertFalse(dilbert.canMint(false));
+			assertFalse(dilbert.canMint());
 
 			// Post-combine recipient checks
 			checkRecipientPostTransfer(pre1stCombineDilbertData, pre1stCombineChloeData, post1stCombineChloeData, expectedPost1stCombineLevel);
-			assertTrue(chloe.canMint(false));
+			assertTrue(chloe.canMint());
 
 			// COMBINE ALICE INTO CHLOE
 
-			assertTrue(alice.canMint(false));
-			assertTrue(chloe.canMint(false));
+			assertTrue(alice.canMint());
+			assertTrue(chloe.canMint());
 
 			// Alice needs to mint enough blocks to surpass Chloe's level post-combine
 			final int expectedPost2ndCombineLevel = chloe.getLevel() + 1;
@@ -254,11 +254,11 @@ public class TransferPrivsTests extends Common {
 
 			// Post-combine sender checks
 			checkSenderPostTransfer(post2ndCombineAliceData);
-			assertFalse(alice.canMint(false));
+			assertFalse(alice.canMint());
 
 			// Post-combine recipient checks
 			checkRecipientPostTransfer(pre2ndCombineAliceData, pre2ndCombineChloeData, post2ndCombineChloeData, expectedPost2ndCombineLevel);
-			assertTrue(chloe.canMint(false));
+			assertTrue(chloe.canMint());
 
 			// Orphan 2nd combine
 			BlockUtils.orphanLastBlock(repository);
@@ -266,12 +266,12 @@ public class TransferPrivsTests extends Common {
 			// Sender checks
 			AccountData orphanedAliceData = repository.getAccountRepository().getAccount(alice.getAddress());
 			checkAccountDataRestored("sender", pre2ndCombineAliceData, orphanedAliceData);
-			assertTrue(alice.canMint(false));
+			assertTrue(alice.canMint());
 
 			// Recipient checks
 			AccountData orphanedChloeData = repository.getAccountRepository().getAccount(chloe.getAddress());
 			checkAccountDataRestored("recipient", pre2ndCombineChloeData, orphanedChloeData);
-			assertTrue(chloe.canMint(false));
+			assertTrue(chloe.canMint());
 
 			// Orphan 1nd combine
 			BlockUtils.orphanToBlock(repository, pre1stCombineBlockHeight);
@@ -279,7 +279,7 @@ public class TransferPrivsTests extends Common {
 			// Sender checks
 			AccountData orphanedDilbertData = repository.getAccountRepository().getAccount(dilbert.getAddress());
 			checkAccountDataRestored("sender", pre1stCombineDilbertData, orphanedDilbertData);
-			assertTrue(dilbert.canMint(false));
+			assertTrue(dilbert.canMint());
 
 			// Recipient checks
 			orphanedChloeData = repository.getAccountRepository().getAccount(chloe.getAddress());
@@ -287,7 +287,7 @@ public class TransferPrivsTests extends Common {
 
 			// Chloe canMint() would return true here due to Alice-Chloe reward-share minting at top of method, so undo that minting by orphaning back to block 1
 			BlockUtils.orphanToBlock(repository, 1);
-			assertFalse(chloe.canMint(false));
+			assertFalse(chloe.canMint());
 		}
 	}
 

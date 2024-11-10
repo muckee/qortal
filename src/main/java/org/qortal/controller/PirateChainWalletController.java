@@ -48,16 +48,14 @@ public class PirateChainWalletController extends Thread {
     private boolean shouldLoadWallet = false;
     private String loadStatus = null;
 
-    private static final String qdnWalletSignature = "EsfUw54perxkEtfoUoL7Z97XPrNsZRZXePVZPz3cwRm9qyEPSofD5KmgVpDqVitQp7LhnZRmL6z2V9hEe1YS45T";
+    private static String qdnWalletSignature = "EsfUw54perxkEtfoUoL7Z97XPrNsZRZXePVZPz3cwRm9qyEPSofD5KmgVpDqVitQp7LhnZRmL6z2V9hEe1YS45T";
 
 
     private PirateChainWalletController() {
-        this.running = Settings.getInstance().isWalletEnabled("ARRR");
+        this.running = true;
     }
 
     public static PirateChainWalletController getInstance() {
-        if (!Settings.getInstance().isWalletEnabled("ARRR"))
-            return null;
         if (instance == null)
             instance = new PirateChainWalletController();
 
@@ -134,14 +132,10 @@ public class PirateChainWalletController extends Thread {
 
     public void shutdown() {
         // Save the wallet
-        try {
-            this.saveCurrentWallet();
+        this.saveCurrentWallet();
 
-            this.running = false;
-            this.interrupt();
-        } catch (Exception e) {
-
-        }
+        this.running = false;
+        this.interrupt();
     }
 
 
