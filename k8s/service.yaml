@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: qortal
+spec:
+  type: ClusterIP  # Change to LoadBalancer if you want external access
+  ports:
+    - port: 12391
+      targetPort: 12391
+      name: admin
+    - port: 12392
+      targetPort: 12392
+      name: service
+  selector:
+    app: qortal
