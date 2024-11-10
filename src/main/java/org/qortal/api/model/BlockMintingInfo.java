@@ -9,7 +9,6 @@ import java.math.BigInteger;
 public class BlockMintingInfo {
 
 	public byte[] minterPublicKey;
-	public String minterAddress;
 	public int minterLevel;
 	public int onlineAccountsCount;
 	public BigDecimal maxDistance;
@@ -20,4 +19,5 @@ public class BlockMintingInfo {
 
 	public BlockMintingInfo() {
 	}
+
 }

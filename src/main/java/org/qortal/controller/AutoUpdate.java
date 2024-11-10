@@ -30,9 +30,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
@@ -233,139 +231,64 @@ public class AutoUpdate extends Thread {
 
 		// Call ApplyUpdate to end this process (unlocking current JAR so it can be replaced)
 		String javaHome = System.getProperty("java.home");
+		LOGGER.debug(String.format("Java home: %s", javaHome));
+
 		Path javaBinary = Paths.get(javaHome, "bin", "java");
-		Path javaSpawnHelper = Paths.get(javaHome, "lib", "jspawnhelper");
-		Path newJarAbsolute = newJar.toAbsolutePath();
-		String[] savedArgs = Controller.getInstance().getSavedArgs();
+		LOGGER.debug(String.format("Java binary: %s", javaBinary));
 
-		SysTray.getInstance().showMessage(Translator.INSTANCE.translate("SysTray", "AUTO_UPDATE"),
-				Translator.INSTANCE.translate("SysTray", "APPLYING_UPDATE_AND_RESTARTING"),
-				MessageType.INFO);
+		try {
+			List<String> javaCmd = new ArrayList<>();
+			// Java runtime binary itself
+			javaCmd.add(javaBinary.toString());
 
-		List<String> javaCandidates = buildJavaCandidates(javaBinary);
-		List<String> runtimeInputArgs = ManagementFactory.getRuntimeMXBean().getInputArguments();
-		Exception lastException = null;
-		int attempt = 0;
+			// JVM arguments
+			javaCmd.addAll(ManagementFactory.getRuntimeMXBean().getInputArguments());
 
-		// Try full JVM args first, then retry with a minimal command line.
-		for (boolean includeJvmArgs : new boolean[]{true, false}) {
-				for (String javaCandidate : javaCandidates) {
-					attempt++;
-					List<String> javaCmd = buildApplyUpdateCommand(javaCandidate, includeJvmArgs, runtimeInputArgs, savedArgs, newJarAbsolute);
-					LOGGER.info("Applying update attempt {} (jvmArgs={}, java={}): {}", attempt, includeJvmArgs, javaCandidate, String.join(" ", javaCmd));
+			// Disable, but retain, any -agentlib JVM arg as sub-process might fail if it tries to reuse same port
+			javaCmd = javaCmd.stream()
+					.map(arg -> arg.replace("-agentlib", AGENTLIB_JVM_HOLDER_ARG))
+					.collect(Collectors.toList());
 
-				try {
-					startApplyUpdateProcess(javaCmd);
-					return true; // applying update OK
-				} catch (Exception e) {
-					lastException = e;
-					LOGGER.error("Failed to apply update attempt {} (jvmArgs={}, java={}): {}", attempt, includeJvmArgs, javaCandidate, e.getMessage(), e);
-				}
+			// Remove JNI options as they won't be supported by command-line 'java'
+			// These are typically added by the AdvancedInstaller Java launcher EXE
+			javaCmd.removeAll(Arrays.asList("abort", "exit", "vfprintf"));
+
+			// Call ApplyUpdate using new JAR
+			javaCmd.addAll(Arrays.asList("-cp", NEW_JAR_FILENAME, ApplyUpdate.class.getCanonicalName()));
+
+			// Add command-line args saved from start-up
+			String[] savedArgs = Controller.getInstance().getSavedArgs();
+			if (savedArgs != null)
+				javaCmd.addAll(Arrays.asList(savedArgs));
+
+			LOGGER.info(String.format("Applying update with: %s", String.join(" ", javaCmd)));
+
+			SysTray.getInstance().showMessage(Translator.INSTANCE.translate("SysTray", "AUTO_UPDATE"),
+					Translator.INSTANCE.translate("SysTray", "APPLYING_UPDATE_AND_RESTARTING"),
+					MessageType.INFO);
+
+			ProcessBuilder processBuilder = new ProcessBuilder(javaCmd);
+
+			// New process will inherit our stdout and stderr
+			processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+			processBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
+
+			Process process = processBuilder.start();
+
+			// Nothing to pipe to new process, so close output stream (process's stdin)
+			process.getOutputStream().close();
+
+			return true; // applying update OK
+		} catch (Exception e) {
+			LOGGER.error(String.format("Failed to apply update: %s", e.getMessage()));
+
+			try {
+				Files.deleteIfExists(newJar);
+			} catch (IOException de) {
+				LOGGER.warn(String.format("Failed to delete update download: %s", de.getMessage()));
 			}
-		}
 
-		logLaunchDiagnostics(javaHome, javaBinary, javaSpawnHelper, newJarAbsolute, javaCandidates, attempt, lastException);
-
-		try {
-			Files.deleteIfExists(newJar);
-		} catch (IOException de) {
-			LOGGER.warn(String.format("Failed to delete update download: %s", de.getMessage()));
-		}
-
-		return false; // failed - allow retries/repo fallback
-	}
-
-	static List<String> buildJavaCandidates(Path javaBinary) {
-		LinkedHashSet<String> candidates = new LinkedHashSet<>();
-		candidates.add(javaBinary.toString());
-
-		try {
-			candidates.add(javaBinary.toRealPath().toString());
-		} catch (IOException e) {
-			// ignore
-		}
-
-		String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-		if (!osName.contains("win")) {
-			candidates.add("/usr/bin/java");
-		}
-
-		candidates.add("java");
-		return new ArrayList<>(candidates);
-	}
-
-	static List<String> sanitizeJvmArguments(List<String> inputArgs) {
-		List<String> javaCmd = new ArrayList<>(inputArgs);
-
-		// Disable, but retain, any -agentlib JVM arg as sub-process might fail if it tries to reuse same port
-		javaCmd = javaCmd.stream()
-				.map(arg -> arg.replace("-agentlib", AGENTLIB_JVM_HOLDER_ARG))
-				.collect(Collectors.toList());
-
-		// Remove JNI options as they won't be supported by command-line 'java'
-		// These are typically added by the AdvancedInstaller Java launcher EXE
-		javaCmd.removeAll(Arrays.asList("abort", "exit", "vfprintf"));
-
-		return javaCmd;
-	}
-
-	static List<String> buildApplyUpdateCommand(String javaExecutable, boolean includeJvmArgs,
-											 List<String> runtimeInputArgs, String[] savedArgs, Path newJarAbsolute) {
-		List<String> javaCmd = new ArrayList<>();
-		javaCmd.add(javaExecutable);
-
-		if (includeJvmArgs) {
-			javaCmd.addAll(sanitizeJvmArguments(runtimeInputArgs));
-		}
-
-		// Call ApplyUpdate using new JAR
-		javaCmd.addAll(Arrays.asList("-cp", newJarAbsolute.toString(), ApplyUpdate.class.getCanonicalName()));
-
-		// Add command-line args saved from start-up
-		if (savedArgs != null)
-			javaCmd.addAll(Arrays.asList(savedArgs));
-
-		return javaCmd;
-	}
-
-	private static void startApplyUpdateProcess(List<String> javaCmd) throws IOException {
-		ProcessBuilder processBuilder = new ProcessBuilder(javaCmd);
-
-		// New process will inherit our stdout and stderr
-		processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
-		processBuilder.redirectError(ProcessBuilder.Redirect.INHERIT);
-
-		Process process = processBuilder.start();
-
-		// Nothing to pipe to new process, so close output stream (process's stdin)
-		process.getOutputStream().close();
-	}
-
-	private static void logLaunchDiagnostics(String javaHome, Path javaBinary, Path javaSpawnHelper, Path newJarAbsolute,
-											 List<String> javaCandidates, int attempts, Exception lastException) {
-		LOGGER.error("Failed to apply update after {} attempts. java.home={}, cwd={}, newJar={}, candidates={}",
-				attempts, javaHome, Paths.get(".").toAbsolutePath().normalize(), newJarAbsolute, javaCandidates);
-
-		logPathDiagnostics("javaBinary", javaBinary);
-		logPathDiagnostics("jspawnhelper", javaSpawnHelper);
-		logPathDiagnostics("newJar", newJarAbsolute);
-
-		if (lastException != null) {
-			LOGGER.error("Last apply update failure summary: {}", lastException.getMessage(), lastException);
-		}
-	}
-
-	private static void logPathDiagnostics(String label, Path path) {
-		try {
-			LOGGER.error("{} -> path={}, exists={}, readable={}, executable={}, size={}",
-					label,
-					path,
-					Files.exists(path),
-					Files.isReadable(path),
-					Files.isExecutable(path),
-					Files.exists(path) ? Files.size(path) : -1L);
-		} catch (IOException e) {
-			LOGGER.error("{} diagnostics failed for {}: {}", label, path, e.getMessage(), e);
+			return true; // repo was okay, even if applying update failed
 		}
 	}
 }

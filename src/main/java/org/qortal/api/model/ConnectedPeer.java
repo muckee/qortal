@@ -1,22 +1,18 @@
 package org.qortal.api.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.media.Schema;
 import org.qortal.controller.Controller;
 import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.Handshake;
 import org.qortal.network.Peer;
-import org.qortal.network.helper.PeerCapabilities;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
-import java.util.stream.Collectors;
-import java.util.*;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @XmlAccessorType(XmlAccessType.FIELD)
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class ConnectedPeer {
 
     public enum Direction {
@@ -40,15 +36,10 @@ public class ConnectedPeer {
     public byte[] lastBlockSignature;
     public Long lastBlockTimestamp;
     public UUID connectionId;
-
-    @Schema(description = "Capabilities as an array of maps")
-    public List<Map<String, Object>> capabilities;
-
     public String age;
     public Boolean isTooDivergent;
 
-    // Needed for DeSerialization
-    public ConnectedPeer() {
+    protected ConnectedPeer() {
     }
 
     public ConnectedPeer(Peer peer) {
@@ -65,8 +56,6 @@ public class ConnectedPeer {
         this.version = peer.getPeersVersionString();
         this.nodeId = peer.getPeersNodeId();
         this.connectionId = peer.getPeerConnectionId();
-
-        // Calculate connection age
         if (peer.getConnectionEstablishedTime() > 0) {
             long age = (System.currentTimeMillis() - peer.getConnectionEstablishedTime());
             long minutes = TimeUnit.MILLISECONDS.toMinutes(age);
@@ -76,32 +65,11 @@ public class ConnectedPeer {
             this.age = "connecting...";
         }
 
-        if (peer.getPeersCapabilities() != null && peer.getPeersCapabilities().size() > 0) {
-            capabilities = peer.getPeersCapabilities().getPeerCapabilities().entrySet().stream()
-                    .map(entry -> {
-                        Object value = entry.getValue();
-                        // If value is a Map with "value" key, extract the actual value
-                        if (value instanceof Map) {
-                            Map<?, ?> valueMap = (Map<?, ?>) value;
-                            if (valueMap.containsKey("value")) {
-                                value = valueMap.get("value");
-                            }
-                        }
-                        // Create a single-entry map with the capability key and unwrapped value
-                        Map<String, Object> capabilityMap = new LinkedHashMap<>();
-                        capabilityMap.put(entry.getKey(), value);
-                        return capabilityMap;
-                    })
-                    .collect(Collectors.toList());
-        }
-
-        if (peer.getPeerType() == Peer.NETWORK) {
-            BlockSummaryData peerChainTipData = peer.getChainTipData();
-            if (peerChainTipData != null) {
-                this.lastHeight = peerChainTipData.getHeight();
-                this.lastBlockSignature = peerChainTipData.getSignature();
-                this.lastBlockTimestamp = peerChainTipData.getTimestamp();
-            }
+        BlockSummaryData peerChainTipData = peer.getChainTipData();
+        if (peerChainTipData != null) {
+            this.lastHeight = peerChainTipData.getHeight();
+            this.lastBlockSignature = peerChainTipData.getSignature();
+            this.lastBlockTimestamp = peerChainTipData.getTimestamp();
         }
 
         // Only include isTooDivergent decision if we've had the opportunity to request block summaries this peer
