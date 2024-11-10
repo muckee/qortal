@@ -549,6 +549,11 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 	}
 
 	@Override
+	public List<ChainableServer> getRemainingServers() {
+		return this.remainingServers;
+	}
+
+	@Override
 	public Set<ChainableServer> getUselessServers() {
 		return this.uselessServers;
 	}
