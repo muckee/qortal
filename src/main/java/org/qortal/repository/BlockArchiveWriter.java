@@ -14,7 +14,6 @@ import org.qortal.settings.Settings;
 import org.qortal.transform.TransformationException;
 import org.qortal.transform.block.BlockTransformation;
 import org.qortal.transform.block.BlockTransformer;
-import org.qortal.utils.StringUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.FileOutputStream;
@@ -244,14 +243,14 @@ public class BlockArchiveWriter {
 
             // Log every 1000 blocks
             if (this.shouldLogProgress && i % 1000 == 0) {
-                LOGGER.info("Archived up to block height {}. Size of current file: {}", currentHeight, StringUtils.formatBytes(headerBytes.size() + bytes.size()));
+                LOGGER.info("Archived up to block height {}. Size of current file: {} bytes", currentHeight, (headerBytes.size() + bytes.size()));
             }
 
             i++;
 
         }
         int totalLength = headerBytes.size() + bytes.size();
-        LOGGER.info("Total length of {} blocks is {}", i, StringUtils.formatBytes(totalLength));
+        LOGGER.info(String.format("Total length of %d blocks is %d bytes", i, totalLength));
 
         // Validate file size, in case something went wrong
         if (totalLength < fileSizeTarget && this.shouldEnforceFileSizeTarget) {
