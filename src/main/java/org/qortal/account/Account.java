@@ -198,76 +198,66 @@ public class Account {
 
 	/** Returns whether account can be considered a "minting account".
 	 * <p>
-	 * To be considered a "minting account", the account needs to pass some of these tests:<br>
+	 * To be considered a "minting account", the account needs to pass all of these tests:<br>
 	 * <ul>
 	 * <li>account's level is at least <tt>minAccountLevelToMint</tt> from blockchain config</li>
-	 * <li>account's address has registered a name</li>
-	 * <li>account's address is a member of the minter group</li>
+	 * <li>account's address have registered a name</li>
+	 * <li>account's address is member of minter group</li>
 	 * </ul>
 	 *
-	 * @param isGroupValidated true if this account has already been validated for MINTER Group membership
 	 * @return true if account can be considered "minting account"
 	 * @throws DataException
 	 */
-	public boolean canMint(boolean isGroupValidated) throws DataException {
+	public boolean canMint() throws DataException {
 		AccountData accountData = this.repository.getAccountRepository().getAccount(this.address);
 		NameRepository nameRepository = this.repository.getNameRepository();
 		GroupRepository groupRepository = this.repository.getGroupRepository();
-		String myAddress = accountData.getAddress();
 
 		int blockchainHeight = this.repository.getBlockRepository().getBlockchainHeight();
+		int nameCheckHeight = BlockChain.getInstance().getOnlyMintWithNameHeight();
 		int levelToMint = BlockChain.getInstance().getMinAccountLevelToMint();
 		int level = accountData.getLevel();
 		int groupIdToMint = BlockChain.getInstance().getMintingGroupId();
-		int nameCheckHeight = BlockChain.getInstance().getOnlyMintWithNameHeight();
 		int groupCheckHeight = BlockChain.getInstance().getGroupMemberCheckHeight();
-		int removeNameCheckHeight = BlockChain.getInstance().getRemoveOnlyMintWithNameHeight();
 
-		// Can only mint if:
-		// Account's level is at least minAccountLevelToMint from blockchain config
-		if (blockchainHeight < nameCheckHeight) {
-			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0;
-			} else {
-				return level >= levelToMint;
-			}
-		}
+		String myAddress = accountData.getAddress();
+		List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
+		boolean isMember = groupRepository.memberExists(groupIdToMint, myAddress);
 
-		// Can only mint on onlyMintWithNameHeight from blockchain config if:
-		// Account's level is at least minAccountLevelToMint from blockchain config
-		// Account's address has registered a name
-		if (blockchainHeight >= nameCheckHeight && blockchainHeight < groupCheckHeight) {
-			List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
-			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && !myName.isEmpty();
-			} else {
-				return level >= levelToMint && !myName.isEmpty();
-			}
-		}
+		if (accountData == null)
+			return false;
 
-		// Can only mint on groupMemberCheckHeight from blockchain config if:
-		// Account's level is at least minAccountLevelToMint from blockchain config
-		// Account's address has registered a name
-		// Account's address is a member of the minter group
-		if (blockchainHeight >= groupCheckHeight && blockchainHeight < removeNameCheckHeight) {
-			List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
-			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && !myName.isEmpty() && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
-			} else {
-				return level >= levelToMint && !myName.isEmpty() && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
-			}
-		}
+		// Can only mint if level is at least minAccountLevelToMint< from blockchain config
+		if (blockchainHeight < nameCheckHeight && level >= levelToMint)
+			return true;
 
-		// Can only mint on removeOnlyMintWithNameHeight from blockchain config if:
-		// Account's level is at least minAccountLevelToMint from blockchain config
-		// Account's address is a member of the minter group
-		if (blockchainHeight >= removeNameCheckHeight) {
-			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
-			} else {
-				return level >= levelToMint && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
-			}
-		}
+		// Can only mint if have registered a name
+		if (blockchainHeight >= nameCheckHeight && blockchainHeight < groupCheckHeight && level >= levelToMint && !myName.isEmpty())
+			return true;
+
+		// Can only mint if have registered a name and is member of minter group id
+		if (blockchainHeight >= groupCheckHeight && level >= levelToMint && !myName.isEmpty() && isMember)
+			return true;
+
+		// Founders needs to pass same tests like minters
+		if (blockchainHeight < nameCheckHeight &&
+				Account.isFounder(accountData.getFlags()) &&
+				accountData.getBlocksMintedPenalty() == 0)
+			return true;
+
+		if (blockchainHeight >= nameCheckHeight &&
+				blockchainHeight < groupCheckHeight &&
+				Account.isFounder(accountData.getFlags()) &&
+				accountData.getBlocksMintedPenalty() == 0 &&
+				!myName.isEmpty())
+			return true;
+
+		if (blockchainHeight >= groupCheckHeight &&
+				Account.isFounder(accountData.getFlags()) &&
+				accountData.getBlocksMintedPenalty() == 0 &&
+				!myName.isEmpty() &&
+				isMember)
+			return true;
 
 		return false;
 	}
@@ -282,6 +272,7 @@ public class Account {
 		return this.repository.getAccountRepository().getBlocksMintedPenaltyCount(this.address);
 	}
 
+
 	/** Returns whether account can build reward-shares.
 	 * <p>
 	 * To be able to create reward-shares, the account needs to pass at least one of these tests:<br>
@@ -295,7 +286,6 @@ public class Account {
 	 */
 	public boolean canRewardShare() throws DataException {
 		AccountData accountData = this.repository.getAccountRepository().getAccount(this.address);
-
 		if (accountData == null)
 			return false;
 
@@ -349,26 +339,8 @@ public class Account {
 	}
 
 	/**
-	 * Returns reward-share minting address, or unknown if reward-share does not exist.
-	 * 
-	 * @param repository
-	 * @param rewardSharePublicKey
-	 * @return address or unknown
-	 * @throws DataException
-	 */
-	public static String getRewardShareMintingAddress(Repository repository, byte[] rewardSharePublicKey) throws DataException {
-		// Find actual minter address
-		RewardShareData rewardShareData = repository.getAccountRepository().getRewardShare(rewardSharePublicKey);
-
-		if (rewardShareData == null)
-			return "Unknown";
-
-		return rewardShareData.getMinter();
-	}
-
-	/**
 	 * Returns 'effective' minting level, or zero if reward-share does not exist.
-	 *
+	 * 
 	 * @param repository
 	 * @param rewardSharePublicKey
 	 * @return 0+
@@ -383,7 +355,6 @@ public class Account {
 		Account rewardShareMinter = new Account(repository, rewardShareData.getMinter());
 		return rewardShareMinter.getEffectiveMintingLevel();
 	}
-
 	/**
 	 * Returns 'effective' minting level, with a fix for the zero level.
 	 * <p>
