@@ -106,10 +106,6 @@ public class PeerData {
 		this.failedSyncCount++;
 	}
 
-	public Boolean equals(PeerData against) {
-		return this.getAddress().equals(against.getAddress());
-	}
-
 	// Pretty peerAddress getter for JAXB
 	@XmlElement(name = "address")
 	protected String getPrettyAddress() {

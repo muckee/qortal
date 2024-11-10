@@ -16,10 +16,10 @@ import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
+import org.qortal.utils.ArbitraryTransactionUtils;
 import org.qortal.utils.FilesystemUtils;
 import org.qortal.utils.ListUtils;
 import org.qortal.utils.NTP;
-import org.qortal.utils.StringUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -38,14 +38,13 @@ public class ArbitraryDataResource {
     protected final Service service;
     protected final String identifier;
 
-    private ArbitraryTransactionData transaction;
+    private List<ArbitraryTransactionData> transactions;
     private ArbitraryTransactionData latestPutTransaction;
     private ArbitraryTransactionData latestTransaction;
-
+    private int layerCount;
     private Integer localChunkCount = null;
     private Integer totalChunkCount = null;
     private boolean exists = false;
-
 
     public ArbitraryDataResource(String resourceId, ResourceIdType resourceIdType, Service service, String identifier) {
         this.resourceId = resourceId.toLowerCase();
@@ -66,13 +65,12 @@ public class ArbitraryDataResource {
             arbitraryResourceStatus = this.getStatus(repository);
 
             if (updateCache) {
-                 // Update cache if possible
-                 ArbitraryResourceStatus.Status status = arbitraryResourceStatus != null ? arbitraryResourceStatus.getStatus() : null;
-                 ArbitraryResourceData arbitraryResourceData = new ArbitraryResourceData(this.service, this.resourceId, this.identifier);
-                 repository.discardChanges();
-                 repository.getArbitraryRepository().setStatus(arbitraryResourceData, status);
-                 repository.saveChanges();
- 
+                // Update cache if possible
+                ArbitraryResourceStatus.Status status = arbitraryResourceStatus != null ? arbitraryResourceStatus.getStatus() : null;
+                ArbitraryResourceData arbitraryResourceData = new ArbitraryResourceData(this.service, this.resourceId, this.identifier);
+                repository.discardChanges();
+                repository.getArbitraryRepository().setStatus(arbitraryResourceData, status);
+                repository.saveChanges();
             }
         } catch (DataException e) {
             LOGGER.info("Unable to update status cache for resource {}: {}", this.toString(), e.getMessage());
@@ -174,12 +172,17 @@ public class ArbitraryDataResource {
     public boolean delete(Repository repository, boolean deleteMetadata) {
         try {
             this.fetchTransactions(repository);
-            if (this.transaction == null) {
+            if (this.transactions == null) {
                 return false;
             }
 
-            ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(this.transaction);
-            if (arbitraryDataFile != null) {
+            List<ArbitraryTransactionData> transactionDataList = new ArrayList<>(this.transactions);
+
+            for (ArbitraryTransactionData transactionData : transactionDataList) {
+                ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(transactionData);
+                if (arbitraryDataFile == null) {
+                    continue;
+                }
 
                 // Delete any chunks or complete files from each transaction
                 arbitraryDataFile.deleteAll(deleteMetadata);
@@ -208,7 +211,7 @@ public class ArbitraryDataResource {
 
         String baseDir = Settings.getInstance().getTempDataPath();
         String identifier = this.identifier != null ?  this.identifier : "default";
-        Path cachePath = Paths.get(baseDir, "reader", this.resourceIdType.toString(), StringUtils.sanitizeString(this.resourceId), this.service.toString(), StringUtils.sanitizeString(identifier));
+        Path cachePath = Paths.get(baseDir, "reader", this.resourceIdType.toString(), this.resourceId, this.service.toString(), identifier);
         if (cachePath.toFile().exists()) {
             boolean success = FilesystemUtils.safeDeleteDirectory(cachePath, true);
             if (success) {
@@ -220,40 +223,40 @@ public class ArbitraryDataResource {
     private boolean allFilesDownloaded(Repository repository) {
         // Use chunk counts to speed things up if we can
         if (this.localChunkCount != null && this.totalChunkCount != null &&
-            this.localChunkCount >= this.totalChunkCount) {
+                this.localChunkCount >= this.totalChunkCount) {
             return true;
         }
 
         try {
             this.fetchTransactions(repository);
-            if (this.transaction == null) {
+            if (this.transactions == null) {
                 return false;
             }
 
-            // Optimized: Create ArbitraryDataFile once per transaction instead of twice
-            ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(this.transaction);
-            if (arbitraryDataFile == null || !arbitraryDataFile.allFilesExist()) {
-                return false;
-            }
+            List<ArbitraryTransactionData> transactionDataList = new ArrayList<>(this.transactions);
 
+            for (ArbitraryTransactionData transactionData : transactionDataList) {
+                if (!ArbitraryTransactionUtils.completeFileExists(transactionData) ||
+                    !ArbitraryTransactionUtils.allChunksExist(transactionData)) {
+                    return false;
+                }
+            }
             return true;
+
         } catch (DataException e) {
             return false;
         }
     }
 
-  
-
     /**
      * Calculate chunk counts of a resource
-     * Optimized to call fromTransactionData() only once per transaction
      *
      * @param repository optional - a new instance will be created if null
      */
     private void calculateChunkCounts(Repository repository) {
         try {
             this.fetchTransactions(repository);
-            if (this.transaction == null) {
+            if (this.transactions == null) {
                 this.exists = false;
                 this.localChunkCount = 0;
                 this.totalChunkCount = 0;
@@ -262,50 +265,39 @@ public class ArbitraryDataResource {
 
             this.exists = true;
 
+            List<ArbitraryTransactionData> transactionDataList = new ArrayList<>(this.transactions);
             int localChunkCount = 0;
             int totalChunkCount = 0;
 
-            // Create ArbitraryDataFile once and reuse it for both counts
-            ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(this.transaction);
-            if (arbitraryDataFile != null) {
-                // Calculate local chunk count (files that exist on disk)
-                Path parentPath = arbitraryDataFile.getFilePath().getParent();
-                String[] files = parentPath.toFile().list();
-                if (files != null) {
-                    // Remove the original copy indicator file if it exists
-                    int count = files.length;
-                    for (String file : files) {
-                        if (file.equals(".original")) {
-                            count--;
-                            break;
-                        }
-                    }
-
-                    // If the complete file exists (and this transaction has chunks), subtract it from the count
-                    if (arbitraryDataFile.chunkCount() > 0 && arbitraryDataFile.exists()) {
-                        // We are only measuring the individual chunks, not the joined file
-                        count -= 1;
-                    }
-
-                    localChunkCount += count;
-                }
-
-                // Calculate total chunk count (expected chunks based on metadata)
-                if (this.transaction.getMetadataHash() == null) {
-                    // This file doesn't have any metadata, therefore it has a single (complete) chunk
-                    totalChunkCount += 1;
-                } else {
-                    totalChunkCount += arbitraryDataFile.fileCount();
-                }
+            for (ArbitraryTransactionData transactionData : transactionDataList) {
+                localChunkCount += ArbitraryTransactionUtils.ourChunkCount(transactionData);
+                totalChunkCount += ArbitraryTransactionUtils.totalChunkCount(transactionData);
             }
 
             this.localChunkCount = localChunkCount;
             this.totalChunkCount = totalChunkCount;
 
+        } catch (DataException e) {}
+    }
+
+    private boolean isRateLimited(Repository repository) {
+        try {
+            this.fetchTransactions(repository);
+            if (this.transactions == null) {
+                return true;
+            }
+
+            List<ArbitraryTransactionData> transactionDataList = new ArrayList<>(this.transactions);
+
+            for (ArbitraryTransactionData transactionData : transactionDataList) {
+                if (ArbitraryDataManager.getInstance().isSignatureRateLimited(transactionData.getSignature())) {
+                    return true;
+                }
+            }
+            return true;
+
         } catch (DataException e) {
-            // If there's an error, set counts to 0
-            this.localChunkCount = 0;
-            this.totalChunkCount = 0;
+            return false;
         }
     }
 
@@ -317,7 +309,7 @@ public class ArbitraryDataResource {
     private boolean isDataPotentiallyAvailable(Repository repository) {
         try {
             this.fetchTransactions(repository);
-            if (this.transaction == null) {
+            if (this.transactions == null) {
                 return false;
             }
 
@@ -326,13 +318,16 @@ public class ArbitraryDataResource {
                 return false;
             }
 
-            long lastRequestTime = ArbitraryDataManager.getInstance().lastRequestForSignature(this.transaction.getSignature());
-            // If we haven't requested yet, or requested in the last 30 seconds, there's still a
-            // chance that data is on its way but hasn't arrived yet
-            if (lastRequestTime == 0 || now - lastRequestTime < 30 * 1000L) {
-                return true;
-            }
+            List<ArbitraryTransactionData> transactionDataList = new ArrayList<>(this.transactions);
 
+            for (ArbitraryTransactionData transactionData : transactionDataList) {
+                long lastRequestTime = ArbitraryDataManager.getInstance().lastRequestForSignature(transactionData.getSignature());
+                // If we haven't requested yet, or requested in the last 30 seconds, there's still a
+                // chance that data is on its way but hasn't arrived yet
+                if (lastRequestTime == 0 || now - lastRequestTime < 30 * 1000L) {
+                    return true;
+                }
+            }
             return false;
 
         } catch (DataException e) {
@@ -349,7 +344,7 @@ public class ArbitraryDataResource {
     private boolean isDownloading(Repository repository) {
         try {
             this.fetchTransactions(repository);
-            if (this.transaction == null) {
+            if (this.transactions == null) {
                 return false;
             }
 
@@ -358,10 +353,14 @@ public class ArbitraryDataResource {
                 return false;
             }
 
-            long lastRequestTime = ArbitraryDataManager.getInstance().lastRequestForSignature(this.transaction.getSignature());
-            // If were have requested data in the last 30 seconds, treat it as "downloading"
-            if (lastRequestTime > 0 && now - lastRequestTime < 30 * 1000L) {
-                return true;
+            List<ArbitraryTransactionData> transactionDataList = new ArrayList<>(this.transactions);
+
+            for (ArbitraryTransactionData transactionData : transactionDataList) {
+                long lastRequestTime = ArbitraryDataManager.getInstance().lastRequestForSignature(transactionData.getSignature());
+                // If were have requested data in the last 30 seconds, treat it as "downloading"
+                if (lastRequestTime > 0 && now - lastRequestTime < 30 * 1000L) {
+                    return true;
+                }
             }
 
             // FUTURE: we may want to check for file hashes (including the metadata file hash) in
@@ -382,24 +381,28 @@ public class ArbitraryDataResource {
      * @throws DataException
      */
     private void fetchTransactions(Repository repository) throws DataException {
-        if (this.transaction != null ) {
+        if (this.transactions != null && !this.transactions.isEmpty()) {
             // Already fetched
             return;
         }
 
         try {
-            byte[] latestSignature = repository.getArbitraryRepository().getLatestSignature(this.service, this.resourceId, this.identifier);
-
-            if (latestSignature == null) {
+            // Get the most recent PUT
+            ArbitraryTransactionData latestPut = repository.getArbitraryRepository()
+                    .getLatestTransaction(this.resourceId, this.service, ArbitraryTransactionData.Method.PUT, this.identifier);
+            if (latestPut == null) {
                 String message = String.format("Couldn't find PUT transaction for name %s, service %s and identifier %s",
                         this.resourceId, this.service, this.identifierString());
                 throw new DataNotPublishedException(message);
             }
+            this.latestPutTransaction = latestPut;
 
-            ArbitraryTransactionData latestTransaction
-                    = repository.getArbitraryRepository().getSingleTransactionBySignature(latestSignature);
+            // Load all transactions since the latest PUT
+            List<ArbitraryTransactionData> transactionDataList = repository.getArbitraryRepository()
+                    .getArbitraryTransactions(this.resourceId, this.service, this.identifier, latestPut.getTimestamp());
 
-            this.transaction = latestTransaction;
+            this.transactions = transactionDataList;
+            this.layerCount = transactionDataList.size();
 
         } catch (DataNotPublishedException e) {
             // Ignore without logging
@@ -472,14 +475,4 @@ public class ArbitraryDataResource {
     public String getIdentifier() {
         return this.identifier;
     }
-
-    public Integer getLocalChunkCount() {
-        return this.localChunkCount;
-    }
-
-    public Integer getTotalChunkCount() {
-        return this.totalChunkCount;
-    }
-
-
 }

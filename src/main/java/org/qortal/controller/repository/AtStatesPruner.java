@@ -39,24 +39,15 @@ public class AtStatesPruner implements Runnable {
 			}
 		}
 
-		int pruneStartHeight;
-		int maxLatestAtStatesHeight;
-
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			pruneStartHeight = repository.getATRepository().getAtPruneHeight();
-			maxLatestAtStatesHeight = PruneManager.getMaxHeightForLatestAtStates(repository);
+			int pruneStartHeight = repository.getATRepository().getAtPruneHeight();
+			int maxLatestAtStatesHeight = PruneManager.getMaxHeightForLatestAtStates(repository);
 
 			repository.discardChanges();
 			repository.getATRepository().rebuildLatestAtStates(maxLatestAtStatesHeight);
 			repository.saveChanges();
-		} catch (Exception e) {
-			LOGGER.error("AT States Pruning is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
-			return;
-		}
 
-		while (!Controller.isStopping()) {
-			try (final Repository repository = RepositoryManager.getRepository()) {
-
+			while (!Controller.isStopping()) {
 				try {
 					repository.discardChanges();
 
@@ -87,7 +78,7 @@ public class AtStatesPruner implements Runnable {
 					if (pruneStartHeight >= upperPruneHeight)
 						continue;
 
-					LOGGER.debug(String.format("Pruning AT states between blocks %d and %d...", pruneStartHeight, upperPruneHeight));
+					LOGGER.info(String.format("Pruning AT states between blocks %d and %d...", pruneStartHeight, upperPruneHeight));
 
 					int numAtStatesPruned = repository.getATRepository().pruneAtStates(pruneStartHeight, upperPruneHeight);
 					repository.saveChanges();
@@ -97,7 +88,7 @@ public class AtStatesPruner implements Runnable {
 
 					if (numAtStatesPruned > 0 || numAtStateDataRowsTrimmed > 0) {
 						final int finalPruneStartHeight = pruneStartHeight;
-						LOGGER.debug(() -> String.format("Pruned %d AT state%s between blocks %d and %d",
+						LOGGER.info(() -> String.format("Pruned %d AT state%s between blocks %d and %d",
 								numAtStatesPruned, (numAtStatesPruned != 1 ? "s" : ""),
 								finalPruneStartHeight, upperPruneHeight));
 					} else {
@@ -110,26 +101,29 @@ public class AtStatesPruner implements Runnable {
 							repository.saveChanges();
 
 							final int finalPruneStartHeight = pruneStartHeight;
-							LOGGER.debug(() -> String.format("Bumping AT state base prune height to %d", finalPruneStartHeight));
-						} else {
+							LOGGER.info(() -> String.format("Bumping AT state base prune height to %d", finalPruneStartHeight));
+						}
+						else {
 							// We've pruned up to the upper prunable height
 							// Back off for a while to save CPU for syncing
 							repository.discardChanges();
-							Thread.sleep(5 * 60 * 1000L);
+							Thread.sleep(5*60*1000L);
 						}
 					}
 				} catch (InterruptedException e) {
-					if (Controller.isStopping()) {
+					if(Controller.isStopping()) {
 						LOGGER.info("AT States Pruning Shutting Down");
-					} else {
+					}
+					else {
 						LOGGER.warn("AT States Pruning interrupted. Trying again. Report this error immediately to the developers.", e);
 					}
 				} catch (Exception e) {
 					LOGGER.warn("AT States Pruning stopped working. Trying again. Report this error immediately to the developers.", e);
 				}
-			} catch(Exception e){
-				LOGGER.error("AT States Pruning is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
 			}
+		} catch (Exception e) {
+			LOGGER.error("AT States Pruning is not working! Not trying again. Restart ASAP. Report this error immediately to the developers.", e);
 		}
 	}
+
 }
