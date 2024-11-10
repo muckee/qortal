@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.qortal</groupId>
 	<artifactId>qortal</artifactId>
-	<version>5.0.3</version>
+	<version>4.6.1</version>
 	<packaging>jar</packaging>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -16,7 +16,7 @@
 		<ciyam-at.version>1.4.2</ciyam-at.version>
 		<commons-net.version>3.8.0</commons-net.version>
 		<commons-text.version>1.12.0</commons-text.version>
-		<commons-io.version>2.18.0</commons-io.version>
+		<commons-io.version>2.17.0</commons-io.version>
 		<commons-compress.version>1.27.1</commons-compress.version>
 		<commons-lang3.version>3.17.0</commons-lang3.version>
 		<dagger.version>1.2.2</dagger.version>
@@ -26,9 +26,9 @@
 		<guava.version>33.3.1-jre</guava.version>
 		<hamcrest-library.version>2.2</hamcrest-library.version>
 		<homoglyph.version>1.2.1</homoglyph.version>
-		<hsqldb.version>2.7.4</hsqldb.version>
+		<hsqldb.version>2.5.1</hsqldb.version>
 		<icu4j.version>76.1</icu4j.version>
-		<java-diff-utils.version>4.15</java-diff-utils.version>
+		<java-diff-utils.version>4.12</java-diff-utils.version>
 		<javax.servlet-api.version>4.0.1</javax.servlet-api.version>
 		<jaxb-runtime.version>2.3.9</jaxb-runtime.version>
 		<jersey.version>2.42</jersey.version>
@@ -45,18 +45,17 @@
 		<maven-dependency-plugin.version>3.6.1</maven-dependency-plugin.version>
 		<maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
 		<maven-package-info-plugin.version>1.1.0</maven-package-info-plugin.version>
-		<maven-plugin.version>2.18.0</maven-plugin.version>
+		<maven-plugin.version>2.17.1</maven-plugin.version>
 		<maven-reproducible-build-plugin.version>0.17</maven-reproducible-build-plugin.version>
 		<maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
 		<maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
-		<maven-install-plugin.version>3.1.3</maven-install-plugin.version>
 		<maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
 		<protobuf.version>3.25.3</protobuf.version>
 		<replacer.version>1.5.3</replacer.version>
 		<simplemagic.version>1.17</simplemagic.version>
 		<slf4j.version>1.7.36</slf4j.version>
 		<swagger-api.version>2.0.10</swagger-api.version>
-		<swagger-ui.version>5.18.2</swagger-ui.version>
+		<swagger-ui.version>5.17.14</swagger-ui.version>
 		<upnp.version>1.2</upnp.version>
 		<xz.version>1.10</xz.version>
 	</properties>
@@ -304,30 +303,6 @@
 					</archive>
 				</configuration>
 			</plugin>
-			<!-- Copy modified hsqldb.jar to install / modified MANIFEST.MF-->
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-install-plugin</artifactId>
-				<version>${maven-install-plugin.version}</version>
-				<configuration>
-					<groupId>org.hsqldb</groupId>
-					<artifactId>hsqldb</artifactId>
-					<version>${hsqldb.version}</version>
-					<packaging>jar</packaging>
-				</configuration>
-				<executions>
-					<execution>
-						<phase>install</phase>
-						<goals>
-							<goal>install-file</goal>
-						</goals>
-						<configuration>
-							<file>${project.basedir}/lib/org/hsqldb/hsqldb/${hsqldb.version}/hsqldb.jar</file>
-						</configuration>
-					</execution>
-				</executions>
-			</plugin>
-
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-shade-plugin</artifactId>
@@ -475,7 +450,7 @@
 			<scope>provided</scope>
 			<!-- needed for build, not for runtime -->
 		</dependency>
-		<!-- HSQLDB for repository should use local version with Sealed: false -->
+		<!-- HSQLDB for repository -->
 		<dependency>
 			<groupId>org.hsqldb</groupId>
 			<artifactId>hsqldb</artifactId>
@@ -746,12 +721,12 @@
 		<!-- BouncyCastle for crypto, including TLS secure networking -->
 		<dependency>
 			<groupId>org.bouncycastle</groupId>
-			<artifactId>bcprov-jdk15to18</artifactId>
+			<artifactId>bcprov-jdk15on</artifactId>
 			<version>${bouncycastle.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.bouncycastle</groupId>
-			<artifactId>bctls-jdk15to18</artifactId>
+			<artifactId>bctls-jdk15on</artifactId>
 			<version>${bouncycastle.version}</version>
 		</dependency>
 		<dependency>
@@ -795,10 +770,5 @@
 			<artifactId>jaxb-runtime</artifactId>
 			<version>${jaxb-runtime.version}</version>
 		</dependency>
-		<dependency>
-<groupId>org.apache.tika</groupId>
-<artifactId>tika-core</artifactId>
-<version>3.1.0</version> 
-</dependency>
 	</dependencies>
 </project>

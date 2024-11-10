@@ -587,10 +587,10 @@ public class CrossChainPirateChainResource {
 	}
 
 	@GET
-	@Path("/feerequired")
+	@Path("/feeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking ARRR to the trade offer creator.",
-			description = "The total fee required for unlocking ARRR to the trade offer creator.",
+			summary = "Returns PirateChain fee per Kb.",
+			description = "Returns PirateChain fee per Kb.",
 			responses = {
 					@ApiResponse(
 							content = @Content(
@@ -601,17 +601,17 @@ public class CrossChainPirateChainResource {
 					)
 			}
 	)
-	public String getPirateChainFeeRequired() {
+	public String getPirateChainFeeCeiling() {
 		PirateChain pirateChain = PirateChain.getInstance();
 
-		return String.valueOf(pirateChain.getFeeRequired());
+		return String.valueOf(pirateChain.getFeeCeiling());
 	}
 
 	@POST
-	@Path("/updatefeerequired")
+	@Path("/updatefeeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking ARRR to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Sets PirateChain fee ceiling.",
+			description = "Sets PirateChain fee ceiling.",
 			requestBody = @RequestBody(
 					required = true,
 					content = @Content(
@@ -630,13 +630,13 @@ public class CrossChainPirateChainResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_PRIVATE_KEY, ApiError.INVALID_CRITERIA})
-	public String setPirateChainFeeRequired(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
+	public String setPirateChainFeeCeiling(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
 		Security.checkApiCallAllowed(request);
 
 		PirateChain pirateChain = PirateChain.getInstance();
 
 		try {
-			return CrossChainUtils.setFeeRequired(pirateChain, fee);
+			return CrossChainUtils.setFeeCeiling(pirateChain, fee);
 		}
 		catch (IllegalArgumentException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
