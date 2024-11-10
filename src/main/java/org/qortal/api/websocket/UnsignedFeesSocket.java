@@ -27,6 +27,8 @@ public class UnsignedFeesSocket extends ApiWebSocket implements Listener {
 
 	@Override
 	public void configure(WebSocketServletFactory factory) {
+		LOGGER.info("configure");
+
 		factory.register(UnsignedFeesSocket.class);
 
 		EventBus.INSTANCE.addListener(this);
@@ -63,6 +65,7 @@ public class UnsignedFeesSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
+		LOGGER.info("onWebSocketMessage: message = " + message);
 	}
 
 	private void sendUnsignedFeeEvent(Session session, UnsignedFeeEvent unsignedFeeEvent) {
