@@ -71,9 +71,4 @@ public class P2shOverrideLitecoinMainNetParams extends NetworkParameters {
     public int getProtocolVersionNum(ProtocolVersion version) {
         return this.params.getProtocolVersionNum(version);
     }
-
-    @Override
-    public Block getGenesisBlock() {
-        return this.params.getGenesisBlock();    
-    }
 }
