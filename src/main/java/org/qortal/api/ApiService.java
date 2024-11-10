@@ -46,7 +46,6 @@ public class ApiService {
 	private ApiService() {
 		this.config = new ResourceConfig();
 		this.config.packages("org.qortal.api.resource", "org.qortal.api.restricted.resource");
-		this.config.register(org.glassfish.jersey.media.multipart.MultiPartFeature.class);
 		this.config.register(OpenApiResource.class);
 		this.config.register(ApiDefinition.class);
 		this.config.register(AnnotationPostProcessor.class);
@@ -195,10 +194,8 @@ public class ApiService {
 
 			context.addServlet(AdminStatusWebSocket.class, "/websockets/admin/status");
 			context.addServlet(BlocksWebSocket.class, "/websockets/blocks");
-			context.addServlet(DataMonitorSocket.class, "/websockets/datamonitor");
 			context.addServlet(ActiveChatsWebSocket.class, "/websockets/chat/active/*");
 			context.addServlet(ChatMessagesWebSocket.class, "/websockets/chat/messages");
-			context.addServlet(UnsignedFeesSocket.class, "/websockets/crosschain/unsignedfees");
 			context.addServlet(TradeOffersWebSocket.class, "/websockets/crosschain/tradeoffers");
 			context.addServlet(TradeBotWebSocket.class, "/websockets/crosschain/tradebot");
 			context.addServlet(TradePresenceWebSocket.class, "/websockets/crosschain/tradepresence");
