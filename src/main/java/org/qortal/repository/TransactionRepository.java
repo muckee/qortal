@@ -18,8 +18,6 @@ public interface TransactionRepository {
 
 	public TransactionData fromSignature(byte[] signature) throws DataException;
 
-	public List<TransactionData> fromSignatures(List<byte[]> signatures) throws DataException;
-
 	public TransactionData fromReference(byte[] reference) throws DataException;
 
 	public TransactionData fromHeightAndSequence(int height, int sequence) throws DataException;
@@ -352,6 +350,5 @@ public interface TransactionRepository {
 	public void save(TransactionData transactionData) throws DataException;
 
 	public void delete(TransactionData transactionData) throws DataException;
-
 
 }

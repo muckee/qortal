@@ -1,6 +1,3 @@
 {
-  "apiDocumentationEnabled": true,
-  "apiWhitelistEnabled": false,
-  "apiRestricted": false
+  "apiDocumentationEnabled": true
 }
-
