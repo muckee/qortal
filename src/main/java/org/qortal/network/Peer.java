@@ -640,12 +640,9 @@ public class Peer {
                     return false;
 
                 try {
-                        byte[] messageBytes = message.toBytes();
-
-                    this.outputBuffer = ByteBuffer.wrap(messageBytes);
+                    this.outputBuffer = ByteBuffer.wrap(message.toBytes());
                     this.outputMessageType = message.getType().name();
                     this.outputMessageId = message.getId();
-
 
                     LOGGER.trace("[{}] Sending {} message with ID {} to peer {}",
                             this.peerConnectionId, this.outputMessageType, this.outputMessageId, this);
@@ -665,22 +662,12 @@ public class Peer {
             // If output byte buffer is not null, send from that
             int bytesWritten = this.socketChannel.write(outputBuffer);
 
-            int zeroSendCount = 0;
+            LOGGER.trace("[{}] Sent {} bytes of {} message with ID {} to peer {} ({} total)", this.peerConnectionId,
+                    bytesWritten, this.outputMessageType, this.outputMessageId, this, outputBuffer.limit());
 
-            while (bytesWritten == 0) {
-                if (zeroSendCount > 9) {
-                    LOGGER.debug("Socket write stuck for too long, returning");
-                    return true;
-                }
-                try {
-                    Thread.sleep(10); // 10MS CPU Sleep to try and give it time to flush the socket 
-                }
-                catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false; // optional, if you want to signal shutdown
-            }
-                zeroSendCount++;
-                bytesWritten = this.socketChannel.write(outputBuffer);
+            // If we've sent 0 bytes then socket buffer is full so we need to wait until it's empty again
+            if (bytesWritten == 0) {
+                return true;
             }
 
             // If we then exhaust the byte buffer, set it to null (otherwise loop and try to send more)
@@ -742,7 +729,7 @@ public class Peer {
 
         try {
             // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
-            LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
+            LOGGER.trace("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
                     message.getType().name(), message.getId(), this);
 
             // Check message properly constructed
