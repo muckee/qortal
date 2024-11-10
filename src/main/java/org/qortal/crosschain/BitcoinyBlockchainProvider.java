@@ -64,6 +64,8 @@ public abstract class BitcoinyBlockchainProvider {
 
 	public abstract Set<ChainableServer> getServers();
 
+	public abstract List<ChainableServer> getRemainingServers();
+
 	public abstract Set<ChainableServer> getUselessServers();
 
 	public abstract ChainableServer getCurrentServer();
