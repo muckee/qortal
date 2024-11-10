@@ -3,9 +3,8 @@ package org.qortal.api.websocket;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jetty.websocket.api.Session;
-import org.eclipse.jetty.websocket.api.WriteCallback;
 import org.eclipse.jetty.websocket.api.annotations.*;
-import org.eclipse.jetty.websocket.server.JettyWebSocketServletFactory;
+import org.eclipse.jetty.websocket.servlet.WebSocketServletFactory;
 import org.qortal.api.model.CrossChainOfferSummary;
 import org.qortal.controller.Synchronizer;
 import org.qortal.controller.tradebot.TradeBot;
@@ -39,6 +38,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 
 	private static class CachedOfferInfo {
 		public final Map<String, AcctMode> previousAtModes = new HashMap<>();
+
 		// OFFERING
 		public final Map<String, CrossChainOfferSummary> currentSummaries = new HashMap<>();
 		// REDEEMED/REFUNDED/CANCELLED
@@ -54,16 +54,13 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 
 	private static final Map<Session, String> sessionBlockchain = Collections.synchronizedMap(new HashMap<>());
 
-	/**
-	 * Updated for Jetty 10.
-	 */
 	@Override
-	protected void configure(JettyWebSocketServletFactory factory) {
-		// Register this instance to handle websocket upgrades
-		factory.addMapping("/", (req, res) -> this);
+	public void configure(WebSocketServletFactory factory) {
+		factory.register(TradeOffersWebSocket.class);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			populateCurrentSummaries(repository);
+
 			populateHistoricSummaries(repository);
 		} catch (DataException e) {
 			// How to fail properly?
@@ -91,6 +88,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 
 			for (SupportedBlockchain blockchain : SupportedBlockchain.values()) {
 				Map<ByteArray, Supplier<ACCT>> acctsByCodeHash = SupportedBlockchain.getFilteredAcctMap(blockchain);
+
 				List<CrossChainOfferSummary> crossChainOfferSummaries = new ArrayList<>();
 
 				synchronized (cachedInfoByBlockchain) {
@@ -100,7 +98,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 						byte[] codeHash = acctInfo.getKey().value;
 						ACCT acct = acctInfo.getValue().get();
 
-						List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash, null, null,
+						List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
 								isFinished, dataByteOffset, expectedValue, minimumFinalHeight,
 								null, null, null);
 
@@ -117,20 +115,23 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 					// Update
 					for (CrossChainOfferSummary offerSummary : crossChainOfferSummaries) {
 						String offerAtAddress = offerSummary.getQortalAtAddress();
+
 						cachedInfo.previousAtModes.put(offerAtAddress, offerSummary.getMode());
-						LOGGER.trace("Block height: {}, AT: {}, mode: {}", blockData.getHeight(), offerAtAddress, offerSummary.getMode().name());
+						LOGGER.trace(() -> String.format("Block height: %d, AT: %s, mode: %s", blockData.getHeight(), offerAtAddress, offerSummary.getMode().name()));
 
 						switch (offerSummary.getMode()) {
 							case OFFERING:
 								cachedInfo.currentSummaries.put(offerAtAddress, offerSummary);
 								cachedInfo.historicSummaries.remove(offerAtAddress);
 								break;
+
 							case REDEEMED:
 							case REFUNDED:
 							case CANCELLED:
 								cachedInfo.currentSummaries.remove(offerAtAddress);
 								cachedInfo.historicSummaries.put(offerAtAddress, offerSummary);
 								break;
+
 							case TRADING:
 								cachedInfo.currentSummaries.remove(offerAtAddress);
 								cachedInfo.historicSummaries.remove(offerAtAddress);
@@ -147,9 +148,11 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 				for (Session session : getSessions()) {
 					// Only send if this session has this/no preferred blockchain
 					String preferredBlockchain = sessionBlockchain.get(session);
+
 					if (preferredBlockchain == null || preferredBlockchain.equals(blockchain.name()))
 						sendOfferSummaries(session, crossChainOfferSummaries);
 				}
+
 			}
 		} catch (DataException e) {
 			// No output this time
@@ -160,11 +163,11 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 	@Override
 	public void onWebSocketConnect(Session session) {
 		Map<String, List<String>> queryParams = session.getUpgradeRequest().getParameterMap();
-		final boolean includeHistoric = queryParams.containsKey("includeHistoric");
-		final boolean excludeInitialData = queryParams.containsKey("excludeInitialData");
+		final boolean includeHistoric = queryParams.get("includeHistoric") != null;
+		final boolean excludeInitialData = queryParams.get("excludeInitialData") != null;
 
 		List<String> foreignBlockchains = queryParams.get("foreignBlockchain");
-		final String foreignBlockchain = (foreignBlockchains == null || foreignBlockchains.isEmpty()) ? null : foreignBlockchains.get(0);
+		final String foreignBlockchain = foreignBlockchains == null ? null : foreignBlockchains.get(0);
 
 		// Make sure blockchain (if any) is valid
 		if (foreignBlockchain != null && SupportedBlockchain.fromString(foreignBlockchain) == null) {
@@ -182,6 +185,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 		if (!excludeInitialData) {
 			synchronized (cachedInfoByBlockchain) {
 				Collection<CachedOfferInfo> cachedInfos;
+
 				if (foreignBlockchain == null)
 					// No preferred blockchain, so iterate through all of them
 					cachedInfos = cachedInfoByBlockchain.values();
@@ -190,6 +194,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 
 				for (CachedOfferInfo cachedInfo : cachedInfos) {
 					crossChainOfferSummaries.addAll(cachedInfo.currentSummaries.values());
+
 					if (includeHistoric)
 						crossChainOfferSummaries.addAll(cachedInfo.historicSummaries.values());
 				}
@@ -209,6 +214,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 	public void onWebSocketClose(Session session, int statusCode, String reason) {
 		// clean up
 		sessionBlockchain.remove(session);
+
 		super.onWebSocketClose(session, statusCode, reason);
 	}
 
@@ -219,43 +225,43 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
-		if (Objects.equals(message, "ping") && session.isOpen()) {
-			session.getRemote().sendString("pong", WriteCallback.NOOP);
-		}
+		/* ignored */
 	}
 
 	private boolean sendOfferSummaries(Session session, List<CrossChainOfferSummary> crossChainOfferSummaries) {
-		if (session.isOpen()) {
-			try {
-				StringWriter stringWriter = new StringWriter();
-				marshall(stringWriter, crossChainOfferSummaries);
-				String output = stringWriter.toString();
+		try {
+			StringWriter stringWriter = new StringWriter();
+			marshall(stringWriter, crossChainOfferSummaries);
 
-				// Updated for Jetty 10 async send pattern
-				session.getRemote().sendString(output, WriteCallback.NOOP);
-				return true;
-			} catch (IOException e) {
-				return false;
-			}
+			String output = stringWriter.toString();
+			session.getRemote().sendStringByFuture(output);
+		} catch (IOException e) {
+			// No output this time?
+			return false;
 		}
-		return false;
+
+		return true;
 	}
 
 	private static void populateCurrentSummaries(Repository repository) throws DataException {
+		// We want ALL OFFERING trades
 		Boolean isFinished = Boolean.FALSE;
 		Long expectedValue = (long) AcctMode.OFFERING.value;
+		Integer minimumFinalHeight = null;
 
 		for (SupportedBlockchain blockchain : SupportedBlockchain.values()) {
 			Map<ByteArray, Supplier<ACCT>> acctsByCodeHash = SupportedBlockchain.getFilteredAcctMap(blockchain);
+
 			CachedOfferInfo cachedInfo = cachedInfoByBlockchain.computeIfAbsent(blockchain.name(), k -> new CachedOfferInfo());
 
 			for (Map.Entry<ByteArray, Supplier<ACCT>> acctInfo : acctsByCodeHash.entrySet()) {
 				byte[] codeHash = acctInfo.getKey().value;
 				ACCT acct = acctInfo.getValue().get();
-				Integer dataByteOffset = acct.getModeByteOffset();
 
-				List<ATStateData> initialAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash, null, null,
-						isFinished, dataByteOffset, expectedValue, null, null, null, null);
+				Integer dataByteOffset = acct.getModeByteOffset();
+				List<ATStateData> initialAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
+					isFinished, dataByteOffset, expectedValue, minimumFinalHeight,
+					null, null, null);
 
 				if (initialAtStates == null)
 					throw new DataException("Couldn't fetch current trades from repository");
@@ -265,7 +271,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 
 				// Convert to offer summaries
 				cachedInfo.currentSummaries.putAll(produceSummaries(repository, acct, initialAtStates, null).stream()
-						.collect(Collectors.toMap(CrossChainOfferSummary::getQortalAtAddress, offerSummary -> offerSummary)));
+										.collect(Collectors.toMap(CrossChainOfferSummary::getQortalAtAddress, offerSummary -> offerSummary)));
 			}
 		}
 	}
@@ -279,24 +285,29 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 			throw new DataException("Couldn't fetch block timestamp from repository");
 
 		Boolean isFinished = Boolean.TRUE;
+		Integer dataByteOffset = null;
+		Long expectedValue = null;
 		++minimumFinalHeight; // because height is just *before* timestamp
 
 		for (SupportedBlockchain blockchain : SupportedBlockchain.values()) {
 			Map<ByteArray, Supplier<ACCT>> acctsByCodeHash = SupportedBlockchain.getFilteredAcctMap(blockchain);
+
 			CachedOfferInfo cachedInfo = cachedInfoByBlockchain.computeIfAbsent(blockchain.name(), k -> new CachedOfferInfo());
 
 			for (Map.Entry<ByteArray, Supplier<ACCT>> acctInfo : acctsByCodeHash.entrySet()) {
 				byte[] codeHash = acctInfo.getKey().value;
 				ACCT acct = acctInfo.getValue().get();
 
-				List<ATStateData> historicAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash, null, null,
-						isFinished, null, null, minimumFinalHeight, null, null, null);
+				List<ATStateData> historicAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
+					isFinished, dataByteOffset, expectedValue, minimumFinalHeight,
+					null, null, null);
 
 				if (historicAtStates == null)
 					throw new DataException("Couldn't fetch historic trades from repository");
 
 				for (ATStateData historicAtState : historicAtStates) {
 					CrossChainOfferSummary historicOfferSummary = produceSummary(repository, acct, historicAtState, null, null);
+
 					if (!isHistoric.test(historicOfferSummary))
 						continue;
 
@@ -316,6 +327,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 		}
 
 		long atStateTimestamp;
+
 		if (crossChainTradeData.mode == AcctMode.OFFERING)
 			// We want when trade was created, not when it was last updated
 			atStateTimestamp = crossChainTradeData.creationTimestamp;
@@ -334,8 +346,11 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 			if (TradeBot.getInstance().isFailedTrade(repository, crossChainTradeData)) {
 				continue;
 			}
+
 			offerSummaries.add(produceSummary(repository, acct, atState, crossChainTradeData, timestamp));
 		}
+
 		return offerSummaries;
 	}
+
 }

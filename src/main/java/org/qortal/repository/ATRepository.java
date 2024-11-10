@@ -14,8 +14,6 @@ public interface ATRepository {
 	/** Returns ATData using AT's address or null if none found */
 	public ATData fromATAddress(String atAddress) throws DataException;
 
-	public List<ATData> fromATAddresses(List<String> atAddresses) throws DataException;
-
 	/** Returns where AT with passed address exists in repository */
 	public boolean exists(String atAddress) throws DataException;
 
@@ -64,8 +62,6 @@ public interface ATRepository {
 	 */
 	public ATStateData getLatestATState(String atAddress) throws DataException;
 
-	public List<ATStateData> getLatestATStates(List<String> collect) throws DataException;
-
 	/**
 	 * Returns final ATStateData for ATs matching codeHash (required)
 	 * and specific data segment value (optional).
@@ -80,9 +76,9 @@ public interface ATRepository {
 	 * Although <tt>expectedValue</tt>, if provided, is natively an unsigned long,
 	 * the data segment comparison is done via unsigned hex string.
 	 */
-	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, byte[] buyerPublicKey, byte[] sellerPublicKey, Boolean isFinished,
-													  Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
-													  Integer limit, Integer offset, Boolean reverse) throws DataException;
+	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, Boolean isFinished,
+			Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
+			Integer limit, Integer offset, Boolean reverse) throws DataException;
 
 	/**
 	 * Returns final ATStateData for ATs matching codeHash (required)

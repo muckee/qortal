@@ -3,7 +3,6 @@ package org.qortal.api.resource;
 import com.google.common.primitives.Bytes;
 import com.j256.simplemagic.ContentInfo;
 import com.j256.simplemagic.ContentInfoUtil;
-
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -13,7 +12,6 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
-
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.logging.log4j.LogManager;
@@ -21,8 +19,6 @@ import org.apache.logging.log4j.Logger;
 import org.bouncycastle.util.encoders.Base64;
 import org.qortal.api.*;
 import org.qortal.api.model.FileProperties;
-import org.qortal.api.model.PeerCountInfo;
-import org.qortal.api.model.PeerInfo;
 import org.qortal.api.resource.TransactionsResource.ConfirmationStatus;
 import org.qortal.arbitrary.*;
 import org.qortal.arbitrary.ArbitraryDataFile.ResourceIdType;
@@ -32,29 +28,18 @@ import org.qortal.arbitrary.misc.Category;
 import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataCacheManager;
-import org.qortal.controller.arbitrary.ArbitraryDataFileRequestThread;
-import org.qortal.controller.arbitrary.ArbitraryDataHostMonitor;
-import org.qortal.controller.arbitrary.ArbitraryDataManager;
 import org.qortal.controller.arbitrary.ArbitraryDataRenderManager;
 import org.qortal.controller.arbitrary.ArbitraryDataStorageManager;
 import org.qortal.controller.arbitrary.ArbitraryMetadataManager;
 import org.qortal.data.account.AccountData;
-import org.qortal.data.arbitrary.AdvancedStringMatcher;
 import org.qortal.data.arbitrary.ArbitraryCategoryInfo;
-import org.qortal.data.arbitrary.ArbitraryDataIndexDetail;
-import org.qortal.data.arbitrary.ArbitraryDataIndexScorecard;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
-import org.qortal.data.arbitrary.IndexCache;
 import org.qortal.data.naming.NameData;
-import org.qortal.data.network.PeerData;
-import org.qortal.data.transaction.ArbitraryHostedDataInfo;
-import org.qortal.data.transaction.ArbitraryHostedDataItemInfo;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.list.ResourceListManager;
-import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -74,36 +59,18 @@ import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
-
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.FileNameMap;
 import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
-import java.util.zip.GZIPOutputStream;
-
-import org.apache.tika.Tika;
-import org.apache.tika.mime.MimeTypeException;
-import org.apache.tika.mime.MimeTypes;
-
-import javax.ws.rs.core.Response;
-
-import org.glassfish.jersey.media.multipart.FormDataParam;
+import java.util.Objects;
 
 @Path("/arbitrary")
 @Tag(name = "Arbitrary")
@@ -205,7 +172,6 @@ public class ArbitraryResource {
 			@Parameter(description = "Name (searches name field only)") @QueryParam("name") List<String> names,
 			@Parameter(description = "Title (searches title metadata field only)") @QueryParam("title") String title,
 			@Parameter(description = "Description (searches description metadata field only)") @QueryParam("description") String description,
-			@Parameter(description = "Keyword (searches description metadata field by keywords)") @QueryParam("keywords") List<String> keywords,
 			@Parameter(description = "Prefix only (if true, only the beginning of fields are matched)") @QueryParam("prefix") Boolean prefixOnly,
 			@Parameter(description = "Exact match names only (if true, partial name matches are excluded)") @QueryParam("exactmatchnames") Boolean exactMatchNamesOnly,
 			@Parameter(description = "Default resources (without identifiers) only") @QueryParam("default") Boolean defaultResource,
@@ -246,7 +212,7 @@ public class ArbitraryResource {
 			}
 
 			List<ArbitraryResourceData> resources = repository.getArbitraryRepository()
-					.searchArbitraryResources(service, query, identifier, names, title, description, keywords, usePrefixOnly,
+					.searchArbitraryResources(service, query, identifier, names, title, description, usePrefixOnly,
 							exactMatchNames, defaultRes, mode, minLevel, followedOnly, excludeBlocked, includeMetadata, includeStatus,
 							before, after, limit, offset, reverse);
 
@@ -366,108 +332,6 @@ public class ArbitraryResource {
 			Security.requirePriorAuthorizationOrApiKey(request, name, service, identifier, null);
 
 		return ArbitraryTransactionUtils.getStatus(service, name, identifier, build, true);
-	}
-
-	@GET
-	@Path("/resource/request/peers/{service}/{name}")
-	@Operation(
-			summary = "Get peer information for an active file request (default resource)",
-			description = "Returns detailed information about peers available for downloading chunks for the specified resource (default/latest). Each peer includes how many chunks they have available. Returns empty result if no active request is found.",
-			responses = {
-					@ApiResponse(
-							content = @Content(
-									mediaType = MediaType.APPLICATION_JSON,
-									schema = @Schema(implementation = PeerCountInfo.class)
-							)
-					)
-			}
-	)
-	@ApiErrors({ApiError.REPOSITORY_ISSUE, ApiError.INVALID_DATA})
-	public PeerCountInfo getRequestPeerCountDefault(
-			@PathParam("service") Service service,
-			@PathParam("name") String name) {
-		return getRequestPeerCount(service, name, null);
-	}
-
-	@GET
-	@Path("/resource/request/peers/{service}/{name}/{identifier}")
-	@Operation(
-			summary = "Get peer information for an active file request",
-			description = "Returns detailed information about peers available for downloading chunks for the specified resource. Each peer includes how many chunks they have available. Returns empty result if no active request is found.",
-			responses = {
-					@ApiResponse(
-							content = @Content(
-									mediaType = MediaType.APPLICATION_JSON,
-									schema = @Schema(implementation = PeerCountInfo.class)
-							)
-					)
-			}
-	)
-	@ApiErrors({ApiError.REPOSITORY_ISSUE, ApiError.INVALID_DATA})
-	public PeerCountInfo getRequestPeerCount(
-			@PathParam("service") Service service,
-			@PathParam("name") String name,
-			@PathParam("identifier") String identifier) {
-		
-		try (final Repository repository = RepositoryManager.getRepository()) {
-			// Get the latest transaction for this resource to find its signature
-			ArbitraryTransactionData transactionData = repository.getArbitraryRepository()
-					.getLatestTransaction(name, service, null, identifier);
-			
-			if (transactionData == null) {
-				return new PeerCountInfo(0);
-			}
-			
-			String signature58 = Base58.encode(transactionData.getSignature());
-			
-			// Get detailed peer information
-			Map<PeerData, ArbitraryDataFileRequestThread.PeerDetails> peerDetailsMap = 
-				ArbitraryDataFileRequestThread.getInstance().getDetailedPeersForSignature(signature58);
-			
-			if (peerDetailsMap == null || peerDetailsMap.isEmpty()) {
-				return new PeerCountInfo(0);
-			}
-			
-			// Convert to PeerInfo list
-			List<PeerInfo> peerInfoList = new ArrayList<>();
-			for (Map.Entry<PeerData, ArbitraryDataFileRequestThread.PeerDetails> entry : peerDetailsMap.entrySet()) {
-				Peer peer = entry.getValue().peer;
-				boolean isDirect = entry.getValue().isDirect;
-				
-				// Get last 10 digits of node ID
-				String nodeId = peer.getPeersNodeId();
-				String id = nodeId != null && nodeId.length() >= 10 
-					? nodeId.substring(nodeId.length() - 10) 
-					: (nodeId != null ? nodeId : "unknown");
-				
-				// Determine speed from RTT
-				// HIGH = RTT < 5000ms, LOW = RTT 5000-10000ms, IDLE = RTT > 10000ms or no data
-				PeerInfo.Speed speed = PeerInfo.Speed.IDLE;
-				Long rtt = peer.getDownloadSpeedTracker().getLatestRoundTripTime();
-				if (rtt != null) {
-					if (rtt < 5000) {
-						speed = PeerInfo.Speed.HIGH;
-					} else if (rtt <= 10000) {
-						speed = PeerInfo.Speed.LOW;
-					} else {
-						speed = PeerInfo.Speed.IDLE;
-					}
-				}
-				
-				peerInfoList.add(new PeerInfo(id, speed, isDirect, entry.getValue().chunksAvailable));
-			}
-			
-			// Sort by speed (HIGH first, then LOW, then IDLE) then by id for consistent ordering
-			peerInfoList.sort((a, b) -> {
-				int speedCompare = a.speed.compareTo(b.speed);
-				if (speedCompare != 0) return speedCompare;
-				return a.id.compareTo(b.id);
-			});
-			
-			return new PeerCountInfo(peerInfoList.size(), peerInfoList);
-		} catch (DataException e) {
-			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
-		}
 	}
 
 
@@ -625,33 +489,25 @@ public class ArbitraryResource {
 			summary = "List arbitrary transactions hosted by this node",
 			responses = {
 					@ApiResponse(
-							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = ArbitraryHostedDataInfo.class))
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = ArbitraryTransactionData.class))
 					)
 			}
 	)
 	@ApiErrors({ApiError.REPOSITORY_ISSUE})
-	public ArbitraryHostedDataInfo getHostedTransactions(@Parameter(ref = "limit") @QueryParam("limit") Integer limit,
-																@Parameter(ref = "offset") @QueryParam("offset") Integer offset,
-																   @QueryParam("name") String name) {
+	public List<ArbitraryTransactionData> getHostedTransactions(@HeaderParam(Security.API_KEY_HEADER) String apiKey,
+																@Parameter(ref = "limit") @QueryParam("limit") Integer limit,
+																@Parameter(ref = "offset") @QueryParam("offset") Integer offset) {
+		Security.checkApiCallAllowed(request);
 
-		Stream<ArbitraryHostedDataItemInfo> stream = ArbitraryDataHostMonitor.getInstance().getHostedDataItemInfos().stream();
+		try (final Repository repository = RepositoryManager.getRepository()) {
 
-		// if name is set, then filter by name
-		if( name != null && !"".equals(name)) {
-			stream = stream.filter( info -> info.getName().startsWith(name));
+			List<ArbitraryTransactionData> hostedTransactions = ArbitraryDataStorageManager.getInstance().listAllHostedTransactions(repository, limit, offset);
+
+			return hostedTransactions;
+
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
-
-		// always sort from the greatest total space to the least total space
-		List<ArbitraryHostedDataItemInfo> hostedTransactions
-			= stream.sorted(Comparator.comparing(ArbitraryHostedDataItemInfo::getTotalSpace).reversed())
-				.collect(Collectors.toList());
-
-		int count = hostedTransactions.size();
-		long totalSpace = hostedTransactions.stream().collect(Collectors.summingLong(ArbitraryHostedDataItemInfo::getTotalSpace));
-
-		List<ArbitraryHostedDataItemInfo> items = ArbitraryTransactionUtils.limitOffsetTransactions(hostedTransactions, limit, offset);
-
-		return new ArbitraryHostedDataInfo(count, totalSpace, items);
 	}
 
 	@GET
@@ -692,7 +548,6 @@ public class ArbitraryResource {
 				arbitraryResourceData.name = transactionData.getName();
 				arbitraryResourceData.service = transactionData.getService();
 				arbitraryResourceData.identifier = transactionData.getIdentifier();
-				arbitraryResourceData.latestSignature = transactionData.getSignature();
 				if (!resources.contains(arbitraryResourceData)) {
 					resources.add(arbitraryResourceData);
 				}
@@ -823,20 +678,20 @@ public class ArbitraryResource {
 					)
 			}
 	)
-	public void get(@PathParam("service") Service service,
+	public HttpServletResponse get(@PathParam("service") Service service,
 								   @PathParam("name") String name,
 								   @QueryParam("filepath") String filepath,
 								   @QueryParam("encoding") String encoding,
 								   @QueryParam("rebuild") boolean rebuild,
 								   @QueryParam("async") boolean async,
-								   @QueryParam("attempts") Integer attempts, @QueryParam("attachment") boolean attachment, @QueryParam("attachmentFilename") String attachmentFilename) {
+								   @QueryParam("attempts") Integer attempts) {
 
 		// Authentication can be bypassed in the settings, for those running public QDN nodes
 		if (!Settings.getInstance().isQDNAuthBypassEnabled()) {
 			Security.checkApiCallAllowed(request);
 		}
 
-		 this.download(service, name, null, filepath, encoding, rebuild, async, attempts, attachment, attachmentFilename);
+		return this.download(service, name, null, filepath, encoding, rebuild, async, attempts);
 	}
 
 	@GET
@@ -856,21 +711,21 @@ public class ArbitraryResource {
 					)
 			}
 	)
-	public void get(@PathParam("service") Service service,
+	public HttpServletResponse get(@PathParam("service") Service service,
 								   @PathParam("name") String name,
 								   @PathParam("identifier") String identifier,
 								   @QueryParam("filepath") String filepath,
 								   @QueryParam("encoding") String encoding,
 								   @QueryParam("rebuild") boolean rebuild,
 								   @QueryParam("async") boolean async,
-								   @QueryParam("attempts") Integer attempts, @QueryParam("attachment") boolean attachment, @QueryParam("attachmentFilename") String attachmentFilename) {
+								   @QueryParam("attempts") Integer attempts) {
 
 		// Authentication can be bypassed in the settings, for those running public QDN nodes
 		if (!Settings.getInstance().isQDNAuthBypassEnabled()) {
 			Security.checkApiCallAllowed(request, null);
 		}
 
-		this.download(service, name, identifier, filepath, encoding, rebuild, async, attempts, attachment, attachmentFilename);
+		return this.download(service, name, identifier, filepath, encoding, rebuild, async, attempts);
 	}
 
 
@@ -1013,460 +868,6 @@ public class ArbitraryResource {
 		return this.upload(Service.valueOf(serviceString), name, identifier, path, null, null, false,
 				fee, null, title, description, tags, category, preview);
 	}
-
-
-	@GET
-	@Path("/check/tmp")
-	@Produces(MediaType.TEXT_PLAIN)
-	@Operation(
-		summary = "Check if the disk has enough disk space for an upcoming upload",
-		responses = {
-			@ApiResponse(description = "OK if sufficient space", responseCode = "200"),
-			@ApiResponse(description = "Insufficient space", responseCode = "507") // 507 = Insufficient Storage
-		}
-	)
-	@SecurityRequirement(name = "apiKey")
-	public Response checkUploadSpace(@HeaderParam(Security.API_KEY_HEADER) String apiKey,
-									 @QueryParam("totalSize") Long totalSize) {
-		Security.checkApiCallAllowed(request);
-	
-		if (totalSize == null || totalSize <= 0) {
-			return Response.status(Response.Status.BAD_REQUEST)
-					.entity("Missing or invalid totalSize parameter").build();
-		}
-	
-		File uploadDir = new File("uploads-temp");
-		if (!uploadDir.exists()) {
-			uploadDir.mkdirs(); // ensure the folder exists
-		}
-
-		long usableSpace = uploadDir.getUsableSpace();
-		long requiredSpace = (long)(((double)totalSize) * 2.2); // estimate for chunks + merge
-
-		if (usableSpace < requiredSpace) {
-			return Response.status(507).entity("Insufficient disk space").build();
-		}
-
-		return Response.ok("Sufficient disk space").build();
-	}
-
-	@POST
-@Path("/{service}/{name}/chunk")
-@Consumes(MediaType.MULTIPART_FORM_DATA)
-@Operation(
-    summary = "Upload a single file chunk to be later assembled into a complete arbitrary resource (no identifier)",
-    requestBody = @RequestBody(
-        required = true,
-        content = @Content(
-            mediaType = MediaType.MULTIPART_FORM_DATA,
-            schema = @Schema(
-                implementation = Object.class
-            )
-        )
-    ),
-    responses = {
-        @ApiResponse(
-            description = "Chunk uploaded successfully",
-            responseCode = "200"
-        ),
-        @ApiResponse(
-            description = "Error writing chunk",
-            responseCode = "500"
-        )
-    }
-)
-@SecurityRequirement(name = "apiKey")
-public Response uploadChunkNoIdentifier(@HeaderParam(Security.API_KEY_HEADER) String apiKey,
-                                        @PathParam("service") String serviceString,
-                                        @PathParam("name") String name,
-                                        @FormDataParam("chunk") InputStream chunkStream,
-                                        @FormDataParam("index") int index) {
-    Security.checkApiCallAllowed(request);
-
-    try {
-		String safeService = Paths.get(serviceString).getFileName().toString();
-        String safeName = Paths.get(name).getFileName().toString();
-
-		java.nio.file.Path tempDir = Paths.get("uploads-temp", safeService, safeName);
-		Files.createDirectories(tempDir);
-		
-        
-
-        java.nio.file.Path chunkFile = tempDir.resolve("chunk_" + index);
-        Files.copy(chunkStream, chunkFile, StandardCopyOption.REPLACE_EXISTING);
-
-        return Response.ok("Chunk " + index + " received").build();
-    } catch (IOException e) {
-		LOGGER.error("Failed to write chunk {} for service '{}' and name '{}'", index, serviceString, name, e);
-        return Response.serverError().entity("Failed to write chunk: " + e.getMessage()).build();
-    }
-}
-
-@POST
-@Path("/{service}/{name}/finalize")
-@Produces(MediaType.TEXT_PLAIN)
-@Operation(
-    summary = "Finalize a chunked upload (no identifier) and build a raw, unsigned, ARBITRARY transaction",
-    responses = {
-        @ApiResponse(
-            description = "raw, unsigned, ARBITRARY transaction encoded in Base58",
-            content = @Content(mediaType = MediaType.TEXT_PLAIN)
-        )
-    }
-)
-@SecurityRequirement(name = "apiKey")
-public String finalizeUploadNoIdentifier(
-    @HeaderParam(Security.API_KEY_HEADER) String apiKey,
-    @PathParam("service") String serviceString,
-    @PathParam("name") String name,
-    @QueryParam("title") String title,
-    @QueryParam("description") String description,
-    @QueryParam("tags") List<String> tags,
-    @QueryParam("category") Category category,
-    @QueryParam("filename") String filename,
-    @QueryParam("fee") Long fee,
-    @QueryParam("preview") Boolean preview,
-    @QueryParam("isZip") Boolean isZip
-) {
-    Security.checkApiCallAllowed(request);
-    java.nio.file.Path tempFile = null;
-    java.nio.file.Path tempDir = null;
-	java.nio.file.Path chunkDir = null;
-    String safeService = Paths.get(serviceString).getFileName().toString();
-	String safeName = Paths.get(name).getFileName().toString();
-
-
-
-    try {
-		chunkDir = Paths.get("uploads-temp", safeService, safeName);
-
-        if (!Files.exists(chunkDir) || !Files.isDirectory(chunkDir)) {
-            throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "No chunks found for upload");
-        }
-
-        String safeFilename = (filename == null || filename.isBlank()) ? "qortal-" + NTP.getTime() : filename;
-        tempDir = Files.createTempDirectory("qortal-");
-        String sanitizedFilename = Paths.get(safeFilename).getFileName().toString();
-		tempFile = tempDir.resolve(sanitizedFilename);
-
-        try (OutputStream out = Files.newOutputStream(tempFile, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-            byte[] buffer = new byte[65536];
-            for (java.nio.file.Path chunk : Files.list(chunkDir)
-                    .filter(path -> path.getFileName().toString().startsWith("chunk_"))
-                    .sorted(Comparator.comparingInt(path -> {
-                        String name2 = path.getFileName().toString();
-                        String numberPart = name2.substring("chunk_".length());
-                        return Integer.parseInt(numberPart);
-                    })).collect(Collectors.toList())) {
-                try (InputStream in = Files.newInputStream(chunk)) {
-                    int bytesRead;
-                    while ((bytesRead = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, bytesRead);
-                    }
-                }
-            }
-        }
-
-        String detectedExtension = "";
-        String uploadFilename = null;
-        boolean extensionIsValid = false;
-
-        if (filename != null && !filename.isBlank()) {
-            int lastDot = filename.lastIndexOf('.');
-            if (lastDot > 0 && lastDot < filename.length() - 1) {
-                extensionIsValid = true;
-                uploadFilename = filename;
-            }
-        }
-
-        if (!extensionIsValid) {
-            Tika tika = new Tika();
-            String mimeType = tika.detect(tempFile.toFile());
-            try {
-                MimeTypes allTypes = MimeTypes.getDefaultMimeTypes();
-                org.apache.tika.mime.MimeType mime = allTypes.forName(mimeType);
-                detectedExtension = mime.getExtension();
-            } catch (MimeTypeException e) {
-                LOGGER.warn("Could not determine file extension for MIME type: {}", mimeType, e);
-            }
-
-            if (filename != null && !filename.isBlank()) {
-                int lastDot = filename.lastIndexOf('.');
-                String baseName = (lastDot > 0) ? filename.substring(0, lastDot) : filename;
-                uploadFilename = baseName + (detectedExtension != null ? detectedExtension : "");
-            } else {
-                uploadFilename = "qortal-" + NTP.getTime() + (detectedExtension != null ? detectedExtension : "");
-            }
-        }
-
-		Boolean isZipBoolean = false;
-
-		if (isZip != null && isZip) {
-			isZipBoolean = true;
-		}
-        
-
-        // ✅ Call upload with `null` as identifier
-        return this.upload(
-            Service.valueOf(serviceString),
-            name,
-            null, // no identifier
-            tempFile.toString(),
-            null,
-            null,
-            isZipBoolean,
-            fee,
-            uploadFilename,
-            title,
-            description,
-            tags,
-            category,
-            preview
-        );
-
-    } catch (IOException e) {
-		LOGGER.error("Failed to merge chunks for service='{}', name='{}'", serviceString, name, e);
-
-        throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.REPOSITORY_ISSUE, "Failed to merge chunks: " + e.getMessage());
-    } finally {
-        if (tempDir != null) {
-            try {
-                ArbitraryTransactionUtils.deleteDirectory(tempDir.toFile());
-            } catch (IOException e) {
-                LOGGER.warn("Failed to delete temp directory: {}", tempDir, e);
-            } catch (Exception e) {
-				LOGGER.error(e.getMessage(), e);
-			}
-        }
-
-        try {
-            ArbitraryTransactionUtils.deleteDirectory(chunkDir.toFile());
-        } catch (IOException e) {
-            LOGGER.warn("Failed to delete chunk directory: {}", chunkDir, e);
-        } catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
-		}
-    }
-}
-
-
-
-	@POST
-@Path("/{service}/{name}/{identifier}/chunk")
-@Consumes(MediaType.MULTIPART_FORM_DATA)
-@Operation(
-    summary = "Upload a single file chunk to be later assembled into a complete arbitrary resource",
-    requestBody = @RequestBody(
-        required = true,
-        content = @Content(
-            mediaType = MediaType.MULTIPART_FORM_DATA,
-            schema = @Schema(
-                implementation = Object.class
-            )
-        )
-    ),
-    responses = {
-        @ApiResponse(
-            description = "Chunk uploaded successfully",
-            responseCode = "200"
-        ),
-        @ApiResponse(
-            description = "Error writing chunk",
-            responseCode = "500"
-        )
-    }
-)
-@SecurityRequirement(name = "apiKey")
-public Response uploadChunk(@HeaderParam(Security.API_KEY_HEADER) String apiKey,
-                            @PathParam("service") String serviceString,
-                            @PathParam("name") String name,
-                            @PathParam("identifier") String identifier,
-                            @FormDataParam("chunk") InputStream chunkStream,
-                            @FormDataParam("index") int index) {
-    Security.checkApiCallAllowed(request);
-
-    try {
-        String safeService = Paths.get(serviceString).getFileName().toString();
-        String safeName = Paths.get(name).getFileName().toString();
-        String safeIdentifier = Paths.get(identifier).getFileName().toString();
-
-        java.nio.file.Path tempDir = Paths.get("uploads-temp", safeService, safeName, safeIdentifier);
-
-        Files.createDirectories(tempDir);
-
-        java.nio.file.Path chunkFile = tempDir.resolve("chunk_" + index);
-        Files.copy(chunkStream, chunkFile, StandardCopyOption.REPLACE_EXISTING);
-
-        return Response.ok("Chunk " + index + " received").build();
-    } catch (IOException e) {
-		LOGGER.error("Failed to write chunk {} for service='{}', name='{}', identifier='{}'", index, serviceString, name, identifier, e);
-        return Response.serverError().entity("Failed to write chunk: " + e.getMessage()).build();
-    }
-}
-
-@POST
-@Path("/{service}/{name}/{identifier}/finalize")
-@Produces(MediaType.TEXT_PLAIN)
-@Operation(
-    summary = "Finalize a chunked upload and build a raw, unsigned, ARBITRARY transaction",
-    responses = {
-        @ApiResponse(
-            description = "raw, unsigned, ARBITRARY transaction encoded in Base58",
-            content = @Content(mediaType = MediaType.TEXT_PLAIN)
-        )
-    }
-)
-@SecurityRequirement(name = "apiKey")
-public String finalizeUpload(
-    @HeaderParam(Security.API_KEY_HEADER) String apiKey,
-    @PathParam("service") String serviceString,
-    @PathParam("name") String name,
-    @PathParam("identifier") String identifier,
-    @QueryParam("title") String title,
-    @QueryParam("description") String description,
-    @QueryParam("tags") List<String> tags,
-    @QueryParam("category") Category category,
-    @QueryParam("filename") String filename,
-    @QueryParam("fee") Long fee,
-    @QueryParam("preview") Boolean preview,
-	@QueryParam("isZip") Boolean isZip
-) {
-    Security.checkApiCallAllowed(request);
-    java.nio.file.Path tempFile = null;
-    java.nio.file.Path tempDir = null;
-	java.nio.file.Path chunkDir = null;
-
-	
-	
-	
-
-    try {
-		String safeService = Paths.get(serviceString).getFileName().toString();
-	String safeName = Paths.get(name).getFileName().toString();
-	String safeIdentifier = Paths.get(identifier).getFileName().toString();
-	java.nio.file.Path baseUploadsDir = Paths.get("uploads-temp"); // relative to Qortal working dir
-	chunkDir = baseUploadsDir.resolve(safeService).resolve(safeName).resolve(safeIdentifier);
-		
-        if (!Files.exists(chunkDir) || !Files.isDirectory(chunkDir)) {
-            throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "No chunks found for upload");
-        }
-
-        // Step 1: Determine a safe filename for disk temp file (regardless of extension correctness)
-        String safeFilename = filename;
-        if (filename == null || filename.isBlank()) {
-			safeFilename = "qortal-" + NTP.getTime();
-		} 
-
-        tempDir = Files.createTempDirectory("qortal-");
-        String sanitizedFilename = Paths.get(safeFilename).getFileName().toString();
-		tempFile = tempDir.resolve(sanitizedFilename);
-
-
-        // Step 2: Merge chunks
-  
-        try (OutputStream out = Files.newOutputStream(tempFile, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-            byte[] buffer = new byte[65536];
-            for (java.nio.file.Path chunk : Files.list(chunkDir)
-                    .filter(path -> path.getFileName().toString().startsWith("chunk_"))
-                    .sorted(Comparator.comparingInt(path -> {
-                        String name2 = path.getFileName().toString();
-                        String numberPart = name2.substring("chunk_".length());
-                        return Integer.parseInt(numberPart);
-                    })).collect(Collectors.toList())) {
-                try (InputStream in = Files.newInputStream(chunk)) {
-                    int bytesRead;
-                    while ((bytesRead = in.read(buffer)) != -1) {
-                        out.write(buffer, 0, bytesRead);
-                    }
-                }
-            }
-        }
-       
-
-        // Step 3: Determine correct extension
-        String detectedExtension = "";
-        String uploadFilename  = null;
-        boolean extensionIsValid = false;
-
-        if (filename != null && !filename.isBlank()) {
-            int lastDot = filename.lastIndexOf('.');
-            if (lastDot > 0 && lastDot < filename.length() - 1) {
-                extensionIsValid = true;
-                uploadFilename = filename;
-            }
-        }
-
-        if (!extensionIsValid) {
-            Tika tika = new Tika();
-            String mimeType = tika.detect(tempFile.toFile());
-            try {
-                MimeTypes allTypes = MimeTypes.getDefaultMimeTypes();
-                org.apache.tika.mime.MimeType mime = allTypes.forName(mimeType);
-                detectedExtension = mime.getExtension();
-            } catch (MimeTypeException e) {
-                LOGGER.warn("Could not determine file extension for MIME type: {}", mimeType, e);
-            }
-
-            if (filename != null && !filename.isBlank()) {
-                int lastDot = filename.lastIndexOf('.');
-                String baseName = (lastDot > 0) ? filename.substring(0, lastDot) : filename;
-                uploadFilename = baseName + (detectedExtension != null ? detectedExtension : "");
-            } else {
-                uploadFilename = "qortal-" + NTP.getTime() + (detectedExtension != null ? detectedExtension : "");
-            }
-        }
-
-
-		Boolean isZipBoolean = false;
-
-		if (isZip != null && isZip) {
-			isZipBoolean = true;
-		}
-        
-
-        return this.upload(
-            Service.valueOf(serviceString),
-            name,
-            identifier,
-            tempFile.toString(),
-            null,
-            null,
-            isZipBoolean,
-            fee,
-            uploadFilename,
-            title,
-            description,
-            tags,
-            category,
-            preview
-        );
-
-    } catch (IOException e) {
-		LOGGER.error("Unexpected error in finalizeUpload for service='{}', name='{}', name='{}'", serviceString, name, identifier, e);
-
-        throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.REPOSITORY_ISSUE, "Failed to merge chunks: " + e.getMessage());
-    } finally {
-        if (tempDir != null) {
-            try {
-               ArbitraryTransactionUtils.deleteDirectory(tempDir.toFile());
-            } catch (IOException e) {
-                LOGGER.warn("Failed to delete temp directory: {}", tempDir, e);
-            } catch (Exception e) {
-				LOGGER.error(e.getMessage(), e);
-			}
-        }
-
-        try {
-            ArbitraryTransactionUtils.deleteDirectory(chunkDir.toFile());
-        } catch (IOException e) {
-            LOGGER.warn("Failed to delete chunk directory: {}", chunkDir, e);
-        } catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
-		}
-    }
-}
-
-
 
 
 
@@ -1784,78 +1185,6 @@ public String finalizeUpload(
 		}
 	}
 
-	@GET
-	@Path("/indices")
-	@Operation(
-			summary = "Find exact and similar arbitrary resource indices",
-			description = "",
-			responses = {
-					@ApiResponse(
-							description = "indices",
-							content = @Content(
-									array = @ArraySchema(
-											schema = @Schema(
-													implementation = ArbitraryDataIndexScorecard.class
-											)
-									)
-							)
-					)
-			}
-	)
-	public List<ArbitraryDataIndexScorecard> searchIndices(@QueryParam("terms") String[] terms) {
-
-		List<String> indexedTerms
-			= IndexCache.getInstance()
-				.getIndicesByTerm().entrySet().stream()
-				.map( Map.Entry::getKey )
-				.collect(Collectors.toList());
-
-		List<AdvancedStringMatcher.MatchResult> matchResults = ArbitraryIndexUtils.getMatchedTerms(terms, indexedTerms);
-
-		List<ArbitraryDataIndexDetail> indices = new ArrayList<>();
-
-		// get index details for each matched term
-		for( AdvancedStringMatcher.MatchResult matchResult : matchResults ) {
-
-			List<ArbitraryDataIndexDetail> details = IndexCache.getInstance().getIndicesByTerm().get(matchResult.getMatchedString());
-
-			if( details != null ) {
-
-				ArbitraryIndexUtils.reduceRanks(indices, matchResult.getSimilarity(), details);
-			}
-		}
-
-		List<ArbitraryDataIndexScorecard> scorecards = ArbitraryIndexUtils.getArbitraryDataIndexScorecards(indices);
-
-		return scorecards;
-	}
-
-	@GET
-	@Path("/indices/{name}/{idPrefix}")
-	@Operation(
-			summary = "Find matching arbitrary resource indices for a registered name and identifier prefix",
-			description = "",
-			responses = {
-					@ApiResponse(
-							description = "indices",
-							content = @Content(
-									array = @ArraySchema(
-											schema = @Schema(
-													implementation = ArbitraryDataIndexDetail.class
-											)
-									)
-							)
-					)
-			}
-	)
-	public List<ArbitraryDataIndexDetail> searchIndicesByName(@PathParam("name") String name, @PathParam("idPrefix") String idPrefix) {
-
-		return
-			IndexCache.getInstance().getIndicesByIssuer()
-				.getOrDefault(name, new ArrayList<>(0)).stream()
-					.filter( indexDetail -> indexDetail.indexIdentifer.startsWith(idPrefix))
-					.collect(Collectors.toList());
-	}
 
 	// Shared methods
 
@@ -1922,7 +1251,7 @@ public String finalizeUpload(
 			if (path == null) {
 				// See if we have a string instead
 				if (string != null) {
-					if (filename == null || filename.isBlank()) {
+					if (filename == null) {
 						// Use current time as filename
 						filename = String.format("qortal-%d", NTP.getTime());
 					}
@@ -1937,7 +1266,7 @@ public String finalizeUpload(
 				}
 				// ... or base64 encoded raw data
 				else if (base64 != null) {
-					if (filename == null || filename.isBlank()) {
+					if (filename == null) {
 						// Use current time as filename
 						filename = String.format("qortal-%d", NTP.getTime());
 					}
@@ -1988,7 +1317,6 @@ public String finalizeUpload(
 				);
 
 				transactionBuilder.build();
-
 				// Don't compute nonce - this is done by the client (or via POST /arbitrary/compute)
 				ArbitraryTransactionData transactionData = transactionBuilder.getArbitraryTransactionData();
 				return Base58.encode(ArbitraryTransactionTransformer.toBytes(transactionData));
@@ -2004,274 +1332,118 @@ public String finalizeUpload(
 		}
 	}
 
-	private void download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts, boolean attachment, String attachmentFilename) {
-	
-		
+	private HttpServletResponse download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts) {
+
 		try {
 			ArbitraryDataReader arbitraryDataReader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
-	
+
 			int attempts = 0;
 			if (maxAttempts == null) {
 				maxAttempts = 5;
 			}
-	
+
 			// Loop until we have data
 			if (async) {
 				// Asynchronous
 				arbitraryDataReader.loadAsynchronously(false, 1);
-			} else {
+			}
+			else {
 				// Synchronous
-			
-				
-				// OPTIMIZATION: Fast-path for serving cached data
-				// Check 3 conditions:
-				// 1. Files exist on disk
-				// 2. No rebuild requested
-				// 3. Cache is fresh (in rate-limit cache, meaning not invalidated by updates)
-				java.nio.file.Path cachedPath = arbitraryDataReader.getUncompressedPath();
-				boolean filesExist = false;
-				boolean isCacheFresh = false;
-				
-				try {
-					filesExist = Files.exists(cachedPath) && 
-								!org.qortal.utils.FilesystemUtils.isDirectoryEmpty(cachedPath);
-					
-					// Check if this resource is in the rate-limit cache (meaning it's fresh)
-					// When a new transaction arrives, invalidateCache() removes it from this map
-					if (filesExist) {
-						String resourceId = name.toLowerCase();
-						ArbitraryDataResource resource = new ArbitraryDataResource(
-							resourceId, 
-							ResourceIdType.NAME, 
-							service, 
-							identifier
-						);
-						isCacheFresh = ArbitraryDataManager.getInstance().isResourceCached(resource);
-					}
-				} catch (Exception e) {
-					// If we can't check, assume files don't exist and proceed with normal flow
-					filesExist = false;
-					isCacheFresh = false;
-				}
-				
-				// Fast path: files exist, no rebuild, and cache is fresh (not invalidated)
-				if (!rebuild && filesExist && isCacheFresh) {
-				
-					arbitraryDataReader.setFilePath(cachedPath);
-				} else {
-					// Need to validate or rebuild
-					// This includes: new data, stale cache, updates, or explicit rebuild
-					while (!Controller.isStopping()) {
-						attempts++;
-						if (!arbitraryDataReader.isBuilding()) {
-							try {
-								arbitraryDataReader.loadSynchronously(rebuild);
-								break;
-							} catch (MissingDataException e) {
-								if (attempts > maxAttempts) {
-									throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "Data unavailable. Please try again later.");
-								}
+				while (!Controller.isStopping()) {
+					attempts++;
+					if (!arbitraryDataReader.isBuilding()) {
+						try {
+							arbitraryDataReader.loadSynchronously(rebuild);
+							break;
+						} catch (MissingDataException e) {
+							if (attempts > maxAttempts) {
+								// Give up after 5 attempts
+								throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "Data unavailable. Please try again later.");
 							}
 						}
 					}
+					Thread.sleep(3000L);
 				}
-				
-				
 			}
-	
+
 			java.nio.file.Path outputPath = arbitraryDataReader.getFilePath();
 			if (outputPath == null) {
 				// Assume the resource doesn't exist
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, "File not found");
 			}
-	
+
 			if (filepath == null || filepath.isEmpty()) {
 				// No file path supplied - so check if this is a single file resource
 				String[] files = ArrayUtils.removeElement(outputPath.toFile().list(), ".qortal");
 				if (files != null && files.length == 1) {
 					// This is a single file resource
 					filepath = files[0];
-				} else {
-					throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "filepath is required for resources containing more than one file");
+				}
+				else {
+					throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA,
+							"filepath is required for resources containing more than one file");
 				}
 			}
-	
+
 			java.nio.file.Path path = Paths.get(outputPath.toString(), filepath);
 			if (!Files.exists(path)) {
-				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "No file exists at filepath: " + filepath);
+				String message = String.format("No file exists at filepath: %s", filepath);
+				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, message);
 			}
-	
-			if (attachment) {
-				String rawFilename;
-	
-				if (attachmentFilename != null && !attachmentFilename.isEmpty()) {
-					// 1. Sanitize first
-					String safeAttachmentFilename = attachmentFilename.replaceAll("[\\\\/:*?\"<>|]", "_");
-	
-					// 2. Check for a valid extension (3–5 alphanumeric chars)
-					if (!safeAttachmentFilename.matches(".*\\.[a-zA-Z0-9]{2,5}$")) {
-						safeAttachmentFilename += ".bin";
-					}
-	
-					rawFilename = safeAttachmentFilename;
-				} else {
-					// Fallback if no filename is provided
-					String baseFilename = (identifier != null && !identifier.isEmpty())
-						? name + "-" + identifier
-						: name;
-					rawFilename = baseFilename.replaceAll("[\\\\/:*?\"<>|]", "_") + ".bin";
-				}
-	
-				// Optional: trim length
-				rawFilename = rawFilename.length() > 100 ? rawFilename.substring(0, 100) : rawFilename;
-	
-				// 3. Set Content-Disposition header
-				response.setHeader("Content-Disposition", "attachment; filename=\"" + rawFilename + "\"");
-			}
-	
-			// Determine the total size of the requested file
-			long fileSize = Files.size(path);
-			String mimeType = context.getMimeType(path.toString());
-	
-			// Attempt to read the "Range" header from the request to support partial content delivery (e.g., for video streaming or resumable downloads)
+
+			byte[] data;
+			int fileSize = (int)path.toFile().length();
+			int length = fileSize;
+
+			// Parse "Range" header
+			Integer rangeStart = null;
+			Integer rangeEnd = null;
 			String range = request.getHeader("Range");
-	
-			long rangeStart = 0;
-			long rangeEnd = fileSize - 1;
-			boolean isPartial = false;
-	
-			// If a Range header is present and no base64 encoding is requested, parse the range values
-			if (range != null && encoding == null) {
-				range = range.replace("bytes=", ""); // Remove the "bytes=" prefix
-				String[] parts = range.split("-"); // Split the range into start and end
-	
-				// Parse range start
-				if (parts.length > 0 && !parts[0].isEmpty()) {
-					rangeStart = Long.parseLong(parts[0]);
-				}
-	
-				// Parse range end, if present
-				if (parts.length > 1 && !parts[1].isEmpty()) {
-					rangeEnd = Long.parseLong(parts[1]);
-				}
-	
-				isPartial = true; // Indicate that this is a partial content request
+			if (range != null) {
+				range = range.replace("bytes=", "");
+				String[] parts = range.split("-");
+				rangeStart = (parts != null && parts.length > 0) ? Integer.parseInt(parts[0]) : null;
+				rangeEnd = (parts != null && parts.length > 1) ? Integer.parseInt(parts[1]) : fileSize;
 			}
-	
-			// Calculate how many bytes should be sent in the response
-			long contentLength = rangeEnd - rangeStart + 1;
-	
-			// Inform the client that byte ranges are supported
-			response.setHeader("Accept-Ranges", "bytes");
-	
-			if (isPartial) {
-				// If partial content was requested, return 206 Partial Content with appropriate headers
-				response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
-				response.setHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, fileSize));
-			} else {
-				// Otherwise, return the entire file with status 200 OK
-				response.setStatus(HttpServletResponse.SC_OK);
+
+			if (rangeStart != null && rangeEnd != null) {
+				// We have a range, so update the requested length
+				length = rangeEnd - rangeStart;
 			}
-	
-			// Initialize output streams for writing the file to the response
-			OutputStream rawOut = null;
-			OutputStream base64Out = null;
-			OutputStream gzipOut = null;
-	
-			try {
-				rawOut = response.getOutputStream();
-	
-				if (encoding != null && "base64".equalsIgnoreCase(encoding)) {
-					// If base64 encoding is requested, override content type
-					response.setContentType("text/plain");
-	
-					// Check if the client accepts gzip encoding
-					String acceptEncoding = request.getHeader("Accept-Encoding");
-					boolean wantsGzip = acceptEncoding != null && acceptEncoding.contains("gzip");
-	
-					if (wantsGzip) {
-						// Wrap output in GZIP and Base64 streams if gzip is accepted
-						response.setHeader("Content-Encoding", "gzip");
-						gzipOut = new GZIPOutputStream(rawOut);
-						base64Out = java.util.Base64.getEncoder().wrap(gzipOut);
-					} else {
-						// Wrap output in Base64 only
-						base64Out = java.util.Base64.getEncoder().wrap(rawOut);
-					}
-	
-					rawOut = base64Out; // Use the wrapped stream for writing
-				} else {
-					// For raw binary output, set the content type and length
-					response.setContentType(mimeType != null ? mimeType : "application/octet-stream");
-					response.setContentLength((int) contentLength);
-				}
-	
-			// Stream file content
-	
-			try (InputStream inputStream = Files.newInputStream(path)) {
-			
-				if (rangeStart > 0) {
-					inputStream.skip(rangeStart);
-				}
 
-				byte[] buffer = new byte[65536];
-				long bytesRemaining = contentLength;
-				int bytesRead;
-				long totalBytesWritten = 0;
-				int readCount = 0;
-
-				while (bytesRemaining > 0 && (bytesRead = inputStream.read(buffer, 0, (int) Math.min(buffer.length, bytesRemaining))) != -1) {
-					rawOut.write(buffer, 0, bytesRead);
-					bytesRemaining -= bytesRead;
-					totalBytesWritten += bytesRead;
-					readCount++;
-				}
-				
-			
+			if (length < fileSize && encoding == null) {
+				// Partial content requested, and not encoding the data
+				response.setStatus(206);
+				response.addHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd-1, fileSize));
+				data = FilesystemUtils.readFromFile(path.toString(), rangeStart, length);
 			}
-	
-				// Stream finished
-				if (base64Out != null) {
-					base64Out.close(); // Also flushes and closes the wrapped gzipOut
-				} else if (gzipOut != null) {
-					gzipOut.close(); // Only close gzipOut if it wasn't wrapped by base64Out
-				} else {
-					rawOut.flush(); // Flush only the base output stream if nothing was wrapped
-				}
-	
-				if (!response.isCommitted()) {
-					response.setStatus(HttpServletResponse.SC_OK);
-					response.getWriter().write(" ");
-				}
-	
-		} catch (IOException e) {
-			// Streaming errors should not rethrow — just log
-			LOGGER.trace(String.format("Streaming error for %s %s: %s", service, name, e.getMessage()));
-		}
-		
-	
+			else {
+				// Full content requested (or encoded data)
+				response.setStatus(200);
+				data = Files.readAllBytes(path); // TODO: limit file size that can be read into memory
+			}
 
-	} catch (IOException | ApiException | DataException e) {
+			// Encode the data if requested
+			if (encoding != null && Objects.equals(encoding.toLowerCase(), "base64")) {
+				data = Base64.encode(data);
+			}
+
+			response.addHeader("Accept-Ranges", "bytes");
+			response.setContentType(context.getMimeType(path.toString()));
+			response.setContentLength(data.length);
+			response.getOutputStream().write(data);
+
+			return response;
+		} catch (Exception e) {
 			LOGGER.debug(String.format("Unable to load %s %s: %s", service, name, e.getMessage()));
-			if (!response.isCommitted()) {
-				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
-			}
-		} catch (NumberFormatException e) {
-			LOGGER.debug(String.format("Invalid range for %s %s: %s", service, name, e.getMessage()));
-			if (!response.isCommitted()) {
-				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_DATA, e.getMessage());
-			}
+			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
 		}
 	}
-	
-	
 
 	private FileProperties getFileProperties(Service service, String name, String identifier) {
 		try {
-
 			ArbitraryDataReader arbitraryDataReader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
 			arbitraryDataReader.loadSynchronously(false);
-
 			java.nio.file.Path outputPath = arbitraryDataReader.getFilePath();
 			if (outputPath == null) {
 				// Assume the resource doesn't exist

@@ -46,7 +46,6 @@ public class ArbitraryDataFileChunk extends ArbitraryDataFile {
             }
 
         } catch (IOException e) {
-            LOGGER.info("IOException - Validating");
             return ValidationResult.FILE_NOT_FOUND;
         }
 

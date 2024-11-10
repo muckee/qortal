@@ -29,7 +29,6 @@
 	"onlineAccountSignaturesMinLifetime": 43200000,
 	"onlineAccountSignaturesMaxLifetime": 86400000,
 	"onlineAccountsModulusV2Timestamp": 1659801600000,
-	"onlineAccountsModulusV3Timestamp": 1731961800000,
 	"selfSponsorshipAlgoV1SnapshotTimestamp": 1670230000000,
 	"selfSponsorshipAlgoV2SnapshotTimestamp": 1708360200000,
 	"selfSponsorshipAlgoV3SnapshotTimestamp": 1708432200000,
@@ -38,9 +37,7 @@
 	"blockRewardBatchStartHeight": 1508000,
 	"blockRewardBatchSize": 1000,
 	"blockRewardBatchAccountsBlockCount": 25,
-	"mintingGroupIds": [
-		{ "height": 0, "ids": [ 694 ]}
-	],
+	"mintingGroupId": 694,
 	"rewardsByHeight": [
 		{ "height": 1, "reward": 5.00 },
 		{ "height": 259201, "reward": 4.75 },
@@ -98,7 +95,6 @@
 		"transactionV6Timestamp": 9999999999999,
 		"disableReferenceTimestamp": 1655222400000,
 		"increaseOnlineAccountsDifficultyTimestamp": 9999999999999,
-		"decreaseOnlineAccountsDifficultyTimestamp": 1731958200000,
 		"onlineAccountMinterLevelValidationHeight": 1092000,
 		"selfSponsorshipAlgoV1Height": 1092400,
 		"selfSponsorshipAlgoV2Height": 1611200,
@@ -113,15 +109,7 @@
 		"disableRewardshareHeight": 1899100,
 		"enableRewardshareHeight": 1905100,
 		"onlyMintWithNameHeight": 1900300,
-		"removeOnlyMintWithNameHeight": 1935500,
-		"groupMemberCheckHeight": 1902700,
-		"fixBatchRewardHeight": 1945900,
-		"adminsReplaceFoundersHeight": 2012800,
-		"nullGroupMembershipHeight": 2012800,
-		"ignoreLevelForRewardShareHeight": 2012800,
-		"adminQueryFixHeight": 2012800,
-		"multipleNamesPerAccountHeight": 2206300,
-		"mintedBlocksAdjustmentRemovalHeight": 2206300
+		"groupMemberCheckHeight": 1902700
 	},
 	"checkpoints": [
 		{ "height": 1136300, "signature": "3BbwawEF2uN8Ni5ofpJXkukoU8ctAPxYoFB7whq9pKfBnjfZcpfEJT4R95NvBDoTP8WDyWvsUvbfHbcr9qSZuYpSKZjUQTvdFf6eqznHGEwhZApWfvXu6zjGCxYCp65F4jsVYYJjkzbjmkCg5WAwN5voudngA23kMK6PpTNygapCzXt" }

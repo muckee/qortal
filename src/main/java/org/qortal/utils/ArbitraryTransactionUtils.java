@@ -24,9 +24,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
 
@@ -42,24 +40,6 @@ public class ArbitraryTransactionUtils {
                 return null;
 
             return (ArbitraryTransactionData) transactionData;
-
-        } catch (DataException e) {
-            LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
-            return null;
-        }
-    }
-
-    public static List<ArbitraryTransactionData> fetchTransactionDataList(final Repository repository, final List<byte[]> signature) {
-        try {
-            List<TransactionData> transactions = repository.getTransactionRepository().fromSignatures(signature);
-
-            List<ArbitraryTransactionData> list
-                = transactions.stream()
-                    .filter( transaction -> transaction instanceof ArbitraryTransactionData )
-                    .map( transactionData ->  (ArbitraryTransactionData) transactionData)
-                    .collect(Collectors.toList());
-
-            return list;
 
         } catch (DataException e) {
             LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
@@ -92,23 +72,23 @@ public class ArbitraryTransactionUtils {
         return latestPut;
     }
 
-    public static Optional<ArbitraryTransactionData> hasMoreRecentPutTransaction(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
+    public static boolean hasMoreRecentPutTransaction(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
         byte[] signature = arbitraryTransactionData.getSignature();
         if (signature == null) {
             // We can't make a sensible decision without a signature
             // so it's best to assume there is nothing newer
-            return Optional.empty();
+            return false;
         }
 
         ArbitraryTransactionData latestPut = ArbitraryTransactionUtils.fetchLatestPut(repository, arbitraryTransactionData);
         if (latestPut == null) {
-            return Optional.empty();
+            return false;
         }
 
         // If the latest PUT transaction has a newer timestamp, it will override the existing transaction
         // Any data relating to the older transaction is no longer needed
         boolean hasNewerPut = (latestPut.getTimestamp() > arbitraryTransactionData.getTimestamp());
-        return hasNewerPut ? Optional.of(latestPut) : Optional.empty();
+        return hasNewerPut;
     }
 
     public static boolean completeFileExists(ArbitraryTransactionData transactionData) throws DataException {
@@ -196,100 +176,12 @@ public class ArbitraryTransactionUtils {
         return arbitraryDataFile.fileCount();
     }
 
-    /**
-     * Delete Files By Prefix
-     *
-     * @param directory the directory containing the files
-     * @param prefix the prefix of the files to delete
-     * @param now the timestamp for now
-     * @param minAge the time passed creation to wait for deletion
-     *
-     * @throws IOException
-     */
-    public static void deleteFilesByPrefix(Path directory, String prefix, long now, long minAge) throws IOException {
-        try (Stream<Path> paths = Files.list(directory)) {
-            paths.filter(path -> path.getFileName().toString().startsWith(prefix) && !ArbitraryTransactionUtils.isFileRecent(path, now, minAge))
-                .forEach(path -> {
-                    try {
-                        Files.delete(path);
-                        LOGGER.debug("deleted {}", path);
-                    } catch (IOException e) {
-                        LOGGER.warn("failed to delete {}", path);
-                    }
-                });
-        }
-    }
-
-    /**
-     * Delete Folders By Prefix
-     *
-     * @param directory the directory containing the directories to delete
-     * @param prefix the prefix of the directories to delete
-     * @param now the timestamp for now
-     * @param minAge the time passed creation to wait for deletion
-     *
-     * @throws IOException
-     */
-    public static void deleteFoldersByPrefix(Path directory, String prefix, long now, long minAge) throws IOException {
-        try (Stream<Path> paths = Files.list(directory)) {
-            paths.filter(path -> path.toFile().isDirectory() && path.getFileName().toString().startsWith(prefix) && !ArbitraryTransactionUtils.isFileRecent(path, now, minAge))
-                .forEach(path -> {
-                    try {
-                        deleteDirectory(path.toFile());
-                        LOGGER.debug("deleted {}", path);
-                    } catch (IOException e) {
-                        LOGGER.warn("failed to delete {}", path);
-                    }
-                });
-        }
-    }
-
-    /**
-     * Delete Directory
-     *
-     * Delete directory and all of its contents, recursively.
-     *
-     * @param directory the directory to delete
-     *
-     * @return true if successful, otherwise false
-     *
-     * @throws IOException
-     */
-    public static boolean deleteDirectory(File directory) throws IOException {
-        // Ensure the directory exists and is actually a directory
-        if (!directory.exists()) {
-            return false;
-        }
-        if (!directory.isDirectory()) {
-            return false;
-        }
-
-        File[] files = directory.listFiles();
-        if (files != null) {
-            // Iterate over all files and subdirectories
-            for (File file : files) {
-                if (file.isDirectory()) {
-                    // Recursively delete subdirectory
-                    deleteDirectory(file);
-                } else {
-                    // Delete the file
-                    if (!file.delete()) {
-                        LOGGER.warn("Failed to delete file: " + file.getAbsolutePath());
-                    }
-                }
-            }
-        }
-
-        // Now that the directory is empty, delete it
-        return directory.delete();
-    }
-
     public static boolean isFileRecent(Path filePath, long now, long cleanupAfter) {
         try {
             BasicFileAttributes attr = Files.readAttributes(filePath, BasicFileAttributes.class);
             long timeSinceCreated = now - attr.creationTime().toMillis();
             long timeSinceModified = now - attr.lastModifiedTime().toMillis();
-       
+            //LOGGER.info(String.format("timeSinceCreated for path %s is %d. cleanupAfter: %d", filePath, timeSinceCreated, cleanupAfter));
 
             // Check if the file has been created or modified recently
             if (timeSinceCreated > cleanupAfter) {
@@ -316,30 +208,17 @@ public class ArbitraryTransactionUtils {
         return ArbitraryTransactionUtils.isFileRecent(filePath, now, cleanupAfter);
     }
 
-    /**
-     *
-     * @param arbitraryTransactionData
-     * @param now
-     * @param cleanupAfter
-     * @return true if file is deleted, otherwise return false
-     * @throws DataException
-     */
-    public static boolean deleteCompleteFile(ArbitraryTransactionData arbitraryTransactionData, long now, long cleanupAfter) throws DataException {
+    public static void deleteCompleteFile(ArbitraryTransactionData arbitraryTransactionData, long now, long cleanupAfter) throws DataException {
         byte[] completeHash = arbitraryTransactionData.getData();
         byte[] signature = arbitraryTransactionData.getSignature();
 
         ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromHash(completeHash, signature);
 
         if (!ArbitraryTransactionUtils.isFileHashRecent(completeHash, signature, now, cleanupAfter)) {
-            LOGGER.trace("Deleting file {} because it can be rebuilt from chunks " +
+            LOGGER.info("Deleting file {} because it can be rebuilt from chunks " +
                     "if needed", Base58.encode(completeHash));
 
             arbitraryDataFile.delete();
-
-            return true;
-        }
-        else {
-            return false;
         }
     }
 
@@ -364,7 +243,7 @@ public class ArbitraryTransactionUtils {
         ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(arbitraryTransactionData);
         int chunkCount = arbitraryDataFile.split(ArbitraryDataFile.CHUNK_SIZE);
         if (chunkCount > 1) {
-            LOGGER.trace(String.format("Successfully split %s into %d chunk%s",
+            LOGGER.info(String.format("Successfully split %s into %d chunk%s",
                     Base58.encode(completeHash), chunkCount, (chunkCount == 1 ? "" : "s")));
 
             // Verify that the chunk hashes match those in the transaction
@@ -375,7 +254,7 @@ public class ArbitraryTransactionUtils {
 
                     // Now delete the original file if it's not recent
                     if (!ArbitraryTransactionUtils.isFileHashRecent(completeHash, signature, now, cleanupAfter)) {
-                        LOGGER.trace("Deleting file {} because it can now be rebuilt from " +
+                        LOGGER.info("Deleting file {} because it can now be rebuilt from " +
                                 "chunks if needed", Base58.encode(completeHash));
 
                         ArbitraryTransactionUtils.deleteCompleteFile(arbitraryTransactionData, now, cleanupAfter);
@@ -421,7 +300,7 @@ public class ArbitraryTransactionUtils {
                         Path newPath = newChunk.getFilePath();
 
                         // Ensure parent directories exist, then copy the file
-                        LOGGER.trace("Relocating chunk from {} to {}...", oldPath, newPath);
+                        LOGGER.info("Relocating chunk from {} to {}...", oldPath, newPath);
                         Files.createDirectories(newPath.getParent());
                         Files.move(oldPath, newPath, REPLACE_EXISTING);
                         filesRelocatedCount++;
@@ -439,7 +318,7 @@ public class ArbitraryTransactionUtils {
                 Path newPath = newCompleteFile.getFilePath();
 
                 // Ensure parent directories exist, then copy the file
-                LOGGER.trace("Relocating complete file from {} to {}...", oldPath, newPath);
+                LOGGER.info("Relocating complete file from {} to {}...", oldPath, newPath);
                 Files.createDirectories(newPath.getParent());
                 Files.move(oldPath, newPath, REPLACE_EXISTING);
                 filesRelocatedCount++;
@@ -456,7 +335,7 @@ public class ArbitraryTransactionUtils {
                 Path newPath = newCompleteFile.getFilePath();
 
                 // Ensure parent directories exist, then copy the file
-                LOGGER.trace("Relocating metadata file from {} to {}...", oldPath, newPath);
+                LOGGER.info("Relocating metadata file from {} to {}...", oldPath, newPath);
                 Files.createDirectories(newPath.getParent());
                 Files.move(oldPath, newPath, REPLACE_EXISTING);
                 filesRelocatedCount++;
@@ -470,7 +349,7 @@ public class ArbitraryTransactionUtils {
             if (filesRelocatedCount > 0) {
                 if (Settings.getInstance().isOriginalCopyIndicatorFileEnabled()) {
                     // Create a file in the same directory, to indicate that this is the original copy
-                    LOGGER.trace("Creating original copy indicator file...");
+                    LOGGER.info("Creating original copy indicator file...");
                     ArbitraryDataFile completeFile = ArbitraryDataFile.fromHash(arbitraryDataFile.getHash(), signature);
                     Path parentDirectory = completeFile.getFilePath().getParent();
                     File file = Paths.get(parentDirectory.toString(), ".original").toFile();
@@ -478,14 +357,15 @@ public class ArbitraryTransactionUtils {
                 }
             }
         } catch (DataException | IOException e) {
-            LOGGER.trace("Unable to check and relocate all files for signature {}: {}",
+            LOGGER.info("Unable to check and relocate all files for signature {}: {}",
                     Base58.encode(arbitraryTransactionData.getSignature()), e.getMessage());
         }
 
         return filesRelocatedCount;
     }
 
-    public static <T> List<T> limitOffsetTransactions(List<T> transactions, Integer limit, Integer offset) {
+    public static List<ArbitraryTransactionData> limitOffsetTransactions(List<ArbitraryTransactionData> transactions,
+                                                                         Integer limit, Integer offset) {
         if (limit != null && limit == 0) {
             limit = null;
         }

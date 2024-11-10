@@ -15,46 +15,20 @@ Building the future one block at a time. Welcome to Qortal.
 
 # Building the Qortal Core from Source
 
-## Build / Run
+## Build / run
 
 - Requires Java 11. OpenJDK 11 recommended over Java SE.
 - Install Maven
 - Use Maven to fetch dependencies and build: `mvn clean package`
-- Update Maven dependencies: `mvn install` 
 - Built JAR should be something like `target/qortal-1.0.jar`
 - Create basic *settings.json* file: `echo '{}' > settings.json`
 - Run JAR in same working directory as *settings.json*: `java -jar target/qortal-1.0.jar`
 - Wrap in shell script, add JVM flags, redirection, backgrounding, etc. as necessary.
 - Or use supplied example shell script: *start.sh*
 
-## Docker Build / Run
-
-- Copy env template: `cp .env.example .env`
-- Build and start with host port publishing (default): `docker compose up -d --build`
-- Internal Docker network only (no host port publishing): `docker compose -f docker-compose.internal.yml up -d --build`
-- Stop container: `docker compose down`
-- Node data and *settings.json* are stored in: `./data/qortal`
-- JVM start arguments file is stored in: `./data/qortal/start-arguments.txt`
-  - Default content: `-XX:MaxRAMPercentage=25 -XX:+UseG1GC -Xss1024k`
-  - Edit this file and restart the container to apply memory/runtime argument changes
-- Follow logs: `docker compose logs -f qortal`
-- Network name can be set using `QORTAL_NETWORK_NAME` in `.env`
-- Port source of truth is `./data/qortal/settings.json`; keep `.env` `QORTAL_API_PORT` / `QORTAL_P2P_PORT` / `QORTAL_QDN_PORT` in sync
-- If other containers need API access, update API whitelist in `settings.json` (by default only loopback is allowed)
-
-## IntelliJ IDEA Configuration
-
-- Run -> Edit Configurations
-- Add New Application
-- Name: qortal
-- SDK: java 11
-- Main Class: org.qortal.controller.Controller
-- Program arguments: settings.json -Dlog4j.configurationFile=log4j2.properties -ea
-- Environment variables: Djava.net.preferIPv4Stack=false
-
 # Using a pre-built Qortal 'jar' binary
 
-If you prefer to utilize a released version of Qortal, you may do so by downloading one of the available releases from the releases page, that are also linked on https://qortal.org and https://qortal.dev. 
+If you would prefer to utilize a released version of Qortal, you may do so by downloading one of the available releases from the releases page, that are also linked on https://qortal.org and https://qortal.dev. 
 
 # Learning Q-App Development
 
@@ -65,8 +39,7 @@ https://qortal.dev contains dev documentation for building JS/React (and other c
 If the project interests you, you may learn more from the various web2 and QDN based websites focused on introductory information. 
 
 https://qortal.org - primary internet presence 
-https://qortal.dev - new primary project site 
+https://qortal.dev - secondary and development focused website with links to many new developments and documentation
 https://wiki.qortal.org - community built and managed wiki with detailed information regarding the project
-https://qortal.dev/wiki - a simpler setup-focused wiki
 
 links to telegram and discord communities are at the top of https://qortal.org as well. 

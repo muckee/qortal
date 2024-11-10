@@ -234,21 +234,17 @@ public class ChatResource {
 		}
 	)
 	@ApiErrors({ApiError.INVALID_CRITERIA, ApiError.INVALID_ADDRESS, ApiError.REPOSITORY_ISSUE})
-	public ActiveChats getActiveChats(
-		@PathParam("address") String address,
-		@QueryParam("encoding") Encoding encoding,
-		@QueryParam("haschatreference") Boolean hasChatReference
-	) {
+	public ActiveChats getActiveChats(@PathParam("address") String address, @QueryParam("encoding") Encoding encoding) {
 		if (address == null || !Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
-	
+
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			return repository.getChatRepository().getActiveChats(address, encoding, hasChatReference);
+			return repository.getChatRepository().getActiveChats(address, encoding);
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
 	}
-	
+
 	@POST
 	@Operation(
 		summary = "Build raw, unsigned, CHAT transaction",

@@ -2,7 +2,6 @@ package org.qortal.controller;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.qortal.controller.arbitrary.PeerMessage;
 import org.qortal.data.block.BlockData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.network.Network;
@@ -21,11 +20,7 @@ import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class TransactionImporter extends Thread {
@@ -55,11 +50,6 @@ public class TransactionImporter extends Thread {
     /** Cached list of unconfirmed transactions, used when counting per creator. This is replaced regularly */
     public static List<TransactionData> unconfirmedTransactionsCache = null;
 
-    public TransactionImporter() {
-        signatureMessageScheduler.scheduleAtFixedRate(this::processNetworkTransactionSignaturesMessage, 60, 1, TimeUnit.SECONDS);
-        getTransactionMessageScheduler.scheduleAtFixedRate(this::processNetworkGetTransactionMessages, 60, 1, TimeUnit.SECONDS);
-        getUnconfirmedTransactionsMessageScheduler.scheduleAtFixedRate(this::processNetworkGetUnconfirmedTransactionsMessages, 60, 1, TimeUnit.SECONDS);
-    }
 
     public static synchronized TransactionImporter getInstance() {
         if (instance == null) {
@@ -92,27 +82,6 @@ public class TransactionImporter extends Thread {
     public void shutdown() {
         isStopping = true;
         this.interrupt();
-
-        // Shutdown all schedulers
-        LOGGER.info("Shutting down TransactionImporter schedulers");
-        try {
-            getTransactionMessageScheduler.shutdownNow();
-            getUnconfirmedTransactionsMessageScheduler.shutdownNow();
-            signatureMessageScheduler.shutdownNow();
-
-            if (!getTransactionMessageScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                LOGGER.warn("getTransactionMessageScheduler did not terminate in time");
-            }
-            if (!getUnconfirmedTransactionsMessageScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                LOGGER.warn("getUnconfirmedTransactionsMessageScheduler did not terminate in time");
-            }
-            if (!signatureMessageScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                LOGGER.warn("signatureMessageScheduler did not terminate in time");
-            }
-        } catch (InterruptedException e) {
-            LOGGER.warn("Interrupted while waiting for TransactionImporter schedulers to terminate", e);
-            Thread.currentThread().interrupt();
-        }
     }
 
 
@@ -266,13 +235,6 @@ public class TransactionImporter extends Thread {
             return;
         }
 
-        // discard general chat transactions, chat transactions with no group and no recipient
-        sigValidTransactions.removeIf(
-                transactionData -> transactionData.getType() == Transaction.TransactionType.CHAT &&
-                        transactionData.getTxGroupId() == 0 &&
-                        transactionData.getRecipient() == null
-        );
-
         if (Synchronizer.getInstance().isSyncRequested() || Synchronizer.getInstance().isSynchronizing()) {
             // Prioritize syncing, and don't attempt to lock
             return;
@@ -287,19 +249,19 @@ public class TransactionImporter extends Thread {
         LOGGER.debug("Importing incoming transactions queue (size {})...", sigValidTransactions.size());
 
         int processedCount = 0;
-        try {
-            try (final Repository repository = RepositoryManager.getRepository()) {
+        try (final Repository repository = RepositoryManager.getRepository()) {
 
-                // Use a single copy of the unconfirmed transactions list for each cycle, to speed up constant lookups
-                // when counting unconfirmed transactions by creator.
-                List<TransactionData> unconfirmedTransactions = repository.getTransactionRepository().getUnconfirmedTransactions();
-                unconfirmedTransactions.removeIf(t -> t.getType() == Transaction.TransactionType.CHAT);
-                unconfirmedTransactionsCache = unconfirmedTransactions;
+            // Use a single copy of the unconfirmed transactions list for each cycle, to speed up constant lookups
+            // when counting unconfirmed transactions by creator.
+            List<TransactionData> unconfirmedTransactions = repository.getTransactionRepository().getUnconfirmedTransactions();
+            unconfirmedTransactions.removeIf(t -> t.getType() == Transaction.TransactionType.CHAT);
+            unconfirmedTransactionsCache = unconfirmedTransactions;
 
-                // A list of signatures were imported in this round
-                List<byte[]> newlyImportedSignatures = new ArrayList<>();
+            // A list of signatures were imported in this round
+            List<byte[]> newlyImportedSignatures = new ArrayList<>();
 
-                // Import transactions with valid signatures
+            // Import transactions with valid signatures
+            try {
                 for (int i = 0; i < sigValidTransactions.size(); ++i) {
                     if (isStopping) {
                         return;
@@ -373,18 +335,15 @@ public class TransactionImporter extends Thread {
                     Message newTransactionSignatureMessage = new TransactionSignaturesMessage(newlyImportedSignatures);
                     Network.getInstance().broadcast(broadcastPeer -> newTransactionSignatureMessage);
                 }
-
+            } finally {
                 LOGGER.debug("Finished importing {} incoming transaction{}", processedCount, (processedCount == 1 ? "" : "s"));
+                blockchainLock.unlock();
 
-            } catch (DataException e) {
-                LOGGER.error("Repository issue while importing incoming transactions", e);
+                // Clear the unconfirmed transaction cache so new data can be populated in the next cycle
+                unconfirmedTransactionsCache = null;
             }
-        } finally {
-            // Always release the blockchain lock, even if an exception occurred
-            blockchainLock.unlock();
-
-            // Clear the unconfirmed transaction cache so new data can be populated in the next cycle
-            unconfirmedTransactionsCache = null;
+        } catch (DataException e) {
+            LOGGER.error("Repository issue while importing incoming transactions", e);
         }
     }
 
@@ -412,240 +371,94 @@ public class TransactionImporter extends Thread {
         }
     }
 
-    // List to collect messages
-    private final List<PeerMessage> getTransactionMessageList = new ArrayList<>();
-    // Lock to synchronize access to the list
-    private final Object getTransactionMessageLock = new Object();
-
-    // Scheduled executor service to process messages every second
-    private final ScheduledExecutorService getTransactionMessageScheduler = Executors.newScheduledThreadPool(1);
-
     public void onNetworkGetTransactionMessage(Peer peer, Message message) {
+        GetTransactionMessage getTransactionMessage = (GetTransactionMessage) message;
+        byte[] signature = getTransactionMessage.getSignature();
 
-        synchronized (getTransactionMessageLock) {
-            getTransactionMessageList.add(new PeerMessage(peer, message));
-        }
-    }
-
-    private void processNetworkGetTransactionMessages() {
-        if (Controller.isStopping()) {
-            return;
-        }
-
-        try {
-            List<PeerMessage> messagesToProcess;
-            synchronized (getTransactionMessageLock) {
-                messagesToProcess = new ArrayList<>(getTransactionMessageList);
-                getTransactionMessageList.clear();
-            }
-
-            if( messagesToProcess.isEmpty() ) return;
-
-            Map<String, PeerMessage> peerMessageBySignature58 = new HashMap<>(messagesToProcess.size());
-
-            for( PeerMessage peerMessage : messagesToProcess ) {
-                GetTransactionMessage getTransactionMessage = (GetTransactionMessage) peerMessage.getMessage();
-                byte[] signature = getTransactionMessage.getSignature();
-
-                peerMessageBySignature58.put(Base58.encode(signature), peerMessage);
-            }
-
+        try (final Repository repository = RepositoryManager.getRepository()) {
             // Firstly check the sig-valid transactions that are currently queued for import
-            Map<String, TransactionData> transactionsCachedBySignature58
-                = this.getCachedSigValidTransactions().stream()
-                    .collect(Collectors.toMap(t -> Base58.encode(t.getSignature()), Function.identity()));
+            TransactionData transactionData = this.getCachedSigValidTransactions().stream()
+                    .filter(t -> Arrays.equals(signature, t.getSignature()))
+                    .findFirst().orElse(null);
 
-            Map<Boolean, List<Map.Entry<String, PeerMessage>>> transactionsCachedBySignature58Partition
-                = peerMessageBySignature58.entrySet().stream()
-                    .collect(Collectors.partitioningBy(entry -> transactionsCachedBySignature58.containsKey(entry.getKey())));
-
-            List<byte[]> signaturesNeeded
-                = transactionsCachedBySignature58Partition.get(false).stream()
-                    .map(Map.Entry::getValue)
-                    .map(PeerMessage::getMessage)
-                    .map(message -> (GetTransactionMessage) message)
-                    .map(GetTransactionMessage::getSignature)
-                    .collect(Collectors.toList());
-
-            // transaction found in the import queue
-            Map<String, TransactionData> transactionsToSendBySignature58 = new HashMap<>(messagesToProcess.size());
-            for( Map.Entry<String, PeerMessage> entry : transactionsCachedBySignature58Partition.get(true)) {
-                transactionsToSendBySignature58.put(entry.getKey(), transactionsCachedBySignature58.get(entry.getKey()));
-            }
-
-            if( !signaturesNeeded.isEmpty() ) {
+            if (transactionData == null) {
                 // Not found in import queue, so try the database
-                try (final Repository repository = RepositoryManager.getRepository()) {
-                    transactionsToSendBySignature58.putAll(
-                            repository.getTransactionRepository().fromSignatures(signaturesNeeded).stream()
-                                    .collect(Collectors.toMap(transactionData -> Base58.encode(transactionData.getSignature()), Function.identity()))
-                    );
-                } catch (DataException e) {
-                    LOGGER.error(e.getMessage(), e);
-                }
+                transactionData = repository.getTransactionRepository().fromSignature(signature);
             }
 
-            for( final Map.Entry<String, TransactionData> entry : transactionsToSendBySignature58.entrySet() ) {
-
-                PeerMessage peerMessage = peerMessageBySignature58.get(entry.getKey());
-                final Message message = peerMessage.getMessage();
-                final Peer peer = peerMessage.getPeer();
-
-                Runnable sendTransactionMessageRunner = () -> sendTransactionMessage(entry.getKey(), entry.getValue(), message, peer);
-                Thread sendTransactionMessageThread = new Thread(sendTransactionMessageRunner);
-                sendTransactionMessageThread.start();
+            if (transactionData == null) {
+                // Still not found - so we don't have this transaction
+                LOGGER.debug(() -> String.format("Ignoring GET_TRANSACTION request from peer %s for unknown transaction %s", peer, Base58.encode(signature)));
+                // Send no response at all???
+                return;
             }
-        } catch (Exception e) {
-            LOGGER.error(e.getMessage(),e);
-        }
-    }
 
-    private static void sendTransactionMessage(String signature58, TransactionData data, Message message, Peer peer) {
-        try {
-            Message transactionMessage = new TransactionMessage(data);
+            Message transactionMessage = new TransactionMessage(transactionData);
             transactionMessage.setId(message.getId());
-
             if (!peer.sendMessage(transactionMessage))
                 peer.disconnect("failed to send transaction");
-        }
-        catch (TransformationException e) {
-            LOGGER.error(String.format("Serialization issue while sending transaction %s to peer %s", signature58, peer), e);
-        }
-        catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
+        } catch (DataException e) {
+            LOGGER.error(String.format("Repository issue while sending transaction %s to peer %s", Base58.encode(signature), peer), e);
+        } catch (TransformationException e) {
+            LOGGER.error(String.format("Serialization issue while sending transaction %s to peer %s", Base58.encode(signature), peer), e);
         }
     }
-
-    // List to collect messages
-    private final List<PeerMessage> getUnconfirmedTransactionsMessageList = new ArrayList<>();
-    // Lock to synchronize access to the list
-    private final Object getUnconfirmedTransactionsMessageLock = new Object();
-
-    // Scheduled executor service to process messages every second
-    private final ScheduledExecutorService getUnconfirmedTransactionsMessageScheduler = Executors.newScheduledThreadPool(1);
 
     public void onNetworkGetUnconfirmedTransactionsMessage(Peer peer, Message message) {
-        synchronized (getUnconfirmedTransactionsMessageLock) {
-            getUnconfirmedTransactionsMessageList.add(new PeerMessage(peer, message));
-        }
-    }
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            List<byte[]> signatures = Collections.emptyList();
 
-    private void processNetworkGetUnconfirmedTransactionsMessages() {
-        if (Controller.isStopping()) {
-            return;
-        }
-
-        List<PeerMessage> messagesToProcess;
-        synchronized (getUnconfirmedTransactionsMessageLock) {
-            messagesToProcess = new ArrayList<>(getUnconfirmedTransactionsMessageList);
-            getUnconfirmedTransactionsMessageList.clear();
-        }
-
-        if( messagesToProcess.isEmpty() ) return;
-
-        List<byte[]> signatures = Collections.emptyList();
-
-        // If we're NOT up-to-date then don't send out unconfirmed transactions
-        // as it's possible they are already included in a later block that we don't have.
-        if (Controller.getInstance().isUpToDate()) {
-            try (final Repository repository = RepositoryManager.getRepository()) {
+            // If we're NOT up-to-date then don't send out unconfirmed transactions
+            // as it's possible they are already included in a later block that we don't have.
+            if (Controller.getInstance().isUpToDate())
                 signatures = repository.getTransactionRepository().getUnconfirmedTransactionSignatures();
-            } catch (DataException e) {
-                LOGGER.error(String.format("Repository issue while sending unconfirmed transaction signatures to peers"), e);
-            }
-        }
 
-        Message transactionSignaturesMessage = new TransactionSignaturesMessage(signatures);
-
-        for( PeerMessage messageToProcess : messagesToProcess ) {
-            if (!messageToProcess.getPeer().sendMessage(transactionSignaturesMessage))
-                messageToProcess.getPeer().disconnect("failed to send unconfirmed transaction signatures");
+            Message transactionSignaturesMessage = new TransactionSignaturesMessage(signatures);
+            if (!peer.sendMessage(transactionSignaturesMessage))
+                peer.disconnect("failed to send unconfirmed transaction signatures");
+        } catch (DataException e) {
+            LOGGER.error(String.format("Repository issue while sending unconfirmed transaction signatures to peer %s", peer), e);
         }
     }
-
-    // List to collect messages
-    private final List<PeerMessage> signatureMessageList = new ArrayList<>();
-    // Lock to synchronize access to the list
-    private final Object signatureMessageLock = new Object();
-
-    // Scheduled executor service to process messages every second
-    private final ScheduledExecutorService signatureMessageScheduler = Executors.newScheduledThreadPool(1);
 
     public void onNetworkTransactionSignaturesMessage(Peer peer, Message message) {
-        synchronized (signatureMessageLock) {
-            signatureMessageList.add(new PeerMessage(peer, message));
-        }
-    }
+        TransactionSignaturesMessage transactionSignaturesMessage = (TransactionSignaturesMessage) message;
+        List<byte[]> signatures = transactionSignaturesMessage.getSignatures();
 
-    public void processNetworkTransactionSignaturesMessage() {
-        if (Controller.isStopping()) {
-            return;
-        }
-
-        try {
-            List<PeerMessage> messagesToProcess;
-            synchronized (signatureMessageLock) {
-                messagesToProcess = new ArrayList<>(signatureMessageList);
-                signatureMessageList.clear();
-            }
-
-            Map<String, byte[]> signatureBySignature58 = new HashMap<>(messagesToProcess.size() * 10);
-            Map<String, Peer> peerBySignature58 = new HashMap<>( messagesToProcess.size() * 10 );
-
-            for( PeerMessage peerMessage : messagesToProcess ) {
-
-                TransactionSignaturesMessage transactionSignaturesMessage = (TransactionSignaturesMessage) peerMessage.getMessage();
-                List<byte[]> signatures = transactionSignaturesMessage.getSignatures();
-
-                for (byte[] signature : signatures) {
-                    String signature58 = Base58.encode(signature);
-                    if (invalidUnconfirmedTransactions.containsKey(signature58)) {
-                        // Previously invalid transaction - don't keep requesting it
-                        // It will be periodically removed from invalidUnconfirmedTransactions to allow for rechecks
-                        continue;
-                    }
-
-                    // Ignore if this transaction is in the queue
-                    if (incomingTransactionQueueContains(signature)) {
-                        LOGGER.trace(() -> String.format("Ignoring existing queued transaction %s from peer %s", Base58.encode(signature), peerMessage.getPeer()));
-                        continue;
-                    }
-
-                    signatureBySignature58.put(signature58, signature);
-                    peerBySignature58.put(signature58, peerMessage.getPeer());
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            for (byte[] signature : signatures) {
+                String signature58 = Base58.encode(signature);
+                if (invalidUnconfirmedTransactions.containsKey(signature58)) {
+                    // Previously invalid transaction - don't keep requesting it
+                    // It will be periodically removed from invalidUnconfirmedTransactions to allow for rechecks
+                    continue;
                 }
-            }
 
-            if( !signatureBySignature58.isEmpty() ) {
-                try (final Repository repository = RepositoryManager.getRepository()) {
-
-                    // remove signatures in db already
-                    repository.getTransactionRepository()
-                            .fromSignatures(new ArrayList<>(signatureBySignature58.values())).stream()
-                            .map(TransactionData::getSignature)
-                            .map(signature -> Base58.encode(signature))
-                            .forEach(signature58 -> signatureBySignature58.remove(signature58));
-                } catch (DataException e) {
-                    LOGGER.error(String.format("Repository issue while processing unconfirmed transactions from peer"), e);
+                // Ignore if this transaction is in the queue
+                if (incomingTransactionQueueContains(signature)) {
+                    LOGGER.trace(() -> String.format("Ignoring existing queued transaction %s from peer %s", Base58.encode(signature), peer));
+                    continue;
                 }
-            }
 
-            // Check isInterrupted() here and exit fast
-            if (Thread.currentThread().isInterrupted())
-                return;
+                // Do we have it already? (Before requesting transaction data itself)
+                if (repository.getTransactionRepository().exists(signature)) {
+                    LOGGER.trace(() -> String.format("Ignoring existing transaction %s from peer %s", Base58.encode(signature), peer));
+                    continue;
+                }
 
-            for (Map.Entry<String, byte[]> entry : signatureBySignature58.entrySet()) {
-
-                Peer peer = peerBySignature58.get(entry.getKey());
+                // Check isInterrupted() here and exit fast
+                if (Thread.currentThread().isInterrupted())
+                    return;
 
                 // Fetch actual transaction data from peer
-                Message getTransactionMessage = new GetTransactionMessage(entry.getValue());
-                if (peer != null && !peer.sendMessage(getTransactionMessage)) {
+                Message getTransactionMessage = new GetTransactionMessage(signature);
+                if (!peer.sendMessage(getTransactionMessage)) {
                     peer.disconnect("failed to request transaction");
+                    return;
                 }
             }
-        } catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
+        } catch (DataException e) {
+            LOGGER.error(String.format("Repository issue while processing unconfirmed transactions from peer %s", peer), e);
         }
     }
 

@@ -100,7 +100,7 @@ public class AES {
         // Prepend the output stream with the 16 byte initialization vector
         outputStream.write(iv.getIV());
 
-        byte[] buffer = new byte[65536];
+        byte[] buffer = new byte[1024];
         int bytesRead;
         while ((bytesRead = inputStream.read(buffer)) != -1) {
             byte[] output = cipher.update(buffer, 0, bytesRead);
@@ -129,31 +129,29 @@ public class AES {
             throw new IOException("Failed to create directory " + parent);
         }
 
-        // Buffer size: 256KB - good balance between performance and memory for all machines
-        final int BUFFER_SIZE = 256 * 1024;
-        
-        try (BufferedInputStream inputStream = new BufferedInputStream(new FileInputStream(encryptedFile), BUFFER_SIZE);
-             BufferedOutputStream outputStream = new BufferedOutputStream(new FileOutputStream(decryptedFile), BUFFER_SIZE)) {
+        FileInputStream inputStream = new FileInputStream(encryptedFile);
+        FileOutputStream outputStream = new FileOutputStream(decryptedFile);
 
-            // Read the initialization vector from the first 16 bytes of the file
-            byte[] iv = new byte[16];
-            inputStream.read(iv);
-            Cipher cipher = Cipher.getInstance(algorithm);
-            cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
+        // Read the initialization vector from the first 16 bytes of the file
+        byte[] iv = new byte[16];
+        inputStream.read(iv);
+        Cipher cipher = Cipher.getInstance(algorithm);
+        cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
 
-            byte[] buffer = new byte[BUFFER_SIZE];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                byte[] output = cipher.update(buffer, 0, bytesRead);
-                if (output != null) {
-                    outputStream.write(output);
-                }
-            }
-            byte[] output = cipher.doFinal();
+        byte[] buffer = new byte[64];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buffer)) != -1) {
+            byte[] output = cipher.update(buffer, 0, bytesRead);
             if (output != null) {
                 outputStream.write(output);
             }
         }
+        byte[] output = cipher.doFinal();
+        if (output != null) {
+            outputStream.write(output);
+        }
+        inputStream.close();
+        outputStream.close();
     }
 
     public static SealedObject encryptObject(String algorithm, Serializable object, SecretKey key,
@@ -191,37 +189,6 @@ public class AES {
         cipher.init(Cipher.DECRYPT_MODE, key, iv);
         return new String(cipher.doFinal(Base64.getDecoder()
                 .decode(cipherText)));
-    }
-
-    /**
-     * Creates a CipherInputStream for decrypting an encrypted file stream.
-     * This allows streaming decryption without writing to a temporary file.
-     * 
-     * @param algorithm The encryption algorithm (e.g., "AES/CBC/PKCS5Padding")
-     * @param key The secret key for decryption
-     * @param encryptedInputStream The input stream containing encrypted data (with IV in first 16 bytes)
-     * @return A CipherInputStream that decrypts data as it's read
-     * @throws IOException If reading the IV fails
-     * @throws NoSuchPaddingException If the padding scheme is not available
-     * @throws NoSuchAlgorithmException If the algorithm is not available
-     * @throws InvalidAlgorithmParameterException If the IV is invalid
-     * @throws InvalidKeyException If the key is invalid
-     */
-    public static CipherInputStream createDecryptingInputStream(String algorithm, SecretKey key, 
-            InputStream encryptedInputStream) throws IOException, NoSuchPaddingException, 
-            NoSuchAlgorithmException, InvalidAlgorithmParameterException, InvalidKeyException {
-        
-        // Read the initialization vector from the first 16 bytes
-        byte[] iv = new byte[16];
-        int bytesRead = encryptedInputStream.read(iv);
-        if (bytesRead != 16) {
-            throw new IOException("Failed to read initialization vector (expected 16 bytes, got " + bytesRead + ")");
-        }
-        
-        Cipher cipher = Cipher.getInstance(algorithm);
-        cipher.init(Cipher.DECRYPT_MODE, key, new IvParameterSpec(iv));
-        
-        return new CipherInputStream(encryptedInputStream, cipher);
     }
 
     public static long getEncryptedFileSize(long inFileSize) {
