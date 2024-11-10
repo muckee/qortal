@@ -411,20 +411,13 @@ public class RepositoryTests extends Common {
 		}
 	}
 
-	/** Specifically test LATERAL() usage in Chat repository with hasChatReference */
+	/** Specifically test LATERAL() usage in Chat repository */
 	@Test
 	public void testChatLateral() {
 		try (final HSQLDBRepository hsqldb = (HSQLDBRepository) RepositoryManager.getRepository()) {
 			String address = Crypto.toAddress(new byte[32]);
 
-			// Test without hasChatReference
-			hsqldb.getChatRepository().getActiveChats(address, ChatMessage.Encoding.BASE58, null);
-
-			// Test with hasChatReference = true
-			hsqldb.getChatRepository().getActiveChats(address, ChatMessage.Encoding.BASE58, true);
-
-			// Test with hasChatReference = false
-			hsqldb.getChatRepository().getActiveChats(address, ChatMessage.Encoding.BASE58, false);
+			hsqldb.getChatRepository().getActiveChats(address, ChatMessage.Encoding.BASE58);
 		} catch (DataException e) {
 			fail("HSQLDB bug #1580");
 		}
