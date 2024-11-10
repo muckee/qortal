@@ -3,24 +3,12 @@ package org.qortal.repository.hsqldb;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.api.SearchMode;
-import org.qortal.api.resource.TransactionsResource;
 import org.qortal.arbitrary.misc.Category;
 import org.qortal.arbitrary.misc.Service;
-import org.qortal.controller.Controller;
-import org.qortal.data.account.AccountBalanceData;
-import org.qortal.data.account.AddressAmountData;
-import org.qortal.data.account.BlockHeightRange;
-import org.qortal.data.account.BlockHeightRangeAddressAmounts;
 import org.qortal.data.arbitrary.ArbitraryResourceCache;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
-import org.qortal.data.transaction.TransactionData;
-import org.qortal.repository.DataException;
-import org.qortal.repository.Repository;
-import org.qortal.repository.RepositoryManager;
-import org.qortal.settings.Settings;
-import org.qortal.utils.BalanceRecorderUtils;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -37,7 +25,6 @@ import java.util.Optional;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -61,11 +48,6 @@ public class HSQLDBCacheUtils {
         }
     };
     private static final String DEFAULT_IDENTIFIER = "default";
-    private static final int ZERO = 0;
-    public static final String DB_CACHE_TIMER = "DB Cache Timer";
-    public static final String DB_CACHE_TIMER_TASK = "DB Cache Timer Task";
-    public static final String BALANCE_RECORDER_TIMER = "Balance Recorder Timer";
-    public static final String BALANCE_RECORDER_TIMER_TASK = "Balance Recorder Timer Task";
 
     /**
      *
@@ -180,10 +162,7 @@ public class HSQLDBCacheUtils {
             Optional<Boolean> reverse) {
 
         // retain only candidates with names
-        Stream<ArbitraryResourceData> stream = candidates.stream().filter(candidate -> candidate.name != null );
-
-        if(exclude.isPresent())
-            stream = stream.filter( candidate -> !exclude.get().get().contains( candidate.name ));
+        Stream<ArbitraryResourceData> stream = candidates.stream().filter(candidate -> candidate.name != null);
 
         // filter by service
         if( service.isPresent() )
@@ -372,200 +351,13 @@ public class HSQLDBCacheUtils {
      * Start Caching
      *
      * @param priorityRequested the thread priority to fill cache in
-     * @param frequency         the frequency to fill the cache (in seconds)
+     * @param frequency the frequency to fill the cache (in seconds)
+     * @param respository the data source
      *
      * @return the data cache
      */
-    public static void startCaching(int priorityRequested, int frequency) {
+    public static void startCaching(int priorityRequested, int frequency, HSQLDBRepository respository) {
 
-        Timer timer = buildTimer(DB_CACHE_TIMER, priorityRequested);
-
-        TimerTask task = new TimerTask() {
-            @Override
-            public void run() {
-
-                Thread.currentThread().setName(DB_CACHE_TIMER_TASK);
-
-                try (final HSQLDBRepository respository = (HSQLDBRepository) Controller.REPOSITORY_FACTORY.getRepository()) {
-                    fillCache(ArbitraryResourceCache.getInstance(), respository);
-                }
-                catch( DataException e ) {
-                    LOGGER.error(e.getMessage(), e);
-                }
-            }
-        };
-
-        // delay 1 second
-        timer.scheduleAtFixedRate(task, 1000, frequency * 1000);
-    }
-
-    /**
-     * Start Recording Balances
-     *
-     * @param balancesByHeight height -> account balances
-     * @param balanceDynamics every balance dynamic
-     * @param priorityRequested the requested thread priority
-     * @param frequency the recording frequencies, in minutes
-     * @param capacity the maximum size of balanceDynamics
-     */
-    public static void startRecordingBalances(
-            final ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight,
-            CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> balanceDynamics,
-            int priorityRequested,
-            int frequency,
-            int capacity) {
-
-        Timer timer = buildTimer(BALANCE_RECORDER_TIMER, priorityRequested);
-
-        TimerTask task = new TimerTask() {
-            @Override
-            public void run() {
-
-                Thread.currentThread().setName(BALANCE_RECORDER_TIMER_TASK);
-
-                int currentHeight = recordCurrentBalances(balancesByHeight);
-
-                LOGGER.debug("recorded balances: height = " + currentHeight);
-
-                // remove invalidated recordings, recording after current height
-                BalanceRecorderUtils.removeRecordingsAboveHeight(currentHeight, balancesByHeight);
-
-                // remove invalidated dynamics, on or after current height
-                BalanceRecorderUtils.removeDynamicsOnOrAboveHeight(currentHeight, balanceDynamics);
-
-                // if there are 2 or more recordings, then produce balance dynamics for the first 2 recordings
-                if( balancesByHeight.size() > 1 ) {
-
-                    Optional<Integer> priorHeight = BalanceRecorderUtils.getPriorHeight(currentHeight, balancesByHeight);
-
-                    // if there is a prior height
-                    if(priorHeight.isPresent()) {
-
-                        boolean isRewardDistribution = BalanceRecorderUtils.isRewardDistributionRange(priorHeight.get(), currentHeight);
-
-                        // if this range has a reward recording block or if other blocks are enabled for recording
-                        if( isRewardDistribution || !Settings.getInstance().isRewardRecordingOnly() ) {
-                            produceBalanceDynamics(currentHeight, priorHeight, isRewardDistribution, balancesByHeight, balanceDynamics, capacity);
-                        }
-                    }
-                    else {
-                        LOGGER.warn("Expecting prior height and nothing was discovered, current height = " + currentHeight);
-                    }
-                }
-                // else this should be the first recording
-                else {
-                    LOGGER.info("first balance recording completed");
-                }
-            }
-        };
-
-        // wait 5 minutes
-        timer.scheduleAtFixedRate(task, 300_000, frequency * 60_000);
-    }
-
-    private static void produceBalanceDynamics(int currentHeight, Optional<Integer> priorHeight, boolean isRewardDistribution, ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight, CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> balanceDynamics, int capacity) {
-        BlockHeightRange blockHeightRange = new BlockHeightRange(priorHeight.get(), currentHeight, isRewardDistribution);
-
-        LOGGER.debug("building dynamics for block heights: range = " + blockHeightRange);
-
-        List<AccountBalanceData> currentBalances = balancesByHeight.get(currentHeight);
-
-        ArrayList<TransactionData> transactions = getTransactionDataForBlocks(blockHeightRange);
-
-        LOGGER.info("transactions counted for balance adjustments: count = " + transactions.size());
-        List<AddressAmountData> currentDynamics
-            = BalanceRecorderUtils.buildBalanceDynamics(
-                currentBalances,
-                balancesByHeight.get(priorHeight.get()),
-                Settings.getInstance().getMinimumBalanceRecording(),
-                transactions);
-
-        LOGGER.debug("dynamics built: count = " + currentDynamics.size());
-
-        if(LOGGER.isDebugEnabled())
-            currentDynamics.stream()
-                .sorted(Comparator.comparingLong(AddressAmountData::getAmount).reversed())
-                .limit(Settings.getInstance().getTopBalanceLoggingLimit())
-                .forEach(top5Dynamic -> LOGGER.debug("Top Dynamics = " + top5Dynamic));
-
-        BlockHeightRangeAddressAmounts amounts
-            = new BlockHeightRangeAddressAmounts( blockHeightRange, currentDynamics );
-
-        balanceDynamics.add(amounts);
-
-        BalanceRecorderUtils.removeRecordingsBelowHeight(currentHeight - Settings.getInstance().getBalanceRecorderRollbackAllowance(), balancesByHeight);
-
-        while(balanceDynamics.size() > capacity) {
-            BlockHeightRangeAddressAmounts oldestDynamics = BalanceRecorderUtils.removeOldestDynamics(balanceDynamics);
-
-            LOGGER.debug("removing oldest dynamics: range " + oldestDynamics.getRange());
-        }
-    }
-
-    private static ArrayList<TransactionData> getTransactionDataForBlocks(BlockHeightRange blockHeightRange) {
-        ArrayList<TransactionData> transactions;
-
-        try (final Repository repository = RepositoryManager.getRepository()) {
-            List<byte[]> signatures
-                = repository.getTransactionRepository().getSignaturesMatchingCriteria(
-                    blockHeightRange.getBegin() + 1, blockHeightRange.getEnd() - blockHeightRange.getBegin(),
-                    null, null,null, null, null,
-                    TransactionsResource.ConfirmationStatus.CONFIRMED,
-                    null, null, null);
-
-            transactions = new ArrayList<>(signatures.size());
-            for (byte[] signature : signatures) {
-                transactions.add(repository.getTransactionRepository().fromSignature(signature));
-            }
-
-            LOGGER.debug(String.format("Found %s transactions for " + blockHeightRange, transactions.size()));
-        } catch (Exception e) {
-            transactions = new ArrayList<>(0);
-            LOGGER.warn("Problems getting transactions for balance recording: " + e.getMessage());
-        }
-        return transactions;
-    }
-
-    private static int recordCurrentBalances(ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight) {
-        int currentHeight;
-
-        try (final HSQLDBRepository repository = (HSQLDBRepository) Controller.REPOSITORY_FACTORY.getRepository()) {
-
-            // get current balances
-            List<AccountBalanceData> accountBalances = getAccountBalances(repository);
-
-            // get anyone of the balances
-            Optional<AccountBalanceData> data = accountBalances.stream().findAny();
-
-            // if there are any balances, then record them
-            if (data.isPresent()) {
-                // map all new balances to the current height
-                balancesByHeight.put(data.get().getHeight(), accountBalances);
-
-                currentHeight =  data.get().getHeight();
-            }
-            else {
-                currentHeight = Integer.MAX_VALUE;
-            }
-        } catch (DataException e) {
-            LOGGER.error(e.getMessage(), e);
-            currentHeight = Integer.MAX_VALUE;
-        }
-
-        return currentHeight;
-    }
-
-    /**
-     * Build Timer
-     *
-     * Build a timer for scheduling a timer task.
-     *
-     * @param name the name for the thread running the timer task
-     * @param priorityRequested the priority for the thread running the timer task
-     *
-     * @return a timer for scheduling a timer task
-     */
-    private static Timer buildTimer( final String name, int priorityRequested) {
         // ensure priority is in between 1-10
         final int priority = Math.max(0, Math.min(10, priorityRequested));
 
@@ -573,7 +365,7 @@ public class HSQLDBCacheUtils {
         Timer timer = new Timer(true) { // 'true' to make the Timer daemon
             @Override
             public void schedule(TimerTask task, long delay) {
-                Thread thread = new Thread(task, name) {
+                Thread thread = new Thread(task) {
                     @Override
                     public void run() {
                         this.setPriority(priority);
@@ -584,7 +376,17 @@ public class HSQLDBCacheUtils {
                 thread.start();
             }
         };
-        return timer;
+
+        TimerTask task = new TimerTask() {
+            @Override
+            public void run() {
+
+                fillCache(ArbitraryResourceCache.getInstance(), respository);
+            }
+        };
+
+        // delay 1 second
+        timer.scheduleAtFixedRate(task, 1000, frequency * 1000);
     }
 
     /**
@@ -738,44 +540,5 @@ public class HSQLDBCacheUtils {
         } while (resultSet.next());
 
         return resources;
-    }
-
-    public static List<AccountBalanceData> getAccountBalances(HSQLDBRepository repository) {
-
-        StringBuilder sql = new StringBuilder();
-
-        sql.append("SELECT account, balance, height ");
-        sql.append("FROM ACCOUNTBALANCES as balances ");
-        sql.append("JOIN (SELECT height FROM BLOCKS ORDER BY height DESC LIMIT 1) AS max_height ON true ");
-        sql.append("WHERE asset_id=0");
-
-        List<AccountBalanceData> data = new ArrayList<>();
-
-        LOGGER.info( "Getting account balances ...");
-
-        try {
-            Statement statement = repository.connection.createStatement();
-
-            ResultSet resultSet = statement.executeQuery(sql.toString());
-
-            if (resultSet == null || !resultSet.next())
-                return new ArrayList<>(0);
-
-            do {
-                String account = resultSet.getString(1);
-                long balance = resultSet.getLong(2);
-                int height = resultSet.getInt(3);
-
-                data.add(new AccountBalanceData(account, ZERO, balance, height));
-            } while (resultSet.next());
-        } catch (SQLException e) {
-            LOGGER.warn(e.getMessage());
-        } catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
-        }
-
-        LOGGER.info("Retrieved account balances: count = " + data.size());
-
-        return data;
     }
 }
