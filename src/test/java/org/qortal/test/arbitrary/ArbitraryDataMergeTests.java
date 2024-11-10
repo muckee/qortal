@@ -15,7 +15,9 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.file.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Random;
@@ -240,7 +242,7 @@ public class ArbitraryDataMergeTests extends Common {
         BufferedWriter file1Writer = new BufferedWriter(new FileWriter(file1));
         String initialString = ArbitraryUtils.generateRandomString(1024);
         // Add a newline every 50 chars
-        initialString = initialString.replaceAll("(.{50})", "$1" + System.lineSeparator());
+        initialString = initialString.replaceAll("(.{50})", "$1\n");
         file1Writer.write(initialString);
         file1Writer.newLine();
         file1Writer.close();
@@ -305,23 +307,23 @@ public class ArbitraryDataMergeTests extends Common {
         file1.deleteOnExit();
         file2.deleteOnExit();
 
-        // Write a random string to the first file, 1024 characters, \n every 50 chars
+        // Write a random string to the first file
         BufferedWriter file1Writer = new BufferedWriter(new FileWriter(file1));
         String initialString = ArbitraryUtils.generateRandomString(1024);
         // Add a newline every 50 chars
-        initialString = initialString.replaceAll("(.{50})", "$1" + System.lineSeparator());
+        initialString = initialString.replaceAll("(.{50})", "$1\n");
         // Remove newline at end of string
-        initialString = initialString.stripTrailing();  // Remove Trailing White Space
+        initialString = initialString.stripTrailing();
         file1Writer.write(initialString);
         // No newline
         file1Writer.close();
         byte[] file1Digest = Crypto.digest(file1);
 
-        // Write a slightly modified string to the second file, append "-edit" to the string
+        // Write a slightly modified string to the second file
         BufferedWriter file2Writer = new BufferedWriter(new FileWriter(file2));
         String updatedString = initialString.concat("-edit");
         file2Writer.write(updatedString);
-        // No newline - This is wrong, both files contain \n every 50 chars
+        // No newline
         file2Writer.close();
         byte[] file2Digest = Crypto.digest(file2);
 
@@ -340,7 +342,6 @@ public class ArbitraryDataMergeTests extends Common {
         ArbitraryDataCreatePatch patch = new ArbitraryDataCreatePatch(tempDir1, tempDir2, signature);
         patch.create();
         Path patchPath = patch.getFinalPath();
-
         assertTrue(Files.exists(patchPath));
 
         // Check that the patch file exists
@@ -352,7 +353,6 @@ public class ArbitraryDataMergeTests extends Common {
         assertFalse(Arrays.equals(patchDigest, file1Digest));
 
         // Make sure that the patch file is different from file2
-        // This assert fails, patchFile and file2 have the same contents so the digest will match
         assertFalse(Arrays.equals(patchDigest, file2Digest));
 
         // Now merge the patch with the original path
@@ -384,7 +384,7 @@ public class ArbitraryDataMergeTests extends Common {
         BufferedWriter file1Writer = new BufferedWriter(new FileWriter(file1));
         String initialString = ArbitraryUtils.generateRandomString(110 * 1024);
         // Add a newline every 50 chars
-        initialString = initialString.replaceAll("(.{50})", "$1" + System.lineSeparator());
+        initialString = initialString.replaceAll("(.{50})", "$1\n");
         file1Writer.write(initialString);
         file1Writer.newLine();
         file1Writer.close();
