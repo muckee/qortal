@@ -14,10 +14,16 @@ import org.qortal.api.ApiErrors;
 import org.qortal.api.ApiExceptionFactory;
 import org.qortal.api.Security;
 import org.qortal.api.model.crosschain.AddressRequest;
-import org.qortal.api.model.crosschain.ForeignCoinStatus;
 import org.qortal.api.model.crosschain.LitecoinSendRequest;
-import org.qortal.crosschain.*;
-import org.qortal.settings.Settings;
+import org.qortal.crosschain.AddressInfo;
+import org.qortal.crosschain.ChainableServer;
+import org.qortal.crosschain.ElectrumX;
+import org.qortal.crosschain.ForeignBlockchainException;
+import org.qortal.crosschain.Litecoin;
+import org.qortal.crosschain.ServerConnectionInfo;
+import org.qortal.crosschain.ServerInfo;
+import org.qortal.crosschain.SimpleTransaction;
+import org.qortal.crosschain.ServerConfigurationInfo;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.GET;
@@ -34,70 +40,6 @@ public class CrossChainLitecoinResource {
 
 	@Context
 	HttpServletRequest request;
-
-	@GET
-	@Path("/status")
-	@Operation(
-			summary = "Returns wallet status, connected server count and known server count",
-			description = "Returns the status of the wallet and the number of electrumX servers available/connected",
-			responses = {
-					@ApiResponse(
-							content = @Content(
-									schema = @Schema(
-											implementation = ForeignCoinStatus.class
-									)
-							)
-					)
-			}
-	)
-	public ForeignCoinStatus getWalletStatus() {
-		Litecoin litecoin = Litecoin.getInstance();
-		boolean isEnabled = litecoin != null;
-		int connections = 0;
-		int known = 0;
-		if (isEnabled && litecoin.getBlockchainProvider() instanceof ElectrumX) {
-			connections = ((ElectrumX) litecoin.getBlockchainProvider()).getConnectedServerCount();
-			known = ((ElectrumX) litecoin.getBlockchainProvider()).getKnownServerCount();
-
-		}
-
-		return new ForeignCoinStatus(isEnabled, connections, known);
-	}
-
-	@POST
-	@Path("/start")
-	@Operation(
-			summary = "Start Litecoin Electrum Connections",
-			description = "Start Litecoin Electrum Connections",
-			responses = {
-					@ApiResponse(
-							description = "true if Litecoin Wallet Started",
-							content = @Content(
-									schema = @Schema(
-											type = "string"
-									)
-							)
-					)
-			}
-	)
-	@SecurityRequirement(name = "apiKey")
-	public String startWalletSingleton(
-			@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
-
-		Security.checkApiCallAllowed(request);
-		Settings.getInstance().enableWallet("LTC");
-		Litecoin litecoin = Litecoin.getInstance();
-
-		try {
-			Thread.sleep(100);
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-		}
-
-		boolean started = litecoin != null;
-
-		return Boolean.toString(started);
-	}
 
 	@GET
 	@Path("/height")
@@ -283,12 +225,6 @@ public class CrossChainLitecoinResource {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
 
 		Litecoin litecoin = Litecoin.getInstance();
-
-		// if the request is using the current p2sh prefix 'M' format, then convert it to the deprecated p2sh prefix '3' format
-		// internally we are using the deprecated format only and changing that standard may put the trade portal at risk due to its dependency on that
-		if( litecoin.isCurrentP2ShAddress(litecoinSendRequest.receivingAddress)) {
-			litecoinSendRequest.receivingAddress = litecoin.convertCurrentP2ShAddress(litecoinSendRequest.receivingAddress);
-		}
 
 		if (!litecoin.isValidAddress(litecoinSendRequest.receivingAddress))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
@@ -484,7 +420,7 @@ public class CrossChainLitecoinResource {
 			}
 
 	)
-	@ApiErrors({ApiError.INVALID_DATA, ApiError.UNAUTHORIZED})
+	@ApiErrors({ApiError.INVALID_DATA})
 	@SecurityRequirement(name = "apiKey")
 	public ServerConnectionInfo setCurrentServer(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ServerInfo serverInfo) {
 		Security.checkApiCallAllowed(request);
@@ -492,14 +428,7 @@ public class CrossChainLitecoinResource {
 		if( serverInfo.getConnectionType() == null ||
 				serverInfo.getHostName() == null) throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
 		try {
-			ServerConnectionInfo serverConnectionInfo = CrossChainUtils.setCurrentServer(Litecoin.getInstance(), serverInfo);
-
-			if( serverConnectionInfo != null ) {
-				return serverConnectionInfo;
-			}
-			else {
-				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.UNAUTHORIZED);
-			}
+			return CrossChainUtils.setCurrentServer( Litecoin.getInstance(), serverInfo );
 		}
 		catch (IllegalArgumentException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
@@ -611,10 +540,10 @@ public class CrossChainLitecoinResource {
 	}
 
 	@GET
-	@Path("/feerequired")
+	@Path("/feeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking LTC to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Returns Litecoin fee per Kb.",
+			description = "Returns Litecoin fee per Kb.",
 			responses = {
 					@ApiResponse(
 							content = @Content(
@@ -625,17 +554,17 @@ public class CrossChainLitecoinResource {
 					)
 			}
 	)
-	public String getLitecoinFeeRequired() {
+	public String getLitecoinFeeCeiling() {
 		Litecoin litecoin = Litecoin.getInstance();
 
-		return String.valueOf(litecoin.getFeeRequired());
+		return String.valueOf(litecoin.getFeeCeiling());
 	}
 
 	@POST
-	@Path("/updatefeerequired")
+	@Path("/updatefeeceiling")
 	@Operation(
-			summary = "The total fee required for unlocking LTC to the trade offer creator.",
-			description = "This is in sats for a transaction that is approximately 300 kB in size.",
+			summary = "Sets Litecoin fee ceiling.",
+			description = "Sets Litecoin fee ceiling.",
 			requestBody = @RequestBody(
 					required = true,
 					content = @Content(
@@ -654,13 +583,13 @@ public class CrossChainLitecoinResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_PRIVATE_KEY, ApiError.INVALID_CRITERIA})
-	public String setLitecoinFeeRequired(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
+	public String setLitecoinFeeCeiling(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String fee) {
 		Security.checkApiCallAllowed(request);
 
 		Litecoin litecoin = Litecoin.getInstance();
 
 		try {
-			return CrossChainUtils.setFeeRequired(litecoin, fee);
+			return CrossChainUtils.setFeeCeiling(litecoin, fee);
 		}
 		catch (IllegalArgumentException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);

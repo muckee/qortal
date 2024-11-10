@@ -14,7 +14,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class Ravencoin extends Bitcoiny {
 
@@ -62,7 +61,7 @@ public class Ravencoin extends Bitcoiny {
 
 			@Override
 			public long getP2shFee(Long timestamp) {
-				return this.getFeeRequired();
+				return this.getFeeCeiling();
 			}
 		},
 		TEST3 {
@@ -112,14 +111,14 @@ public class Ravencoin extends Bitcoiny {
 			}
 		};
 
-		private AtomicLong feeRequired = new AtomicLong( MAINNET_FEE );
+		private long feeCeiling = MAINNET_FEE;
 
-		public long getFeeRequired() {
-			return feeRequired.get();
+		public long getFeeCeiling() {
+			return feeCeiling;
 		}
 
-		public void setFeeRequired(long feeRequired) {
-			this.feeRequired.set(feeRequired);
+		public void setFeeCeiling(long feeCeiling) {
+			this.feeCeiling = feeCeiling;
 		}
 
 		public abstract NetworkParameters getParams();
@@ -142,7 +141,7 @@ public class Ravencoin extends Bitcoiny {
 	}
 
 	public static synchronized Ravencoin getInstance() {
-		if (instance == null && Settings.getInstance().isWalletEnabled("RVN")) {
+		if (instance == null) {
 			RavencoinNet ravencoinNet = Settings.getInstance().getRavencoinNet();
 
 			BitcoinyBlockchainProvider electrumX = new ElectrumX("Ravencoin-" + ravencoinNet.name(), ravencoinNet.getGenesisHash(), ravencoinNet.getServers(), DEFAULT_ELECTRUMX_PORTS);
@@ -181,13 +180,13 @@ public class Ravencoin extends Bitcoiny {
 	}
 
 	@Override
-	public long getFeeRequired() {
-		return this.ravencoinNet.getFeeRequired();
+	public long getFeeCeiling() {
+		return this.ravencoinNet.getFeeCeiling();
 	}
 
 	@Override
-	public void setFeeRequired(long fee) {
+	public void setFeeCeiling(long fee) {
 
-		this.ravencoinNet.setFeeRequired( fee );
+		this.ravencoinNet.setFeeCeiling( fee );
 	}
 }

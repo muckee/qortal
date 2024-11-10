@@ -71,7 +71,6 @@ public class BlockChain {
 		transactionV6Timestamp,
 		disableReferenceTimestamp,
 		increaseOnlineAccountsDifficultyTimestamp,
-		decreaseOnlineAccountsDifficultyTimestamp,
 		onlineAccountMinterLevelValidationHeight,
 		selfSponsorshipAlgoV1Height,
 		selfSponsorshipAlgoV2Height,
@@ -86,19 +85,8 @@ public class BlockChain {
 		disableRewardshareHeight,
 		enableRewardshareHeight,
 		onlyMintWithNameHeight,
-		removeOnlyMintWithNameHeight,
-		groupMemberCheckHeight,
-		fixBatchRewardHeight,
-		adminsReplaceFoundersHeight,
-		nullGroupMembershipHeight,
-		ignoreLevelForRewardShareHeight,
-		adminQueryFixHeight,
-		multipleNamesPerAccountHeight,
-		mintedBlocksAdjustmentRemovalHeight
+		groupMemberCheckHeight
 	}
-
-    // V5.5 Default List of Historic Triggers
-    private static final Map<FeatureTrigger, Long> defaultFeatureTriggerHeight = new EnumMap<>(FeatureTrigger.class);
 
 	// Custom transaction fees
 	/** Unit fees by transaction timestamp */
@@ -117,8 +105,7 @@ public class BlockChain {
 	/** Whether to use legacy, broken RIPEMD160 implementation when converting public keys to addresses. */
 	private boolean useBrokenMD160ForAddresses = false;
 
-	/** This should get ignored and overwritten in the oneNamePerAccount(int blockchainHeight) method,
-	 * because it is based on block height, not based on the genesis block.*/
+	/** Whether only one registered name is allowed per account. */
 	private boolean oneNamePerAccount = false;
 
 	/** Checkpoints */
@@ -218,13 +205,7 @@ public class BlockChain {
 	private int minAccountLevelToRewardShare;
 	private int maxRewardSharesPerFounderMintingAccount;
 	private int founderEffectiveMintingLevel;
-
-	public static class IdsForHeight {
-		public int height;
-		public List<Integer> ids;
-	}
-
-	private List<IdsForHeight> mintingGroupIds;
+	private int mintingGroupId;
 
 	/** Minimum time to retain online account signatures (ms) for block validity checks. */
 	private long onlineAccountSignaturesMinLifetime;
@@ -235,10 +216,6 @@ public class BlockChain {
 	/** Feature trigger timestamp for ONLINE_ACCOUNTS_MODULUS time interval increase. Can't use
 	 * featureTriggers because unit tests need to set this value via Reflection. */
 	private long onlineAccountsModulusV2Timestamp;
-
-	/** Feature trigger timestamp for ONLINE_ACCOUNTS_MODULUS time interval decrease. Can't use
-	 * featureTriggers because unit tests need to set this value via Reflection. */
-	private long onlineAccountsModulusV3Timestamp;
 
 	/** Snapshot timestamp for self sponsorship algo V1 */
 	private long selfSponsorshipAlgoV1SnapshotTimestamp;
@@ -292,6 +269,7 @@ public class BlockChain {
 	private CiyamAtSettings ciyamAtSettings;
 
 	// Constructors, etc.
+
 	private BlockChain() {
 	}
 
@@ -351,10 +329,6 @@ public class BlockChain {
 			InputStream in = classLoader.getResourceAsStream("blockchain.json");
 			jsonSource = new StreamSource(in);
 		}
-
-        // Load in the default feature triggers
-        defaultFeatureTriggerHeight.put(FeatureTrigger.multipleNamesPerAccountHeight, 2206300L);
-        defaultFeatureTriggerHeight.put(FeatureTrigger.mintedBlocksAdjustmentRemovalHeight, 2206300L);
 
 		try  {
 			// Attempt to unmarshal JSON stream to BlockChain config
@@ -429,10 +403,6 @@ public class BlockChain {
 		return this.onlineAccountsModulusV2Timestamp;
 	}
 
-	public long getOnlineAccountsModulusV3Timestamp() {
-		return this.onlineAccountsModulusV3Timestamp;
-	}
-
 	/* Block reward batching */
 	public long getBlockRewardBatchStartHeight() {
 		return this.blockRewardBatchStartHeight;
@@ -483,9 +453,8 @@ public class BlockChain {
 		return this.useBrokenMD160ForAddresses;
 	}
 
-	public boolean oneNamePerAccount(int blockchainHeight) {
-		// this is not set on a simple blockchain setting, it is based on a feature trigger height
-		return blockchainHeight < this.getMultipleNamesPerAccountHeight();
+	public boolean oneNamePerAccount() {
+		return this.oneNamePerAccount;
 	}
 
 	public List<Checkpoint> getCheckpoints() {
@@ -560,8 +529,8 @@ public class BlockChain {
 		return this.onlineAccountSignaturesMaxLifetime;
 	}
 
-	public List<IdsForHeight> getMintingGroupIds() {
-		return mintingGroupIds;
+	public int getMintingGroupId() {
+		return this.mintingGroupId;
 	}
 
 	public CiyamAtSettings getCiyamAtSettings() {
@@ -608,10 +577,6 @@ public class BlockChain {
 
 	public long getIncreaseOnlineAccountsDifficultyTimestamp() {
 		return this.featureTriggers.get(FeatureTrigger.increaseOnlineAccountsDifficultyTimestamp.name()).longValue();
-	}
-
-	public long getDecreaseOnlineAccountsDifficultyTimestamp() {
-		return this.featureTriggers.get(FeatureTrigger.decreaseOnlineAccountsDifficultyTimestamp.name()).longValue();
 	}
 
 	public int getSelfSponsorshipAlgoV1Height() {
@@ -670,40 +635,8 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.onlyMintWithNameHeight.name()).intValue();
 	}
 
-	public int getRemoveOnlyMintWithNameHeight() {
-		return this.featureTriggers.get(FeatureTrigger.removeOnlyMintWithNameHeight.name()).intValue();
-	}
-
 	public int getGroupMemberCheckHeight() {
 		return this.featureTriggers.get(FeatureTrigger.groupMemberCheckHeight.name()).intValue();
-	}
-
-	public int getFixBatchRewardHeight() {
-		return this.featureTriggers.get(FeatureTrigger.fixBatchRewardHeight.name()).intValue();
-	}
-
-	public int getAdminsReplaceFoundersHeight() {
-		return this.featureTriggers.get(FeatureTrigger.adminsReplaceFoundersHeight.name()).intValue();
-	}
-
-	public int getNullGroupMembershipHeight() {
-		return this.featureTriggers.get(FeatureTrigger.nullGroupMembershipHeight.name()).intValue();
-	}
-
-	public int getIgnoreLevelForRewardShareHeight() {
-		return this.featureTriggers.get(FeatureTrigger.ignoreLevelForRewardShareHeight.name()).intValue();
-	}
-
-	public int getAdminQueryFixHeight() {
-		return this.featureTriggers.get(FeatureTrigger.adminQueryFixHeight.name()).intValue();
-	}
-
-	public int getMultipleNamesPerAccountHeight() {
-		return this.featureTriggers.get(FeatureTrigger.multipleNamesPerAccountHeight.name()).intValue();
-	}
-
-	public int getMintedBlocksAdjustmentRemovalHeight() {
-		return this.featureTriggers.get(FeatureTrigger.mintedBlocksAdjustmentRemovalHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp
@@ -810,10 +743,7 @@ public class BlockChain {
 		// Check all featureTriggers are present
 		for (FeatureTrigger featureTrigger : FeatureTrigger.values())
 			if (!this.featureTriggers.containsKey(featureTrigger.name()))
-                if(!defaultFeatureTriggerHeight.containsKey(featureTrigger))
-				    Settings.throwValidationError(String.format("Missing feature trigger \"%s\" in blockchain config", featureTrigger.name()));
-                else
-                    featureTriggers.put(featureTrigger.name(), defaultFeatureTriggerHeight.get(featureTrigger));
+				Settings.throwValidationError(String.format("Missing feature trigger \"%s\" in blockchain config", featureTrigger.name()));
 
 		// Check block reward share bounds (V1)
 		long totalShareV1 = this.qoraHoldersShareByHeight.get(0).share;

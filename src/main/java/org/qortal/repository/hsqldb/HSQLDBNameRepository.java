@@ -7,11 +7,7 @@ import org.qortal.repository.NameRepository;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 public class HSQLDBNameRepository implements NameRepository {
 
@@ -271,7 +267,7 @@ public class HSQLDBNameRepository implements NameRepository {
 		StringBuilder sql = new StringBuilder(512);
 
 		sql.append("SELECT name, reduced_name, data, registered_when, updated_when, "
-				+ "is_for_sale, sale_price, reference, creation_group_id FROM Names WHERE owner = ? ORDER BY registered_when");
+				+ "is_for_sale, sale_price, reference, creation_group_id FROM Names WHERE owner = ? ORDER BY name");
 
 		if (reverse != null && reverse)
 			sql.append(" DESC");
@@ -334,91 +330,6 @@ public class HSQLDBNameRepository implements NameRepository {
 			return names;
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch recent names from repository", e);
-		}
-	}
-
-	@Override
-	public void removePrimaryName(String address) throws DataException {
-		try {
-			this.repository.delete("PrimaryNames", "owner = ?", address);
-		} catch (SQLException e) {
-			throw new DataException("Unable to delete primary name from repository", e);
-		}
-	}
-
-	@Override
-	public Optional<String> getPrimaryName(String address) throws DataException {
-		String sql = "SELECT name FROM PrimaryNames WHERE owner = ?";
-
-		List<String> names = new ArrayList<>();
-
-		try (ResultSet resultSet = this.repository.checkedExecute(sql, address)) {
-			if (resultSet == null)
-				return Optional.empty();
-
-			String name = resultSet.getString(1);
-
-			return Optional.of(name);
-		} catch (SQLException e) {
-			throw new DataException("Unable to fetch recent names from repository", e);
-		}
-	}
-
-	private static final int PRIMARY_NAMES_BATCH_SIZE = 500;
-
-	@Override
-	public Map<String, String> getPrimaryNamesByOwners(Collection<String> addresses) throws DataException {
-		Map<String, String> result = new HashMap<>();
-		if (addresses == null || addresses.isEmpty())
-			return result;
-
-		List<String> list = addresses instanceof List<?> ? (List<String>) addresses : new ArrayList<>(addresses);
-		for (int offset = 0; offset < list.size(); offset += PRIMARY_NAMES_BATCH_SIZE) {
-			int end = Math.min(offset + PRIMARY_NAMES_BATCH_SIZE, list.size());
-			List<String> batch = list.subList(offset, end);
-
-			StringBuilder sql = new StringBuilder(128);
-			sql.append("SELECT owner, name FROM PrimaryNames WHERE owner IN (");
-			for (int i = 0; i < batch.size(); i++) {
-				if (i > 0) sql.append(", ");
-				sql.append("?");
-			}
-			sql.append(")");
-
-			try (ResultSet resultSet = this.repository.checkedExecute(sql.toString(), batch.toArray(new String[0]))) {
-				if (resultSet != null) {
-					do {
-						String owner = resultSet.getString(1);
-						String name = resultSet.getString(2);
-						result.put(owner, name);
-					} while (resultSet.next());
-				}
-			} catch (SQLException e) {
-				throw new DataException("Unable to fetch primary names by owners from repository", e);
-			}
-		}
-		return result;
-	}
-
-	@Override
-	public int setPrimaryName(String address, String primaryName) throws DataException {
-
-		String sql = "INSERT INTO PrimaryNames (owner, name) VALUES (?, ?) ON DUPLICATE KEY UPDATE name = ?";
-
-		try{
-			return this.repository.executeCheckedUpdate(sql, address, primaryName, primaryName);
-		} catch (SQLException e) {
-			throw new DataException("Unable to set primary name", e);
-		}
-	}
-
-	@Override
-	public int clearPrimaryNames() throws DataException {
-
-		try {
-			return this.repository.delete("PrimaryNames");
-		} catch (SQLException e) {
-			throw new DataException("Unable to clear primary names from repository", e);
 		}
 	}
 
