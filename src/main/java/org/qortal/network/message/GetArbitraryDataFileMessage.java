@@ -23,8 +23,7 @@ public class GetArbitraryDataFileMessage extends Message {
 		} catch (IOException e) {
 			throw new AssertionError("IOException shouldn't occur with ByteArrayOutputStream");
 		}
-		this.signature = signature;
-		this.hash = hash;
+
 		this.dataBytes = bytes.toByteArray();
 		this.checksumBytes = Message.generateChecksum(this.dataBytes);
 	}

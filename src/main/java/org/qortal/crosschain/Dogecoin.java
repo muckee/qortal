@@ -1,19 +1,18 @@
 package org.qortal.crosschain;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.EnumMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
-
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Context;
 import org.bitcoinj.core.NetworkParameters;
 import org.libdohj.params.DogecoinMainNetParams;
 import org.libdohj.params.DogecoinTestNet3Params;
-import org.qortal.crosschain.ChainableServer.ConnectionType;
 import org.qortal.crosschain.ElectrumX.Server;
+import org.qortal.crosschain.ChainableServer.ConnectionType;
 import org.qortal.settings.Settings;
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumMap;
+import java.util.Map;
 
 public class Dogecoin extends Bitcoiny {
 
@@ -61,7 +60,7 @@ public class Dogecoin extends Bitcoiny {
 
 			@Override
 			public long getP2shFee(Long timestamp) {
-				return this.getFeeRequired();
+				return this.getFeeCeiling();
 			}
 		},
 		TEST3 {
@@ -111,14 +110,14 @@ public class Dogecoin extends Bitcoiny {
 			}
 		};
 
-		private AtomicLong feeRequired = new AtomicLong(MAINNET_FEE);
+		private long feeCeiling = MAINNET_FEE;
 
-		public long getFeeRequired() {
-			return feeRequired.get();
+		public long getFeeCeiling() {
+			return feeCeiling;
 		}
 
-		public void setFeeRequired(long feeRequired) {
-			this.feeRequired.set(feeRequired);
+		public void setFeeCeiling(long feeCeiling) {
+			this.feeCeiling = feeCeiling;
 		}
 
 		public abstract NetworkParameters getParams();
@@ -141,7 +140,7 @@ public class Dogecoin extends Bitcoiny {
 	}
 
 	public static synchronized Dogecoin getInstance() {
-		if (instance == null && Settings.getInstance().isWalletEnabled("DOGE")) {
+		if (instance == null) {
 			DogecoinNet dogecoinNet = Settings.getInstance().getDogecoinNet();
 
 			BitcoinyBlockchainProvider electrumX = new ElectrumX("Dogecoin-" + dogecoinNet.name(), dogecoinNet.getGenesisHash(), dogecoinNet.getServers(), DEFAULT_ELECTRUMX_PORTS);
@@ -180,13 +179,13 @@ public class Dogecoin extends Bitcoiny {
 	}
 
 	@Override
-	public long getFeeRequired() {
-		return this.dogecoinNet.getFeeRequired();
+	public long getFeeCeiling() {
+		return this.dogecoinNet.getFeeCeiling();
 	}
 
 	@Override
-	public void setFeeRequired(long fee) {
+	public void setFeeCeiling(long fee) {
 
-		this.dogecoinNet.setFeeRequired( fee );
+		this.dogecoinNet.setFeeCeiling( fee );
 	}
 }

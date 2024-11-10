@@ -29,7 +29,6 @@ import org.qortal.utils.FilesystemUtils;
 import org.qortal.utils.NTP;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -162,10 +161,8 @@ public class ArbitraryDataTransactionBuilder {
                 return Method.PUT;
             }
 
-            // Check size of differences between this layer and previous layer
-            // Exclude .qortal metadata to get accurate size comparison for PATCH vs PUT decision
-            long diffSize = FilesystemUtils.getDirectorySize(patch.getFinalPath(), true);
-            long existingStateSize = FilesystemUtils.getDirectorySize(reader.getFilePath(), true);
+            long diffSize = FilesystemUtils.getDirectorySize(patch.getFinalPath());
+            long existingStateSize = FilesystemUtils.getDirectorySize(reader.getFilePath());
             double difference = (double) diffSize / (double) existingStateSize;
             if (difference > MAX_SIZE_DIFF) {
                 LOGGER.info("Reached maximum difference ({} / {}) - using PUT", difference, MAX_SIZE_DIFF);
@@ -200,7 +197,7 @@ public class ArbitraryDataTransactionBuilder {
 
             // We can't use PATCH for on-chain data because this requires the .qortal directory, which can't be put on chain
             final boolean isSingleFileResource = FilesystemUtils.isSingleFileResource(this.path, false);
-            final boolean shouldUseOnChainData = (isSingleFileResource && AES.getEncryptedFileSize(Files.size(path)) <= ArbitraryTransaction.MAX_DATA_SIZE);
+            final boolean shouldUseOnChainData = (isSingleFileResource && AES.getEncryptedFileSize(FilesystemUtils.getSingleFileContents(path).length) <= ArbitraryTransaction.MAX_DATA_SIZE);
             if (shouldUseOnChainData) {
                 LOGGER.info("Data size is small enough to go on chain - using PUT");
                 return Method.PUT;
@@ -248,7 +245,7 @@ public class ArbitraryDataTransactionBuilder {
 
             // Single file resources are handled differently, especially for very small data payloads, as these go on chain
             final boolean isSingleFileResource = FilesystemUtils.isSingleFileResource(path, false);
-            final boolean shouldUseOnChainData = (isSingleFileResource && AES.getEncryptedFileSize(Files.size(path)) <= ArbitraryTransaction.MAX_DATA_SIZE);
+            final boolean shouldUseOnChainData = (isSingleFileResource && AES.getEncryptedFileSize(FilesystemUtils.getSingleFileContents(path).length) <= ArbitraryTransaction.MAX_DATA_SIZE);
 
             // Use zip compression if data isn't going on chain
             Compression compression = shouldUseOnChainData ? Compression.NONE : Compression.ZIP;
