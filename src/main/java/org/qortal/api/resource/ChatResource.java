@@ -14,23 +14,22 @@ import org.qortal.api.ApiError;
 import org.qortal.api.ApiErrors;
 import org.qortal.api.ApiExceptionFactory;
 import org.qortal.api.Security;
-import org.qortal.controller.ChatTransactionDelegate;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.chat.ActiveChats;
-import org.qortal.data.chat.ChatMemoryInfo;
 import org.qortal.data.chat.ChatMessage;
-import org.qortal.data.chat.ChatStat;
-import org.qortal.data.chat.GroupChatStat;
 import org.qortal.data.transaction.ChatTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.repository.DataException;
+import org.qortal.repository.Repository;
+import org.qortal.repository.RepositoryManager;
+import org.qortal.transaction.ChatTransaction;
+import org.qortal.transaction.Transaction;
 import org.qortal.transaction.Transaction.TransactionType;
 import org.qortal.transaction.Transaction.ValidationResult;
 import org.qortal.transform.TransformationException;
 import org.qortal.transform.transaction.ChatTransactionTransformer;
 import org.qortal.transform.transaction.TransactionTransformer;
 import org.qortal.utils.Base58;
-import org.qortal.utils.ChatAnalysisUtils;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
@@ -100,8 +99,8 @@ public class ChatResource {
 		if (chatReference != null)
 			chatReferenceBytes = Base58.decode(chatReference);
 
-		try {
-			return ChatTransactionDelegate.getInstance().getMessagesMatchingCriteria(
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			return repository.getChatRepository().getMessagesMatchingCriteria(
 					before,
 					after,
 					txGroupId,
@@ -115,82 +114,6 @@ public class ChatResource {
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
-	}
-
-	@GET
-	@Path("/memory")
-	@Operation(
-			summary = "Memory Information",
-			description = "System and chat memory usage.",
-			responses = {
-					@ApiResponse(
-							description = "memory usage",
-							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = ChatMemoryInfo.class))
-					)
-			}
-	)
-	@ApiErrors({ApiError.REPOSITORY_ISSUE})
-	public ChatMemoryInfo getChatMemory() {
-
-		ChatMemoryInfo info
-				= new ChatMemoryInfo(
-				Runtime.getRuntime().freeMemory(),
-				Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory(),
-				Runtime.getRuntime().totalMemory(),
-				Runtime.getRuntime().maxMemory(),
-				ChatAnalysisUtils.getSize());
-
-		return info;
-	}
-
-	@GET
-	@Path("/stats")
-	@Operation(
-			summary = "Get chat stats",
-			description = "Returns CHAT statistics.",
-			responses = {
-					@ApiResponse(
-							description = "CHAT statistics",
-							content = @Content(
-									array = @ArraySchema(
-											schema = @Schema(
-													implementation = ChatStat.class
-											)
-									)
-							)
-					)
-			}
-	)
-	public List<ChatStat> getStats(@Parameter(ref = "limit") @QueryParam("limit") Integer limit,
-										@Parameter(ref = "offset") @QueryParam("offset") Integer offset,
-										@Parameter(ref = "reverse") @QueryParam("reverse") Boolean reverse) {
-
-		return ChatAnalysisUtils.getStats(limit);
-	}
-
-	@GET
-	@Path("/groupstats")
-	@Operation(
-			summary = "Get group chat stats",
-			description = "Returns Group CHAT statistics.",
-			responses = {
-					@ApiResponse(
-							description = "Group CHAT statistics",
-							content = @Content(
-									array = @ArraySchema(
-											schema = @Schema(
-													implementation = ChatStat.class
-											)
-									)
-							)
-					)
-			}
-	)
-	public List<GroupChatStat> getGroupStats(@Parameter(ref = "limit") @QueryParam("limit") Integer limit,
-										@Parameter(ref = "offset") @QueryParam("offset") Integer offset,
-										@Parameter(ref = "reverse") @QueryParam("reverse") Boolean reverse) {
-
-		return ChatAnalysisUtils.getGroupStats(limit);
 	}
 
 	@GET
@@ -245,8 +168,8 @@ public class ChatResource {
 		if (chatReference != null)
 			chatReferenceBytes = Base58.decode(chatReference);
 
-		try {
-			return ChatTransactionDelegate.getInstance().getMessagesMatchingCriteria(
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			return repository.getChatRepository().getMessagesMatchingCriteria(
 					before,
 					after,
 					txGroupId,
@@ -279,14 +202,16 @@ public class ChatResource {
 	)
 	@ApiErrors({ApiError.INVALID_CRITERIA, ApiError.INVALID_ADDRESS, ApiError.REPOSITORY_ISSUE})
 	public ChatMessage getMessageBySignature(@PathParam("signature") String signature58, @QueryParam("encoding") Encoding encoding) {
-		try {
+		byte[] signature = Base58.decode(signature58);
 
-			ChatTransactionData chatTransactionData = ChatTransactionDelegate.getInstance().fromSignature(signature58);
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			ChatTransactionData chatTransactionData = (ChatTransactionData) repository.getTransactionRepository().fromSignature(signature);
 			if (chatTransactionData == null) {
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "Message not found");
 			}
 
-			return ChatTransactionDelegate.getInstance().toChatMessage(chatTransactionData, encoding);
+			return repository.getChatRepository().toChatMessage(chatTransactionData, encoding);
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
@@ -309,17 +234,17 @@ public class ChatResource {
 		}
 	)
 	@ApiErrors({ApiError.INVALID_CRITERIA, ApiError.INVALID_ADDRESS, ApiError.REPOSITORY_ISSUE})
-	public ActiveChats getActiveChats(
-		@PathParam("address") String address,
-		@QueryParam("encoding") Encoding encoding,
-		@QueryParam("haschatreference") Boolean hasChatReference
-	) {
+	public ActiveChats getActiveChats(@PathParam("address") String address, @QueryParam("encoding") Encoding encoding) {
 		if (address == null || !Crypto.isValidAddress(address))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
-		return ChatTransactionDelegate.getInstance().getActiveChats(address, encoding, hasChatReference);
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			return repository.getChatRepository().getActiveChats(address, encoding);
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
 	}
-	
+
 	@POST
 	@Operation(
 		summary = "Build raw, unsigned, CHAT transaction",
@@ -350,8 +275,10 @@ public class ChatResource {
 	public String buildChat(@HeaderParam(Security.API_KEY_HEADER) String apiKey, ChatTransactionData transactionData) {
 		Security.checkApiCallAllowed(request);
 
-		try {
-			ValidationResult result = ChatTransactionDelegate.getInstance().isValid(transactionData, false, false);
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			ChatTransaction chatTransaction = (ChatTransaction) Transaction.fromData(repository, transactionData);
+
+			ValidationResult result = chatTransaction.isValidUnconfirmed();
 			if (result != ValidationResult.OK)
 				throw TransactionsResource.createTransactionInvalidException(request, result);
 
@@ -359,6 +286,8 @@ public class ChatResource {
 			return Base58.encode(bytes);
 		} catch (TransformationException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.TRANSFORMATION_ERROR, e);
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
 	}
 
@@ -394,7 +323,7 @@ public class ChatResource {
 	public String buildChat(@HeaderParam(Security.API_KEY_HEADER) String apiKey, String rawBytes58) {
 		Security.checkApiCallAllowed(request);
 
-		try {
+		try (final Repository repository = RepositoryManager.getRepository()) {
 			byte[] rawBytes = Base58.decode(rawBytes58);
 			// We're expecting unsigned transaction, so append empty signature prior to decoding
 			rawBytes = Bytes.concat(rawBytes, new byte[TransactionTransformer.SIGNATURE_LENGTH]);
@@ -406,17 +335,19 @@ public class ChatResource {
 			if (transactionData.getType() != TransactionType.CHAT)
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
 
-			if( !(transactionData instanceof ChatTransactionData) )
-				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA);
-
-			ChatTransactionData chatTransactionData = (ChatTransactionData) transactionData;
+			ChatTransaction chatTransaction = (ChatTransaction) Transaction.fromData(repository, transactionData);
 
 			// Quicker validity check first before we compute nonce
-			ValidationResult result = ChatTransactionDelegate.getInstance().isValid(chatTransactionData, false, false);
+			ValidationResult result = chatTransaction.isValid();
 			if (result != ValidationResult.OK)
 				throw TransactionsResource.createTransactionInvalidException(request, result);
 
-			ChatTransactionDelegate.getInstance().computeNonce(chatTransactionData);
+			chatTransaction.computeNonce();
+
+			// Re-check, but ignores signature
+			result = chatTransaction.isValidUnconfirmed();
+			if (result != ValidationResult.OK)
+				throw TransactionsResource.createTransactionInvalidException(request, result);
 
 			// Strip zeroed signature
 			transactionData.setSignature(null);
@@ -425,6 +356,8 @@ public class ChatResource {
 			return Base58.encode(bytes);
 		} catch (TransformationException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.TRANSFORMATION_ERROR, e);
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
 	}
 

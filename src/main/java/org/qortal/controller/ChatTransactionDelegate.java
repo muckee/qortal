@@ -12,6 +12,7 @@ import org.qortal.data.chat.ChatMessage;
 import org.qortal.data.group.GroupData;
 import org.qortal.data.group.GroupMemberData;
 import org.qortal.data.transaction.ChatTransactionData;
+import org.qortal.data.transaction.TransactionData;
 import org.qortal.group.Group;
 import org.qortal.repository.ChatRepository;
 import org.qortal.repository.DataException;
@@ -497,22 +498,6 @@ public class ChatTransactionDelegate implements ChatRepository {
     }
 
     /**
-     * Get Primary Name By Owner
-     *
-     * @return owner address -> primary name
-     */
-    public Map<String, String> getPrimaryNameByOwner() {
-
-        Map<String, String> valuesByKey;
-        synchronized (nameDataLock) {
-
-            valuesByKey = new HashMap<>(this.primaryNameByOwner);
-        }
-
-        return valuesByKey;
-    }
-
-    /**
      * Process Balances
      *
      * Get all the account balances from the database repository and sets them to the balances by address map.
@@ -602,7 +587,7 @@ public class ChatTransactionDelegate implements ChatRepository {
 
             synchronized (this.chatDataLock) {
                 // if chat has not been validated and is valid, then add to validated chats
-                if (!this.validatedChats.contains(chat) && isValid(chat, true, true) == Transaction.ValidationResult.OK) {
+                if (!this.validatedChats.contains(chat) && isValid(chat, true) == Transaction.ValidationResult.OK) {
                     this.validatedChats.add(chat);
                     mapChat(chat);
                     Controller.getInstance().onNewTransaction(chat);
@@ -618,12 +603,11 @@ public class ChatTransactionDelegate implements ChatRepository {
      * member status of the sender.
      *
      * @param chatTransactionData the chat data
-     * @param checkBlocking       true to check is the sender is on any block lists, otherwise false
-     * @param signed true if signed, otherwise false
+     * @param checkBlocking true to check is the sender is on any block lists, otherwise false
      *
      * @return the validation result
      */
-    public Transaction.ValidationResult isValid(ChatTransactionData chatTransactionData, boolean checkBlocking, boolean signed)  {
+    public Transaction.ValidationResult isValid(ChatTransactionData chatTransactionData, boolean checkBlocking)  {
 
         long cutoffTimestamp = NTP.getTime() - BlockChain.getInstance().getTransactionExpiryPeriod();
 
@@ -669,8 +653,8 @@ public class ChatTransactionDelegate implements ChatRepository {
             return Transaction.ValidationResult.TOO_MANY_UNCONFIRMED;
         }
 
-        // signature and memory proof of work validation for signed messages
-        if (signed && !isSignatureValid(chatTransactionData))
+        // signature and memory proof of work validation
+        if (!isSignatureValid(chatTransactionData))
             return Transaction.ValidationResult.INVALID_TIMESTAMP_SIGNATURE;
 
         // group validation, zero is also valid and used for direct messages

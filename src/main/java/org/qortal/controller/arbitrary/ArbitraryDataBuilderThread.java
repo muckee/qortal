@@ -22,21 +22,13 @@ public class ArbitraryDataBuilderThread implements Runnable {
 
     private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataBuilderThread.class);
 
-    // Whether this thread is reserved for large files
-    private final boolean isLargeFileThread;
-
     public ArbitraryDataBuilderThread() {
-        this(false);
-    }
 
-    public ArbitraryDataBuilderThread(boolean isLargeFileThread) {
-        this.isLargeFileThread = isLargeFileThread;
     }
 
     @Override
     public void run() {
-        String threadName = isLargeFileThread ? "Arbitrary Data Builder Thread (Large Files)" : "Arbitrary Data Builder Thread";
-        Thread.currentThread().setName(threadName);
+        Thread.currentThread().setName("Arbitrary Data Builder Thread");
         Thread.currentThread().setPriority(NORM_PRIORITY);
         ArbitraryDataBuildManager buildManager = ArbitraryDataBuildManager.getInstance();
 
@@ -58,28 +50,13 @@ public class ArbitraryDataBuilderThread implements Runnable {
 
                 ArbitraryDataBuildQueueItem queueItem = null;
 
-                // Find resources that are queued for building
-                // Large file thread only processes large files, other threads use priority with aging
+                // Find resources that are queued for building (sorted by highest priority first)
                 synchronized (buildManager.arbitraryDataBuildQueue) {
-                    Map.Entry<String, ArbitraryDataBuildQueueItem> next;
-                    
-                    if (isLargeFileThread) {
-                        // Reserved thread: only process large files
-                        next = buildManager.arbitraryDataBuildQueue
-                                .entrySet().stream()
-                                .filter(e -> e.getValue().isQueued())
-                                .filter(e -> e.getValue().isLargeFile())
-                                .sorted(Comparator.comparing(item -> item.getValue().getEffectivePriority()))
-                                .reduce((first, second) -> second).orElse(null);
-                    } else {
-                        // Regular threads: process all files using effective priority (with aging)
-                        // This prevents starvation while still prioritizing small files
-                        next = buildManager.arbitraryDataBuildQueue
+                    Map.Entry<String, ArbitraryDataBuildQueueItem> next = buildManager.arbitraryDataBuildQueue
                             .entrySet().stream()
                             .filter(e -> e.getValue().isQueued())
-                                .sorted(Comparator.comparing(item -> item.getValue().getEffectivePriority()))
+                            .sorted(Comparator.comparing(item -> item.getValue().getPriority()))
                             .reduce((first, second) -> second).orElse(null);
-                    }
 
                     if (next == null) {
                         continue;
@@ -112,7 +89,7 @@ public class ArbitraryDataBuilderThread implements Runnable {
 
                 try {
                     // Perform the build
- 
+                    log(queueItem, String.format("Building %s... priority: %d", queueItem, queueItem.getPriority()));
                     queueItem.build();
                     this.removeFromQueue(queueItem);
                     log(queueItem, String.format("Finished building %s", queueItem));
