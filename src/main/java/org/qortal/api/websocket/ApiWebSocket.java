@@ -2,10 +2,8 @@ package org.qortal.api.websocket;
 
 import org.eclipse.jetty.http.pathmap.UriTemplatePathSpec;
 import org.eclipse.jetty.websocket.api.Session;
-//import org.eclipse.jetty.websocket.server.JettyServletUpgradeRequest;
-import org.eclipse.jetty.websocket.server.JettyServerUpgradeRequest;
-import org.eclipse.jetty.websocket.server.JettyWebSocketServlet;
-import org.eclipse.jetty.websocket.server.JettyWebSocketServletFactory;
+import org.eclipse.jetty.websocket.servlet.ServletUpgradeRequest;
+import org.eclipse.jetty.websocket.servlet.WebSocketServlet;
 import org.eclipse.persistence.jaxb.JAXBContextFactory;
 import org.eclipse.persistence.jaxb.MarshallerProperties;
 import org.qortal.api.ApiError;
@@ -20,31 +18,15 @@ import java.io.Writer;
 import java.util.*;
 
 @SuppressWarnings("serial")
-public abstract class ApiWebSocket extends JettyWebSocketServlet {
+abstract class ApiWebSocket extends WebSocketServlet {
 
 	private static final Map<Class<? extends ApiWebSocket>, List<Session>> SESSIONS_BY_CLASS = new HashMap<>();
 
-	/**
-	 * Jetty 10 requires an implementation of configure.
-	 * Subclasses should override this or call super if using custom mappings.
-	 */
-	@Override
-	protected void configure(JettyWebSocketServletFactory factory) {
-		// Default implementation can be empty or used to register the class
-		// Subclasses like ActiveChatsWebSocket will override this to register themselves.
-		factory.addMapping("/", (req, res) -> this);
-
-	}
-
 	protected static String getPathInfo(Session session) {
-		if (session.getUpgradeRequest() instanceof JettyServerUpgradeRequest) {
-			JettyServerUpgradeRequest upgradeRequest = (JettyServerUpgradeRequest) session.getUpgradeRequest();
-			return upgradeRequest.getHttpServletRequest().getPathInfo();
-		}
-
-		// Fallback if the request is not a standard Jetty upgrade request
-		return session.getUpgradeRequest().getRequestURI().getPath();
+		ServletUpgradeRequest upgradeRequest = (ServletUpgradeRequest) session.getUpgradeRequest();
+		return upgradeRequest.getHttpServletRequest().getPathInfo();
 	}
+
 	protected static Map<String, String> getPathParams(Session session, String pathSpec) {
 		UriTemplatePathSpec uriTemplatePathSpec = new UriTemplatePathSpec(pathSpec);
 		return uriTemplatePathSpec.getPathParams(getPathInfo(session));
@@ -57,7 +39,7 @@ public abstract class ApiWebSocket extends JettyWebSocketServlet {
 		StringWriter stringWriter = new StringWriter();
 		try {
 			marshall(stringWriter, apiErrorRoot);
-			session.getRemote().sendString(stringWriter.toString(), null); // Jetty 10 sendString now requires a Callback or is blocking
+			session.getRemote().sendString(stringWriter.toString());
 		} catch (IOException e) {
 			// Remote end probably closed
 		}
@@ -82,6 +64,7 @@ public abstract class ApiWebSocket extends JettyWebSocketServlet {
 
 		// Grab an entry from collection so we can determine type
 		Object entry = collection.iterator().next();
+
 		Marshaller marshaller = createMarshaller(entry.getClass());
 
 		try {
@@ -95,9 +78,16 @@ public abstract class ApiWebSocket extends JettyWebSocketServlet {
 		try {
 			// Create JAXB context aware of object's class
 			JAXBContext jc = JAXBContextFactory.createContext(new Class[] { objectClass }, null);
+
+			// Create marshaller
 			Marshaller marshaller = jc.createMarshaller();
+
+			// Set the marshaller media type to JSON
 			marshaller.setProperty(MarshallerProperties.MEDIA_TYPE, "application/json");
+
+			// Tell marshaller not to include JSON root element in the output
 			marshaller.setProperty(MarshallerProperties.JSON_INCLUDE_ROOT, false);
+
 			return marshaller;
 		} catch (JAXBException e) {
 			throw new RuntimeException("Unable to create websocket marshaller", e);
@@ -120,7 +110,8 @@ public abstract class ApiWebSocket extends JettyWebSocketServlet {
 
 	protected List<Session> getSessions() {
 		synchronized (SESSIONS_BY_CLASS) {
-			return new ArrayList<>(SESSIONS_BY_CLASS.getOrDefault(this.getClass(), Collections.emptyList()));
+			return new ArrayList<>(SESSIONS_BY_CLASS.get(this.getClass()));
 		}
 	}
+
 }

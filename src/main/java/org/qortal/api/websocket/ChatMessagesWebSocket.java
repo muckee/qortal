@@ -1,14 +1,15 @@
 package org.qortal.api.websocket;
 
 import org.eclipse.jetty.websocket.api.Session;
-import org.eclipse.jetty.websocket.api.WriteCallback;
+import org.eclipse.jetty.websocket.api.WebSocketException;
 import org.eclipse.jetty.websocket.api.annotations.*;
-import org.eclipse.jetty.websocket.server.JettyWebSocketServletFactory;
+import org.eclipse.jetty.websocket.servlet.WebSocketServletFactory;
 import org.qortal.controller.ChatNotifier;
-import org.qortal.controller.ChatTransactionDelegate;
 import org.qortal.data.chat.ChatMessage;
 import org.qortal.data.transaction.ChatTransactionData;
 import org.qortal.repository.DataException;
+import org.qortal.repository.Repository;
+import org.qortal.repository.RepositoryManager;
 
 import java.io.IOException;
 import java.io.StringWriter;
@@ -20,21 +21,14 @@ import static org.qortal.data.chat.ChatMessage.Encoding;
 @SuppressWarnings("serial")
 public class ChatMessagesWebSocket extends ApiWebSocket {
 
-	/**
-	 * Jetty 10 implementation of configure.
-	 */
 	@Override
-	protected void configure(JettyWebSocketServletFactory factory) {
-		// Map the current instance to the websocket upgrade path
-		factory.addMapping("/", (req, res) -> this);
+	public void configure(WebSocketServletFactory factory) {
+		factory.register(ChatMessagesWebSocket.class);
 	}
 
 	@OnWebSocketConnect
 	@Override
 	public void onWebSocketConnect(Session session) {
-		// Call super to track the session in the base class
-		super.onWebSocketConnect(session);
-
 		Map<String, List<String>> queryParams = session.getUpgradeRequest().getParameterMap();
 		Encoding encoding = getTargetEncoding(session);
 
@@ -44,21 +38,15 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 		List<String> offsetList = queryParams.get("offset");
 		Integer offset = (offsetList != null && offsetList.size() == 1) ? Integer.parseInt(offsetList.get(0)) : null;
 
-		List<String> reverseList = queryParams.get("reverse"); // Fixed typo from original (was "offset")
-		Boolean reverse = (reverseList != null && reverseList.size() == 1) ? Boolean.parseBoolean(reverseList.get(0)) : null;
+		List<String> reverseList = queryParams.get("offset");
+		Boolean reverse = (reverseList != null && reverseList.size() == 1) ? Boolean.getBoolean(reverseList.get(0)) : null;
 
 		List<String> txGroupIds = queryParams.get("txGroupId");
 		if (txGroupIds != null && txGroupIds.size() == 1) {
 			int txGroupId = Integer.parseInt(txGroupIds.get(0));
 
-			// reject general chat
-			if (txGroupId == 0) {
-				session.close(4001, "invalid criteria");
-				return;
-			}
-
-			try {
-				List<ChatMessage> chatMessages = ChatTransactionDelegate.getInstance().getMessagesMatchingCriteria(
+			try (final Repository repository = RepositoryManager.getRepository()) {
+				List<ChatMessage> chatMessages = repository.getChatRepository().getMessagesMatchingCriteria(
 						null,
 						null,
 						txGroupId,
@@ -89,8 +77,8 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 			return;
 		}
 
-		try {
-			List<ChatMessage> chatMessages = ChatTransactionDelegate.getInstance().getMessagesMatchingCriteria(
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			List<ChatMessage> chatMessages = repository.getChatRepository().getMessagesMatchingCriteria(
 					null,
 					null,
 					null,
@@ -104,6 +92,7 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 
 			sendMessages(session, chatMessages);
 		} catch (DataException e) {
+			// Not a good start
 			session.close(4001, "Couldn't fetch initial messages from repository");
 			return;
 		}
@@ -116,7 +105,6 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 	@Override
 	public void onWebSocketClose(Session session, int statusCode, String reason) {
 		ChatNotifier.getInstance().deregister(session);
-		super.onWebSocketClose(session, statusCode, reason);
 	}
 
 	@OnWebSocketError
@@ -127,10 +115,7 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
 		if (Objects.equals(message, "ping")) {
-			// Updated to Jetty 10 async send pattern
-			if (session.isOpen()) {
-				session.getRemote().sendString("pong", WriteCallback.NOOP);
-			}
+			session.getRemote().sendStringByFuture("pong");
 		}
 	}
 
@@ -169,20 +154,17 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 		try {
 			marshall(stringWriter, chatMessages);
 
-			// In Jetty 10, use sendString with WriteCallback.NOOP to replace sendStringByFuture
-			if (session.isOpen()) {
-				session.getRemote().sendString(stringWriter.toString(), WriteCallback.NOOP);
-			}
-		} catch (IOException e) {
-			// No utput this time?
+			session.getRemote().sendStringByFuture(stringWriter.toString());
+		} catch (IOException | WebSocketException e) {
+			// No output this time?
 		}
 	}
 
 	private void sendChat(Session session, ChatTransactionData chatTransactionData) {
 		// Convert ChatTransactionData to ChatMessage
 		ChatMessage chatMessage;
-		try {
-			chatMessage = ChatTransactionDelegate.getInstance().toChatMessage(chatTransactionData, getTargetEncoding(session));
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			chatMessage = repository.getChatRepository().toChatMessage(chatTransactionData, getTargetEncoding(session));
 		} catch (DataException e) {
 			// No output this time?
 			return;
@@ -196,10 +178,7 @@ public class ChatMessagesWebSocket extends ApiWebSocket {
 		Map<String, List<String>> queryParams = session.getUpgradeRequest().getParameterMap();
 		List<String> encodingList = queryParams.get("encoding");
 		String encoding = (encodingList != null && encodingList.size() == 1) ? encodingList.get(0) : "BASE58";
-		try {
-			return Encoding.valueOf(encoding);
-		} catch (IllegalArgumentException e) {
-			return Encoding.BASE58;
-		}
+		return Encoding.valueOf(encoding);
 	}
+
 }
