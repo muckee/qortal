@@ -13,7 +13,6 @@ import org.qortal.block.Block;
 import org.qortal.block.BlockChain;
 import org.qortal.block.BlockChain.BlockTimingByHeight;
 import org.qortal.controller.arbitrary.*;
-import org.qortal.controller.hsqldb.HSQLDBBalanceRecorder;
 import org.qortal.controller.hsqldb.HSQLDBDataCacheManager;
 import org.qortal.controller.repository.NamesDatabaseIntegrityCheck;
 import org.qortal.controller.repository.PruneManager;
@@ -37,7 +36,7 @@ import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
 import org.qortal.network.message.*;
 import org.qortal.repository.*;
-import org.qortal.repository.hsqldb.HSQLDBCacheUtils;
+import org.qortal.repository.hsqldb.HSQLDBRepository;
 import org.qortal.repository.hsqldb.HSQLDBRepositoryFactory;
 import org.qortal.settings.Settings;
 import org.qortal.transaction.Transaction;
@@ -47,7 +46,6 @@ import org.qortal.utils.*;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
-
 import java.awt.TrayIcon.MessageType;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -55,7 +53,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.SecureRandom;
@@ -66,7 +63,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -74,7 +70,6 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class Controller extends Thread {
 
@@ -397,13 +392,7 @@ public class Controller extends Thread {
 			return; // Not System.exit() so that GUI can display error
 		}
 
-		final Controller controller = Controller.newInstance(args);
-
-		NETWORK_BLOCK_SUMMARIES_V_2_MESSAGE_SCHEDULER.scheduleAtFixedRate(() -> processNetworkBlockSummariesV2Messages(), 60, 1, TimeUnit.SECONDS);
-
-		GET_BLOCK_MESSAGE_SCHEDULER.scheduleAtFixedRate( () -> controller.processNetworkGetBlockMessages(), 60, 1, TimeUnit.SECONDS);
-
-		cleanChunkUploadTempDir(); // cleanup leftover chunks from streaming to disk
+		Controller.newInstance(args);
 
 		LOGGER.info("Starting NTP");
 		Long ntpOffset = Settings.getInstance().getTestNtpOffset();
@@ -414,43 +403,22 @@ public class Controller extends Thread {
 
 		LOGGER.info("Starting repository");
 		try {
-			HSQLDBRepositoryFactory repositoryFactory = new HSQLDBRepositoryFactory(getRepositoryUrl());
+			RepositoryFactory repositoryFactory = new HSQLDBRepositoryFactory(getRepositoryUrl());
 			RepositoryManager.setRepositoryFactory(repositoryFactory);
 			RepositoryManager.setRequestedCheckpoint(Boolean.TRUE);
 
 			try (final Repository repository = RepositoryManager.getRepository()) {
 				// RepositoryManager.rebuildTransactionSequences(repository);
 				ArbitraryDataCacheManager.getInstance().buildArbitraryResourcesCache(repository, false);
-			}
 
-			if( Settings.getInstance().isDbCacheEnabled() ) {
-				LOGGER.info("Starting Db Cache...");
-				HSQLDBDataCacheManager hsqldbDataCacheManager = new HSQLDBDataCacheManager();
-				hsqldbDataCacheManager.start();
-			}
-			else {
-				LOGGER.info("Db Cache Disabled");
-			}
-
-			LOGGER.info("Starting Arbitrary Indexing...");
-			ArbitraryIndexUtils.startCaching(
-				Settings.getInstance().getArbitraryIndexingPriority(),
-				Settings.getInstance().getArbitraryIndexingFrequency()
-			);
-
-			if( Settings.getInstance().isBalanceRecorderEnabled() ) {
-				Optional<HSQLDBBalanceRecorder> recorder = HSQLDBBalanceRecorder.getInstance();
-
-				if( recorder.isPresent() ) {
-					LOGGER.info("Starting Balance Recorder...");
-					recorder.get().start();
+				if( Settings.getInstance().isDbCacheEnabled() ) {
+					LOGGER.info("Db Cache Starting ...");
+					HSQLDBDataCacheManager hsqldbDataCacheManager = new HSQLDBDataCacheManager((HSQLDBRepository) repositoryFactory.getRepository());
+					hsqldbDataCacheManager.start();
 				}
 				else {
-					LOGGER.info("Balance Recorder won't start.");
+					LOGGER.info("Db Cache Disabled");
 				}
-			}
-			else {
-				LOGGER.info("Balance Recorder disabled");
 			}
 		} catch (DataException e) {
 			// If exception has no cause or message then repository is in use by some other process.
@@ -470,17 +438,17 @@ public class Controller extends Thread {
 
 			// Rebuild Names table and check database integrity (if enabled)
 			NamesDatabaseIntegrityCheck namesDatabaseIntegrityCheck = new NamesDatabaseIntegrityCheck();
-			LOGGER.info("Rebuilding all names...");
 			namesDatabaseIntegrityCheck.rebuildAllNames();
 			if (Settings.getInstance().isNamesIntegrityCheckEnabled()) {
-				LOGGER.info("Running database integrity check...");
 				namesDatabaseIntegrityCheck.runIntegrityCheck();
 			}
-			LOGGER.info("Validating blockchain...");
+
+			LOGGER.info("Validating blockchain");
 			try {
 				BlockChain.validate();
+
 				Controller.getInstance().refillLatestBlocksCache();
-				LOGGER.info("Chain height at start-up: {}", Controller.getInstance().getChainHeight());
+				LOGGER.info(String.format("Our chain height at start-up: %d", Controller.getInstance().getChainHeight()));
 			} catch (DataException e) {
 				LOGGER.error("Couldn't validate blockchain", e);
 				Gui.getInstance().fatalError("Blockchain validation issue", e);
@@ -555,25 +523,9 @@ public class Controller extends Thread {
 		ArbitraryDataCleanupManager.getInstance().start();
 		ArbitraryDataStorageManager.getInstance().start();
 		ArbitraryDataRenderManager.getInstance().start();
-		ArbitraryDataHostMonitor.getInstance().start();
-
-		// start rebuild arbitrary resource cache timer task
-		if( Settings.getInstance().isRebuildArbitraryResourceCacheTaskEnabled() ) {
-			new Timer().schedule(
-				new RebuildArbitraryResourceCacheTask(),
-				Settings.getInstance().getRebuildArbitraryResourceCacheTaskDelay() * RebuildArbitraryResourceCacheTask.MILLIS_IN_MINUTE,
-				Settings.getInstance().getRebuildArbitraryResourceCacheTaskPeriod() * RebuildArbitraryResourceCacheTask.MILLIS_IN_HOUR
-			);
-		}
 
 		LOGGER.info("Starting online accounts manager");
 		OnlineAccountsManager.getInstance().start();
-
-		LOGGER.info("Starting foreign fees manager");
-		ForeignFeesManager.getInstance().start();
-
-		LOGGER.info("Starting follower");
-		Follower.getInstance().start();
 
 		LOGGER.info("Starting transaction importer");
 		TransactionImporter.getInstance().start();
@@ -599,7 +551,7 @@ public class Controller extends Thread {
 		}
 
 		if (Settings.getInstance().isGatewayEnabled()) {
-			LOGGER.info("Starting gateway service on port {}", Settings.getInstance().getGatewayPort());
+			LOGGER.info(String.format("Starting gateway service on port %d", Settings.getInstance().getGatewayPort()));
 			try {
 				GatewayService gatewayService = GatewayService.getInstance();
 				gatewayService.start();
@@ -612,7 +564,7 @@ public class Controller extends Thread {
 		}
 
 		if (Settings.getInstance().isDomainMapEnabled()) {
-			LOGGER.info("Starting domain map service on port {}", Settings.getInstance().getDomainMapPort());
+			LOGGER.info(String.format("Starting domain map service on port %d", Settings.getInstance().getDomainMapPort()));
 			try {
 				DomainMapService domainMapService = DomainMapService.getInstance();
 				domainMapService.start();
@@ -687,8 +639,10 @@ public class Controller extends Thread {
 				boolean canBootstrap = Settings.getInstance().getBootstrap();
 				boolean needsArchiveRebuild = false;
 				int checkHeight = 0;
+				Repository repository = null;
 
-				try (final Repository repository = RepositoryManager.getRepository()){
+				try {
+					repository = RepositoryManager.getRepository();
 					needsArchiveRebuild = (repository.getBlockArchiveRepository().fromHeight(2) == null);
 					checkHeight = repository.getBlockRepository().getBlockchainHeight();
 				} catch (DataException e) {
@@ -782,12 +736,12 @@ public class Controller extends Thread {
 					if (ntpTime != null) {
 						if (ntpTime != now)
 							// Only log if non-zero offset
-							LOGGER.info("Adjusting system time by NTP offset: {}ms", ntpTime - now);
+							LOGGER.info(String.format("Adjusting system time by NTP offset: %dms", ntpTime - now));
 
 						ntpCheckTimestamp = now + NTP_POST_SYNC_CHECK_PERIOD;
 						requestSysTrayUpdate = true;
 					} else {
-						LOGGER.info("No NTP offset yet");
+						LOGGER.info(String.format("No NTP offset yet"));
 						ntpCheckTimestamp = now + NTP_PRE_SYNC_CHECK_PERIOD;
 						// We can't do much without a valid NTP time
 						continue;
@@ -1120,11 +1074,6 @@ public class Controller extends Thread {
 
 				LOGGER.info("Shutting down synchronizer");
 				Synchronizer.getInstance().shutdown();
-				try {
-					Synchronizer.getInstance().join();
-				} catch (InterruptedException e) {
-					// We were interrupted while waiting for thread to join
-				}
 
 				LOGGER.info("Shutting down API");
 				ApiService.getInstance().stop();
@@ -1146,13 +1095,9 @@ public class Controller extends Thread {
 				ArbitraryDataCleanupManager.getInstance().shutdown();
 				ArbitraryDataStorageManager.getInstance().shutdown();
 				ArbitraryDataRenderManager.getInstance().shutdown();
-				ArbitraryDataHostMonitor.getInstance().shutdown();
 
 				LOGGER.info("Shutting down online accounts manager");
 				OnlineAccountsManager.getInstance().shutdown();
-
-				LOGGER.info("Shutting down foreign fees manager");
-				ForeignFeesManager.getInstance().shutdown();
 
 				LOGGER.info("Shutting down transaction importer");
 				TransactionImporter.getInstance().shutdown();
@@ -1181,17 +1126,6 @@ public class Controller extends Thread {
 				} catch (InterruptedException e) {
 					// We were interrupted while waiting for thread to join
 				}
-
-				LOGGER.info("Shutting down TradeBot");
-				TradeBot.getInstance().shutdown();
-
-				// Shutdown database cache timers before closing repository
-				LOGGER.info("Shutting down database cache timers");
-				HSQLDBCacheUtils.shutdown();
-
-				// Shutdown arbitrary metadata manager scheduler before closing repository
-				LOGGER.info("Shutting down arbitrary metadata manager");
-				ArbitraryMetadataManager.getInstance().shutdown();
 
 				// Make sure we're the only thread modifying the blockchain when shutting down the repository
 				ReentrantLock blockchainLock = Controller.getInstance().getBlockchainLock();
@@ -1509,14 +1443,6 @@ public class Controller extends Thread {
 				OnlineAccountsManager.getInstance().onNetworkOnlineAccountsV3Message(peer, message);
 				break;
 
-			case GET_FOREIGN_FEES:
-				ForeignFeesManager.getInstance().onNetworkGetForeignFeesMessage(peer, message);
-				break;
-
-			case FOREIGN_FEES:
-				ForeignFeesManager.getInstance().onNetworkForeignFeesMessage(peer, message);
-				break;
-
 			case GET_ARBITRARY_DATA:
 				// Not currently supported
 				break;
@@ -1579,149 +1505,41 @@ public class Controller extends Thread {
 		}
 	}
 
-	// List to collect messages
-	private final static List<PeerMessage> GET_BLOCK_MESSAGE_LIST = new ArrayList<>();
-
-	// Lock to synchronize access to the list
-	private final static Object GET_BLOCK_MESSAGE_LOCK = new Object();
-
-	// Scheduled executor service to process messages every second
-	private static final ScheduledExecutorService GET_BLOCK_MESSAGE_SCHEDULER = Executors.newScheduledThreadPool(1);
-
 	private void onNetworkGetBlockMessage(Peer peer, Message message) {
-		synchronized (GET_BLOCK_MESSAGE_LOCK) {
-			GET_BLOCK_MESSAGE_LIST.add(new PeerMessage(peer, message));
+		GetBlockMessage getBlockMessage = (GetBlockMessage) message;
+		byte[] signature = getBlockMessage.getSignature();
+		this.stats.getBlockMessageStats.requests.incrementAndGet();
+
+		ByteArray signatureAsByteArray = ByteArray.wrap(signature);
+
+		CachedBlockMessage cachedBlockMessage = this.blockMessageCache.get(signatureAsByteArray);
+		int blockCacheSize = Settings.getInstance().getBlockCacheSize();
+
+		// Check cached latest block message
+		if (cachedBlockMessage != null) {
+			this.stats.getBlockMessageStats.cacheHits.incrementAndGet();
+
+			// We need to duplicate it to prevent multiple threads setting ID on the same message
+			CachedBlockMessage clonedBlockMessage = Message.cloneWithNewId(cachedBlockMessage, message.getId());
+
+			if (!peer.sendMessage(clonedBlockMessage))
+				peer.disconnect("failed to send block");
+
+			return;
 		}
-	}
-
-	/**
-	 * Process Network Block Messages
-	 *
-	 * Process message collected in the GET_BLOCK_MESSAGE_LIST
-	 */
-	private void processNetworkGetBlockMessages() {
-
-		List<PeerMessage> messagesToProcess;
-		synchronized (GET_BLOCK_MESSAGE_LOCK) {
-			messagesToProcess = new ArrayList<>(GET_BLOCK_MESSAGE_LIST);
-			GET_BLOCK_MESSAGE_LIST.clear();
-		}
-
-		if( messagesToProcess.isEmpty() ) return;
-
-		Map<String, PeerMessage> toProcessBySignature58 = new HashMap<>();
-
-		for( PeerMessage peerMessage : messagesToProcess ) {
-			Message message = peerMessage.getMessage();
-			Peer peer = peerMessage.getPeer();
-
-			GetBlockMessage getBlockMessage = (GetBlockMessage) message;
-			byte[] signature = getBlockMessage.getSignature();
-			this.stats.getBlockMessageStats.requests.incrementAndGet();
-
-			ByteArray signatureAsByteArray = ByteArray.wrap(signature);
-
-			CachedBlockMessage cachedBlockMessage = this.blockMessageCache.get(signatureAsByteArray);
-
-			// Check cached latest block message
-			if (cachedBlockMessage != null) {
-				this.stats.getBlockMessageStats.cacheHits.incrementAndGet();
-
-				// We need to duplicate it to prevent multiple threads setting ID on the same message
-				CachedBlockMessage clonedBlockMessage = Message.cloneWithNewId(cachedBlockMessage, message.getId());
-
-				if (!peer.sendMessage(clonedBlockMessage))
-					peer.disconnect("failed to send block");
-			}
-			// if not cached, then process later
-			else {
-				toProcessBySignature58.put(Base58.encode(signature), peerMessage);
-			}
-
-		}
-
-		if(toProcessBySignature58.isEmpty()) return;
-
-		List<byte[]> signatures
-			= toProcessBySignature58.values().stream()
-				.map( toProcess -> toProcess.getMessage() )
-				.map( message -> (GetBlockMessage) message)
-				.map(GetBlockMessage::getSignature)
-				.collect(Collectors.toList());
-
-		List<String> signature58Processed = new ArrayList<>();
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
+			BlockData blockData = repository.getBlockRepository().fromSignature(signature);
 
-			List<BlockData> blockDataList = repository.getBlockRepository().fromSignatures(signatures);
-
-			for( BlockData blockData : blockDataList) {
-
+			if (blockData != null) {
 				if (PruneManager.getInstance().isBlockPruned(blockData.getHeight())) {
-
 					// If this is a pruned block, we likely only have partial data, so best not to sent it
-					continue;
-				}
-
-				String signature58 = Base58.encode(blockData.getSignature());
-
-				PeerMessage peerMessage = toProcessBySignature58.get(signature58);
-
-				Message message = peerMessage.getMessage();
-				Peer peer = peerMessage.getPeer();
-
-				signature58Processed.add(signature58);
-
-				Block block = new Block(repository, blockData);
-
-				// V2 support
-				if (peer.getPeersVersion() >= BlockV2Message.MIN_PEER_VERSION) {
-					Message blockMessage = new BlockV2Message(block);
-					blockMessage.setId(message.getId());
-
-					if (!peer.sendMessage(blockMessage)) {
-						peer.disconnect("failed to send block");
-						// Don't fall-through to caching because failure to send might be from failure to build message
-						continue;
-					}
-
-					continue;
-				}
-
-				CachedBlockMessage blockMessage = new CachedBlockMessage(block);
-				blockMessage.setId(message.getId());
-
-				if (!peer.sendMessage(blockMessage)) {
-					peer.disconnect("failed to send block");
-					// Don't fall-through to caching because failure to send might be from failure to build message
-					continue;
-				}
-
-				int blockCacheSize = Settings.getInstance().getBlockCacheSize();
-
-				// If request is for a recent block, cache it
-				if (getChainHeight() - blockData.getHeight() <= blockCacheSize) {
-					this.stats.getBlockMessageStats.cacheFills.incrementAndGet();
-
-					this.blockMessageCache.put(ByteArray.wrap(blockData.getSignature()), blockMessage);
+					blockData = null;
 				}
 			}
 
-			List<String> remainingSignature58ToProcess
-				= toProcessBySignature58.keySet().stream()
-					.filter(signature58 -> !signature58Processed.contains(signature58))
-					.collect(Collectors.toList());
-
-			for( String signature58 : remainingSignature58ToProcess) {
-
-				PeerMessage peerMessage = toProcessBySignature58.get(signature58);
-				Message message = peerMessage.getMessage();
-				Peer peer = peerMessage.getPeer();
-
-				GetBlockMessage getBlockMessage = (GetBlockMessage) message;
-				byte[] signature = getBlockMessage.getSignature();
-
-				// If we have no block data, we should check the archive in case it's there
+			// If we have no block data, we should check the archive in case it's there
+			if (blockData == null) {
 				if (Settings.getInstance().isArchiveEnabled()) {
 					Triple<byte[], Integer, Integer> serializedBlock = BlockArchiveReader.getInstance().fetchSerializedBlockBytesForSignature(signature, true, repository);
 					if (serializedBlock != null) {
@@ -1739,7 +1557,7 @@ public class Controller extends Thread {
 								break;
 
 							default:
-								continue;
+								return;
 						}
 						blockMessage.setId(message.getId());
 
@@ -1747,14 +1565,16 @@ public class Controller extends Thread {
 						if (!peer.sendMessage(blockMessage)) {
 							peer.disconnect("failed to send block");
 							// Don't fall-through to caching because failure to send might be from failure to build message
-							continue;
+							return;
 						}
 
 						// Sent successfully from archive, so nothing more to do
-						continue;
+						return;
 					}
 				}
+			}
 
+			if (blockData == null) {
 				// We don't have this block
 				this.stats.getBlockMessageStats.unknownBlocks.getAndIncrement();
 
@@ -1768,9 +1588,42 @@ public class Controller extends Thread {
 				blockUnknownMessage.setId(message.getId());
 				if (!peer.sendMessage(blockUnknownMessage))
 					peer.disconnect("failed to send block-unknown response");
+				return;
 			}
-		} catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
+
+			Block block = new Block(repository, blockData);
+
+			// V2 support
+			if (peer.getPeersVersion() >= BlockV2Message.MIN_PEER_VERSION) {
+				Message blockMessage = new BlockV2Message(block);
+				blockMessage.setId(message.getId());
+				if (!peer.sendMessage(blockMessage)) {
+					peer.disconnect("failed to send block");
+					// Don't fall-through to caching because failure to send might be from failure to build message
+					return;
+				}
+				return;
+			}
+
+			CachedBlockMessage blockMessage = new CachedBlockMessage(block);
+			blockMessage.setId(message.getId());
+
+			if (!peer.sendMessage(blockMessage)) {
+				peer.disconnect("failed to send block");
+				// Don't fall-through to caching because failure to send might be from failure to build message
+				return;
+			}
+
+			// If request is for a recent block, cache it
+			if (getChainHeight() - blockData.getHeight() <= blockCacheSize) {
+				this.stats.getBlockMessageStats.cacheFills.incrementAndGet();
+
+				this.blockMessageCache.put(ByteArray.wrap(blockData.getSignature()), blockMessage);
+			}
+		} catch (DataException e) {
+			LOGGER.error(String.format("Repository issue while sending block %s to peer %s", Base58.encode(signature), peer), e);
+		} catch (TransformationException e) {
+			LOGGER.error(String.format("Serialization issue while sending block %s to peer %s", Base58.encode(signature), peer), e);
 		}
 	}
 
@@ -1939,80 +1792,39 @@ public class Controller extends Thread {
 		Synchronizer.getInstance().requestSync();
 	}
 
-	// List to collect messages
-	private final static List<PeerMessage> SIGNATURE_MESSAGE_LIST = new ArrayList<>();
-	// Lock to synchronize access to the list
-	private final static Object SIGNATURE_MESSAGE_LOCK = new Object();
-
-	// Scheduled executor service to process messages every second
-	private static final ScheduledExecutorService NETWORK_BLOCK_SUMMARIES_V_2_MESSAGE_SCHEDULER = Executors.newScheduledThreadPool(1);
-
 	private void onNetworkBlockSummariesV2Message(Peer peer, Message message) {
-		synchronized (SIGNATURE_MESSAGE_LOCK) {
-			SIGNATURE_MESSAGE_LIST.add(new PeerMessage(peer, message));
-		}
-	}
+		BlockSummariesV2Message blockSummariesV2Message = (BlockSummariesV2Message) message;
 
-	/**
-	 * Process Network Block Summaries
-	 *
-	 * This was extracted for scheduling purposes.
-	 */
-	private static void processNetworkBlockSummariesV2Messages() {
+		if (!Settings.getInstance().isLite()) {
+			// If peer is inbound and we've not updated their height
+			// then this is probably their initial BLOCK_SUMMARIES_V2 message
+			// so they need a corresponding BLOCK_SUMMARIES_V2 message from us
+			if (!peer.isOutbound() && peer.getChainTipData() == null) {
+				Message responseMessage = Network.getInstance().buildHeightOrChainTipInfo(peer);
 
-		try {
-			List<PeerMessage> messagesToProcess;
-			synchronized (SIGNATURE_MESSAGE_LOCK) {
-				messagesToProcess = new ArrayList<>(SIGNATURE_MESSAGE_LIST);
-				SIGNATURE_MESSAGE_LIST.clear();
-			}
-
-			Map<Long, Message> messageForVersion = new HashMap<>(2);
-
-			for( PeerMessage peerMessage : messagesToProcess ) {
-				Message message = peerMessage.getMessage();
-				Peer peer = peerMessage.getPeer();
-
-				BlockSummariesV2Message blockSummariesV2Message = (BlockSummariesV2Message) message;
-
-				if (!Settings.getInstance().isLite()) {
-					// If peer is inbound and we've not updated their height
-					// then this is probably their initial BLOCK_SUMMARIES_V2 message
-					// so they need a corresponding BLOCK_SUMMARIES_V2 message from us
-					if (!peer.isOutbound() && peer.getChainTipData() == null) {
-						Message responseMessage
-							= messageForVersion.computeIfAbsent(
-								peer.getPeersVersion(),
-								version -> Network.getInstance().buildHeightOrChainTipInfoForVersion(version)
-						);
-
-						if (responseMessage == null || !peer.sendMessage(responseMessage)) {
-							peer.disconnect("failed to send our chain tip info");
-							return;
-						}
-					}
-				}
-
-				if (message.hasId()) {
-					/*
-					 * Experimental proof-of-concept: discard messages with ID
-					 * These are 'late' reply messages received after timeout has expired,
-					 * having been passed upwards from Peer to Network to Controller.
-					 * Hence, these are NOT simple "here's my chain tip" broadcasts from other peers.
-					 */
-					LOGGER.debug("Discarding late {} message with ID {} from {}", message.getType().name(), message.getId(), peer);
+				if (responseMessage == null || !peer.sendMessage(responseMessage)) {
+					peer.disconnect("failed to send our chain tip info");
 					return;
 				}
-
-				// Update peer chain tip data
-				peer.setChainTipSummaries(blockSummariesV2Message.getBlockSummaries());
-
-				// Potentially synchronize
-				Synchronizer.getInstance().requestSync();
 			}
-		} catch (Exception e) {
-			LOGGER.error(e.getMessage(), e);
 		}
+
+		if (message.hasId()) {
+			/*
+			 * Experimental proof-of-concept: discard messages with ID
+			 * These are 'late' reply messages received after timeout has expired,
+			 * having been passed upwards from Peer to Network to Controller.
+			 * Hence, these are NOT simple "here's my chain tip" broadcasts from other peers.
+			 */
+			LOGGER.debug("Discarding late {} message with ID {} from {}", message.getType().name(), message.getId(), peer);
+			return;
+		}
+
+		// Update peer chain tip data
+		peer.setChainTipSummaries(blockSummariesV2Message.getBlockSummaries());
+
+		// Potentially synchronize
+		Synchronizer.getInstance().requestSync();
 	}
 
 	private void onNetworkGetAccountMessage(Peer peer, Message message) {
@@ -2316,24 +2128,6 @@ public class Controller extends Thread {
 
 		return now - offset;
 	}
-
-	private static void cleanChunkUploadTempDir() {
-		Path uploadsTemp = Paths.get("uploads-temp");
-		if (!Files.exists(uploadsTemp)) {
-			return;
-		}
-	
-		try (Stream<Path> paths = Files.walk(uploadsTemp)) {
-			paths.sorted(Comparator.reverseOrder())
-				 .map(Path::toFile)
-				 .forEach(File::delete);
-	
-			LOGGER.info("Cleaned up all temporary uploads in {}", uploadsTemp);
-		} catch (IOException e) {
-			LOGGER.warn("Failed to clean up uploads-temp directory", e);
-		}
-	}
-	
 
 	public StatsSnapshot getStatsSnapshot() {
 		return this.stats;

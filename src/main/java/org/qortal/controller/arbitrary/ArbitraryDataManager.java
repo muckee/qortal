@@ -10,8 +10,6 @@ import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
-import org.qortal.event.DataMonitorEvent;
-import org.qortal.event.EventBus;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
@@ -30,7 +28,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
-import java.util.stream.Collectors;
 
 public class ArbitraryDataManager extends Thread {
 
@@ -42,10 +39,10 @@ public class ArbitraryDataManager extends Thread {
 	private int powDifficulty = 14; // Must not be final, as unit tests need to reduce this value
 
 	/** Request timeout when transferring arbitrary data */
-	public static final long ARBITRARY_REQUEST_TIMEOUT = 24 * 1000L; // ms
+	public static final long ARBITRARY_REQUEST_TIMEOUT = 12 * 1000L; // ms
 
 	/** Maximum time to hold information about an in-progress relay */
-	public static final long ARBITRARY_RELAY_TIMEOUT = 120 * 1000L; // ms
+	public static final long ARBITRARY_RELAY_TIMEOUT = 60 * 1000L; // ms
 
 	/** Maximum time to hold direct peer connection information */
 	public static final long ARBITRARY_DIRECT_CONNECTION_INFO_TIMEOUT = 2 * 60 * 1000L; // ms
@@ -198,35 +195,13 @@ public class ArbitraryDataManager extends Thread {
 		final int limit = 100;
 		int offset = 0;
 
-		List<ArbitraryTransactionData> allArbitraryTransactionsInDescendingOrder;
-
-		try (final Repository repository = RepositoryManager.getRepository()) {
-
-			if( name == null ) {
-				allArbitraryTransactionsInDescendingOrder
-						= repository.getArbitraryRepository()
-						.getLatestArbitraryTransactions();
-			}
-			else {
-				allArbitraryTransactionsInDescendingOrder
-						= repository.getArbitraryRepository()
-						.getLatestArbitraryTransactionsByName(name);
-			}
-		} catch( Exception e) {
-			LOGGER.error(e.getMessage(), e);
-			allArbitraryTransactionsInDescendingOrder = new ArrayList<>(0);
-		}
-
-		// collect processed transactions in a set to ensure outdated data transactions do not get fetched
-		Set<ArbitraryTransactionDataHashWrapper> processedTransactions = new HashSet<>();
-
 		while (!isStopping) {
 			Thread.sleep(1000L);
 
 			// Any arbitrary transactions we want to fetch data for?
 			try (final Repository repository = RepositoryManager.getRepository()) {
-				List<byte[]> signatures = processTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
-
+				List<byte[]> signatures = repository.getTransactionRepository().getSignaturesMatchingCriteria(null, null, null, ARBITRARY_TX_TYPE, null, name, null, ConfirmationStatus.BOTH, limit, offset, true);
+				// LOGGER.trace("Found {} arbitrary transactions at offset: {}, limit: {}", signatures.size(), offset, limit);
 				if (signatures == null || signatures.isEmpty()) {
 					offset = 0;
 					break;
@@ -248,38 +223,14 @@ public class ArbitraryDataManager extends Thread {
 					ArbitraryTransactionData arbitraryTransactionData = (ArbitraryTransactionData) arbitraryTransaction.getTransactionData();
 
 					// Skip transactions that we don't need to proactively store data for
-					ArbitraryDataExamination arbitraryDataExamination = storageManager.shouldPreFetchData(repository, arbitraryTransactionData);
-					if (!arbitraryDataExamination.isPass()) {
+					if (!storageManager.shouldPreFetchData(repository, arbitraryTransactionData)) {
 						iterator.remove();
-
-						EventBus.INSTANCE.notify(
-							new DataMonitorEvent(
-								System.currentTimeMillis(),
-								arbitraryTransactionData.getIdentifier(),
-								arbitraryTransactionData.getName(),
-								arbitraryTransactionData.getService().name(),
-								arbitraryDataExamination.getNotes(),
-								arbitraryTransactionData.getTimestamp(),
-								arbitraryTransactionData.getTimestamp()
-							)
-						);
 						continue;
 					}
 
 					// Remove transactions that we already have local data for
 					if (hasLocalData(arbitraryTransaction)) {
 						iterator.remove();
-						EventBus.INSTANCE.notify(
-							new DataMonitorEvent(
-								System.currentTimeMillis(),
-								arbitraryTransactionData.getIdentifier(),
-								arbitraryTransactionData.getName(),
-								arbitraryTransactionData.getService().name(),
-								"already have local data, skipping",
-								arbitraryTransactionData.getTimestamp(),
-								arbitraryTransactionData.getTimestamp()
-							)
-						);
                     }
 				}
 
@@ -297,21 +248,8 @@ public class ArbitraryDataManager extends Thread {
 
 				// Check to see if we have had a more recent PUT
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
-
-				Optional<ArbitraryTransactionData> moreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
-
-				if (moreRecentPutTransaction.isPresent()) {
-					EventBus.INSTANCE.notify(
-						new DataMonitorEvent(
-							System.currentTimeMillis(),
-							arbitraryTransactionData.getIdentifier(),
-							arbitraryTransactionData.getName(),
-							arbitraryTransactionData.getService().name(),
-							"not fetching old data",
-							arbitraryTransactionData.getTimestamp(),
-							moreRecentPutTransaction.get().getTimestamp()
-						)
-					);
+				boolean hasMoreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
+				if (hasMoreRecentPutTransaction) {
 					// There is a more recent PUT transaction than the one we are currently processing.
 					// When a PUT is issued, it replaces any layers that would have been there before.
 					// Therefore any data relating to this older transaction is no longer needed and we
@@ -319,33 +257,9 @@ public class ArbitraryDataManager extends Thread {
 					continue;
 				}
 
-				EventBus.INSTANCE.notify(
-					new DataMonitorEvent(
-						System.currentTimeMillis(),
-						arbitraryTransactionData.getIdentifier(),
-						arbitraryTransactionData.getName(),
-						arbitraryTransactionData.getService().name(),
-						"fetching data",
-						arbitraryTransactionData.getTimestamp(),
-						arbitraryTransactionData.getTimestamp()
-					)
-				);
-
 				// Ask our connected peers if they have files for this signature
 				// This process automatically then fetches the files themselves if a peer is found
 				fetchData(arbitraryTransactionData);
-
-				EventBus.INSTANCE.notify(
-					new DataMonitorEvent(
-						System.currentTimeMillis(),
-						arbitraryTransactionData.getIdentifier(),
-						arbitraryTransactionData.getName(),
-						arbitraryTransactionData.getService().name(),
-						"fetched data",
-						arbitraryTransactionData.getTimestamp(),
-						arbitraryTransactionData.getTimestamp()
-					)
-				);
 
 			} catch (DataException e) {
 				LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
@@ -360,20 +274,6 @@ public class ArbitraryDataManager extends Thread {
 		final int limit = 100;
 		int offset = 0;
 
-		List<ArbitraryTransactionData> allArbitraryTransactionsInDescendingOrder;
-
-		try (final Repository repository = RepositoryManager.getRepository()) {
-			allArbitraryTransactionsInDescendingOrder
-					= repository.getArbitraryRepository()
-						.getLatestArbitraryTransactions();
-		} catch( Exception e) {
-			LOGGER.error(e.getMessage(), e);
-			allArbitraryTransactionsInDescendingOrder = new ArrayList<>(0);
-		}
-
-		// collect processed transactions in a set to ensure outdated data transactions do not get fetched
-		Set<ArbitraryTransactionDataHashWrapper> processedTransactions = new HashSet<>();
-
 		while (!isStopping) {
 			final int minSeconds = 3;
 			final int maxSeconds = 10;
@@ -382,8 +282,8 @@ public class ArbitraryDataManager extends Thread {
 
 			// Any arbitrary transactions we want to fetch data for?
 			try (final Repository repository = RepositoryManager.getRepository()) {
-				List<byte[]> signatures = processTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
-
+				List<byte[]> signatures = repository.getTransactionRepository().getSignaturesMatchingCriteria(null, null, null, ARBITRARY_TX_TYPE, null, null, null, ConfirmationStatus.BOTH, limit, offset, true);
+				// LOGGER.trace("Found {} arbitrary transactions at offset: {}, limit: {}", signatures.size(), offset, limit);
 				if (signatures == null || signatures.isEmpty()) {
 					offset = 0;
 					break;
@@ -428,76 +328,24 @@ public class ArbitraryDataManager extends Thread {
 					continue;
 				}
 
-				// No longer need to see if we have had a more recent PUT since we compared the transactions to process
-				// to the transactions previously processed, so we can fetch the transactiondata, notify the event bus,
-				// fetch the metadata and notify the event bus again
+				// Check to see if we have had a more recent PUT
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
+				boolean hasMoreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
+				if (hasMoreRecentPutTransaction) {
+					// There is a more recent PUT transaction than the one we are currently processing.
+					// When a PUT is issued, it replaces any layers that would have been there before.
+					// Therefore any data relating to this older transaction is no longer needed and we
+					// shouldn't fetch it from the network.
+					continue;
+				}
 
 				// Ask our connected peers if they have metadata for this signature
 				fetchMetadata(arbitraryTransactionData);
 
-				EventBus.INSTANCE.notify(
-					new DataMonitorEvent(
-						System.currentTimeMillis(),
-						arbitraryTransactionData.getIdentifier(),
-						arbitraryTransactionData.getName(),
-						arbitraryTransactionData.getService().name(),
-						"fetched metadata",
-						arbitraryTransactionData.getTimestamp(),
-						arbitraryTransactionData.getTimestamp()
-					)
-				);
 			} catch (DataException e) {
 				LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
-			} catch (InterruptedException e) {
-				// Thread interrupted during shutdown - restore interrupt status and exit
-				Thread.currentThread().interrupt();
-				return;
-			} catch (Exception e) {
-				LOGGER.error(e.getMessage(), e);
 			}
 		}
-	}
-
-	private static List<byte[]> processTransactionsForSignatures(
-			int limit,
-			int offset,
-			List<ArbitraryTransactionData> transactionsInDescendingOrder,
-			Set<ArbitraryTransactionDataHashWrapper> processedTransactions) {
-		// these transactions are in descending order, latest transactions come first
-		List<ArbitraryTransactionData> transactions
-				= transactionsInDescendingOrder.stream()
-					.skip(offset)
-					.limit(limit)
-					.collect(Collectors.toList());
-
-		// wrap the transactions, so they can be used for hashing and comparing
-		// Class ArbitraryTransactionDataHashWrapper supports hashCode() and equals(...) for this purpose
-		List<ArbitraryTransactionDataHashWrapper> wrappedTransactions
-				= transactions.stream()
-					.map(transaction -> new ArbitraryTransactionDataHashWrapper(transaction))
-					.collect(Collectors.toList());
-
-		// create a set of wrappers and populate it first to last, so that all outdated transactions get rejected
-		Set<ArbitraryTransactionDataHashWrapper> transactionsToProcess = new HashSet<>(wrappedTransactions.size());
-		for(ArbitraryTransactionDataHashWrapper wrappedTransaction : wrappedTransactions) {
-			transactionsToProcess.add(wrappedTransaction);
-		}
-
-		// remove the matches for previously processed transactions,
-		// because these transactions have had updates that have already been processed
-		transactionsToProcess.removeAll(processedTransactions);
-
-		// add to processed transactions to compare and remove matches from future processing iterations
-		processedTransactions.addAll(transactionsToProcess);
-
-		List<byte[]> signatures
-				= transactionsToProcess.stream()
-					.map(transactionToProcess -> transactionToProcess.getData()
-					.getSignature())
-					.collect(Collectors.toList());
-
-		return signatures;
 	}
 
 	private ArbitraryTransaction fetchTransaction(final Repository repository, byte[] signature) {

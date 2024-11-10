@@ -48,8 +48,6 @@ public interface GroupRepository {
 
 	// Group Admins
 
-	public GroupAdminData getAdminFaulty(int groupId, String address) throws DataException;
-
 	public GroupAdminData getAdmin(int groupId, String address) throws DataException;
 
 	public boolean adminExists(int groupId, String address) throws DataException;
@@ -118,12 +116,6 @@ public interface GroupRepository {
 
 	public default List<GroupJoinRequestData> getGroupJoinRequests(int groupId) throws DataException {
 		return getGroupJoinRequests(groupId, null, null, null);
-	}
-
-	public List<GroupJoinRequestData> getJoinRequestsByJoiner(String joiner, Integer limit, Integer offset, Boolean reverse) throws DataException;
-
-	public default List<GroupJoinRequestData> getJoinRequestsByJoiner(String joiner) throws DataException {
-		return getJoinRequestsByJoiner(joiner, null, null, null);
 	}
 
 	public void save(GroupJoinRequestData groupJoinRequestData) throws DataException;

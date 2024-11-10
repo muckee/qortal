@@ -45,7 +45,6 @@ function parseUrl(url) {
 
         // Remove theme, identifier, and time queries if they exist
         parsedUrl.searchParams.delete("theme");
-        parsedUrl.searchParams.delete("lang");
         parsedUrl.searchParams.delete("identifier");
         parsedUrl.searchParams.delete("time");
         parsedUrl.searchParams.delete("isManualNavigation");
@@ -85,7 +84,6 @@ isDOMContentLoaded: isDOMContentLoaded ? true : false
 
 function handleQDNResourceDisplayed(pathurl, isDOMContentLoaded) {
 // make sure that an empty string the root path
-if(pathurl?.startsWith('/render/hash/')) return;
 const path = pathurl || '/'
     if (!isManualNavigation) {
     isManualNavigation = true
@@ -214,11 +212,8 @@ function buildResourceUrl(service, name, identifier, path, isLink) {
         if (path != null) url = url.concat((path.startsWith("/") ? "" : "/") + path);
     }
 
-    if (isLink) {
-        const hasQuery = url.includes("?");
-        const queryPrefix = hasQuery ? "&" : "?";
-        url += queryPrefix + "theme=" + _qdnTheme + "&lang=" + _qdnLang;
-    }
+    if (isLink) url = url.concat((url.includes("?") ? "" : "?") + "&theme=" + _qdnTheme);
+
     return url;
 }
 
@@ -289,9 +284,11 @@ window.addEventListener("message", async (event) => {
         return;
     }
 
+    console.log("Core received action: " + JSON.stringify(event.data.action));
+
     let url;
     let data = event.data;
-    let identifier;
+
     switch (data.action) {
         case "GET_ACCOUNT_DATA":
             return httpGetAsyncWithEvent(event, "/addresses/" + data.address);
@@ -386,7 +383,6 @@ window.addEventListener("message", async (event) => {
             if (data.identifier != null) url = url.concat("&identifier=" + data.identifier);
             if (data.name != null) url = url.concat("&name=" + data.name);
             if (data.names != null) data.names.forEach((x, i) => url = url.concat("&name=" + x));
-            if (data.keywords != null) data.keywords.forEach((x, i) => url = url.concat("&keywords=" + x));
             if (data.title != null) url = url.concat("&title=" + data.title);
             if (data.description != null) url = url.concat("&description=" + data.description);
             if (data.prefix != null) url = url.concat("&prefix=" + new Boolean(data.prefix).toString());
@@ -423,7 +419,7 @@ window.addEventListener("message", async (event) => {
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_QDN_RESOURCE_PROPERTIES":
-            identifier = (data.identifier != null) ? data.identifier : "default";
+            let identifier = (data.identifier != null) ? data.identifier : "default";
             url = "/arbitrary/resource/properties/" + data.service + "/" + data.name + "/" + identifier;
             return httpGetAsyncWithEvent(event, url);
 
@@ -460,7 +456,7 @@ window.addEventListener("message", async (event) => {
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_AT":
-            url = "/at/" + data.atAddress;
+            url = "/at" + data.atAddress;
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_AT_DATA":
@@ -477,7 +473,7 @@ window.addEventListener("message", async (event) => {
 
         case "FETCH_BLOCK":
             if (data.signature != null) {
-                url = "/blocks/signature/" + data.signature;
+                url = "/blocks/" + data.signature;
             } else if (data.height != null) {
                 url = "/blocks/byheight/" + data.height;
             }
@@ -618,7 +614,6 @@ function getDefaultTimeout(action) {
         switch (action) {
             case "GET_USER_ACCOUNT":
             case "SAVE_FILE":
-            case "SIGN_TRANSACTION":
             case "DECRYPT_DATA":
                 // User may take a long time to accept/deny the popup
                 return 60 * 60 * 1000;
@@ -640,11 +635,6 @@ function getDefaultTimeout(action) {
                 // Chat messages rely on PoW computations, so allow extra time
                 return 60 * 1000;
 
-            case "CREATE_TRADE_BUY_ORDER":
-            case "CREATE_TRADE_SELL_ORDER":
-            case "CANCEL_TRADE_SELL_ORDER":
-            case "VOTE_ON_POLL":
-            case "CREATE_POLL":
             case "JOIN_GROUP":
             case "DEPLOY_AT":
             case "SEND_COIN":
@@ -659,7 +649,7 @@ function getDefaultTimeout(action) {
                 break;
         }
     }
-    return 30 * 1000;
+    return 10 * 1000;
 }
 
 /**
@@ -698,7 +688,6 @@ const qortalRequestWithTimeout = (request, timeout) =>
  * Send current page details to UI
  */
 document.addEventListener('DOMContentLoaded', (event) => {
- 
 resetVariables()
     qortalRequest({
         action: "QDN_RESOURCE_DISPLAYED",
@@ -717,7 +706,6 @@ resetVariables()
  * Handle app navigation
  */
 navigation.addEventListener('navigate', (event) => {
-
     const url = new URL(event.destination.url);
 
     let fullpath = url.pathname + url.hash;
