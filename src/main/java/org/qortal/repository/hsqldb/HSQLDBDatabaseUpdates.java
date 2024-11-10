@@ -58,7 +58,7 @@ public class HSQLDBDatabaseUpdates {
 	 * @return database version, or 0 if no schema yet
 	 * @throws SQLException
 	 */
-	public static int fetchDatabaseVersion(Connection connection) throws SQLException {
+	private static int fetchDatabaseVersion(Connection connection) throws SQLException {
 		try (Statement stmt = connection.createStatement()) {
 			if (stmt.execute("SELECT version FROM DatabaseInfo"))
 				try (ResultSet resultSet = stmt.getResultSet()) {
@@ -454,41 +454,40 @@ public class HSQLDBDatabaseUpdates {
 
 				case 12:
 					// Groups
-					// NOTE: We need to set Groups to `GROUPS` here to avoid SQL Standard Keywords in HSQLDB v2.7.4
-					stmt.execute("CREATE TABLE `GROUPS` (group_id GroupID, owner QortalAddress NOT NULL, group_name GroupName NOT NULL, "
+					stmt.execute("CREATE TABLE Groups (group_id GroupID, owner QortalAddress NOT NULL, group_name GroupName NOT NULL, "
 							+ "created_when EpochMillis NOT NULL, updated_when EpochMillis, is_open BOOLEAN NOT NULL, "
 							+ "approval_threshold TINYINT NOT NULL, min_block_delay INTEGER NOT NULL, max_block_delay INTEGER NOT NULL, "
 							+ "reference Signature, creation_group_id GroupID, reduced_group_name GroupName NOT NULL, "
 							+ "description GenericDescription NOT NULL, PRIMARY KEY (group_id))");
 					// For finding groups by name
-					stmt.execute("CREATE INDEX GroupNameIndex on `GROUPS` (group_name)");
+					stmt.execute("CREATE INDEX GroupNameIndex on Groups (group_name)");
 					// For finding groups by reduced name
-					stmt.execute("CREATE INDEX GroupReducedNameIndex on `GROUPS` (reduced_group_name)");
+					stmt.execute("CREATE INDEX GroupReducedNameIndex on Groups (reduced_group_name)");
 					// For finding groups by owner
-					stmt.execute("CREATE INDEX GroupOwnerIndex ON `GROUPS` (owner)");
+					stmt.execute("CREATE INDEX GroupOwnerIndex ON Groups (owner)");
 
 					// We need a corresponding trigger to make sure new group_id values are assigned sequentially starting from 1
-					stmt.execute("CREATE TRIGGER Group_ID_Trigger BEFORE INSERT ON `GROUPS` "
+					stmt.execute("CREATE TRIGGER Group_ID_Trigger BEFORE INSERT ON Groups "
 							+ "REFERENCING NEW ROW AS new_row FOR EACH ROW WHEN (new_row.group_id IS NULL) "
-							+ "SET new_row.group_id = (SELECT IFNULL(MAX(group_id) + 1, 1) FROM `GROUPS`)");
+							+ "SET new_row.group_id = (SELECT IFNULL(MAX(group_id) + 1, 1) FROM Groups)");
 
 					// Admins
 					stmt.execute("CREATE TABLE GroupAdmins (group_id GroupID, admin QortalAddress, reference Signature NOT NULL, "
-							+ "PRIMARY KEY (group_id, admin), FOREIGN KEY (group_id) REFERENCES `GROUPS` (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, admin), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
 					// For finding groups by admin address
 					stmt.execute("CREATE INDEX GroupAdminIndex ON GroupAdmins (admin)");
 
 					// Members
 					stmt.execute("CREATE TABLE GroupMembers (group_id GroupID, address QortalAddress, "
 							+ "joined_when EpochMillis NOT NULL, reference Signature NOT NULL, "
-							+ "PRIMARY KEY (group_id, address), FOREIGN KEY (group_id) REFERENCES `GROUPS` (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, address), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
 					// For finding groups by member address
 					stmt.execute("CREATE INDEX GroupMemberIndex ON GroupMembers (address)");
 
 					// Invites
 					stmt.execute("CREATE TABLE GroupInvites (group_id GroupID, inviter QortalAddress, invitee QortalAddress, "
 							+ "expires_when EpochMillis, reference Signature, "
-							+ "PRIMARY KEY (group_id, invitee), FOREIGN KEY (group_id) REFERENCES `GROUPS` (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, invitee), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
 					// For finding invites sent by inviter
 					stmt.execute("CREATE INDEX GroupInviteInviterIndex ON GroupInvites (inviter)");
 					// For finding invites by group
@@ -504,7 +503,7 @@ public class HSQLDBDatabaseUpdates {
 					// NULL expires_when means does not expire!
 					stmt.execute("CREATE TABLE GroupBans (group_id GroupID, offender QortalAddress, admin QortalAddress NOT NULL, "
 							+ "banned_when EpochMillis NOT NULL, reason GenericDescription NOT NULL, expires_when EpochMillis, reference Signature NOT NULL, "
-							+ "PRIMARY KEY (group_id, offender), FOREIGN KEY (group_id) REFERENCES `GROUPS` (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, offender), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
 					// For expiry maintenance
 					stmt.execute("CREATE INDEX GroupBanExpiryIndex ON GroupBans (expires_when)");
 					break;
@@ -1051,22 +1050,6 @@ public class HSQLDBDatabaseUpdates {
 				case 49:
 					// Update blocks minted penalty
 					stmt.execute("UPDATE Accounts SET blocks_minted_penalty = -5000000 WHERE blocks_minted_penalty < 0");
-					break;
-
-				case 50:
-					// Primary name for a Qortal Address, 0-1 for any address
-					stmt.execute("CREATE TABLE PrimaryNames (owner QortalAddress, name RegisteredName, "
-							+ "PRIMARY KEY (owner), FOREIGN KEY (name) REFERENCES Names (name) ON DELETE CASCADE)");
-					break;
-
-				case 51:
-
-					LOGGER.info("Adding signatures to arbitrary resources cache table - this can take a while...");
-					stmt.execute("ALTER TABLE ArbitraryResourcesCache ADD latest_signature Signature");
-					stmt.execute("ALTER TABLE ArbitraryResourcesCache ADD lower_case_name RegisteredName");
-					stmt.execute("CREATE INDEX ArbitraryResourcesServiceLowerNameIdIndex ON ArbitraryResourcesCache (service, lower_case_name, identifier)");
-					stmt.execute("ALTER TABLE DatabaseInfo ADD latest_signature_populated TINYINT NOT NULL DEFAULT 0");
-
 					break;
 
 				default:
