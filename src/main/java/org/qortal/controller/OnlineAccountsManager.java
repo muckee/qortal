@@ -44,6 +44,7 @@ public class OnlineAccountsManager {
      */
     private static final long ONLINE_TIMESTAMP_MODULUS_V1 = 5 * 60 * 1000L;
     private static final long ONLINE_TIMESTAMP_MODULUS_V2 = 30 * 60 * 1000L;
+    private static final long ONLINE_TIMESTAMP_MODULUS_V3 = 10 * 60 * 1000L;
 
     /**
      * How many 'current' timestamp-sets of online accounts we cache.
@@ -67,12 +68,13 @@ public class OnlineAccountsManager {
     private static final long ONLINE_ACCOUNTS_COMPUTE_INITIAL_SLEEP_INTERVAL = 30 * 1000L; // ms
 
     // MemoryPoW - mainnet
-    public static final int POW_BUFFER_SIZE = 1 * 1024 * 1024; // bytes
+    public static final int POW_BUFFER_SIZE = 1024 * 1024; // bytes
     public static final int POW_DIFFICULTY_V1 = 18; // leading zero bits
     public static final int POW_DIFFICULTY_V2 = 19; // leading zero bits
+    public static final int POW_DIFFICULTY_V3 = 6; // leading zero bits
 
     // MemoryPoW - testnet
-    public static final int POW_BUFFER_SIZE_TESTNET = 1 * 1024 * 1024; // bytes
+    public static final int POW_BUFFER_SIZE_TESTNET = 1024 * 1024; // bytes
     public static final int POW_DIFFICULTY_TESTNET = 5; // leading zero bits
 
     // IMPORTANT: if we ever need to dynamically modify the buffer size using a feature trigger, the
@@ -106,11 +108,15 @@ public class OnlineAccountsManager {
 
     public static long getOnlineTimestampModulus() {
         Long now = NTP.getTime();
-        if (now != null && now >= BlockChain.getInstance().getOnlineAccountsModulusV2Timestamp()) {
+        if (now != null && now >= BlockChain.getInstance().getOnlineAccountsModulusV2Timestamp() && now < BlockChain.getInstance().getOnlineAccountsModulusV3Timestamp()) {
             return ONLINE_TIMESTAMP_MODULUS_V2;
+        }
+        if (now != null && now >= BlockChain.getInstance().getOnlineAccountsModulusV3Timestamp()) {
+            return ONLINE_TIMESTAMP_MODULUS_V3;
         }
         return ONLINE_TIMESTAMP_MODULUS_V1;
     }
+
     public static Long getCurrentOnlineAccountTimestamp() {
         Long now = NTP.getTime();
         if (now == null)
@@ -135,8 +141,11 @@ public class OnlineAccountsManager {
         if (Settings.getInstance().isTestNet())
             return POW_DIFFICULTY_TESTNET;
 
-        if (timestamp >= BlockChain.getInstance().getIncreaseOnlineAccountsDifficultyTimestamp())
+        if (timestamp >= BlockChain.getInstance().getIncreaseOnlineAccountsDifficultyTimestamp() && timestamp < BlockChain.getInstance().getDecreaseOnlineAccountsDifficultyTimestamp())
             return POW_DIFFICULTY_V2;
+
+        if (timestamp >= BlockChain.getInstance().getDecreaseOnlineAccountsDifficultyTimestamp())
+            return POW_DIFFICULTY_V3;
 
         return POW_DIFFICULTY_V1;
     }

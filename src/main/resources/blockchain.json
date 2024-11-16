@@ -29,6 +29,7 @@
 	"onlineAccountSignaturesMinLifetime": 43200000,
 	"onlineAccountSignaturesMaxLifetime": 86400000,
 	"onlineAccountsModulusV2Timestamp": 1659801600000,
+	"onlineAccountsModulusV3Timestamp": 9999999999999,
 	"selfSponsorshipAlgoV1SnapshotTimestamp": 1670230000000,
 	"selfSponsorshipAlgoV2SnapshotTimestamp": 1708360200000,
 	"selfSponsorshipAlgoV3SnapshotTimestamp": 1708432200000,
@@ -95,6 +96,7 @@
 		"transactionV6Timestamp": 9999999999999,
 		"disableReferenceTimestamp": 1655222400000,
 		"increaseOnlineAccountsDifficultyTimestamp": 9999999999999,
+		"decreaseOnlineAccountsDifficultyTimestamp": 9999999999999,
 		"onlineAccountMinterLevelValidationHeight": 1092000,
 		"selfSponsorshipAlgoV1Height": 1092400,
 		"selfSponsorshipAlgoV2Height": 1611200,
@@ -109,6 +111,7 @@
 		"disableRewardshareHeight": 1899100,
 		"enableRewardshareHeight": 1905100,
 		"onlyMintWithNameHeight": 1900300,
+		"removeOnlyMintWithNameHeight": 9999999,
 		"groupMemberCheckHeight": 1902700
 	},
 	"checkpoints": [

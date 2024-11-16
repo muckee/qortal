@@ -219,6 +219,7 @@ public class Account {
 		int level = accountData.getLevel();
 		int groupIdToMint = BlockChain.getInstance().getMintingGroupId();
 		int groupCheckHeight = BlockChain.getInstance().getGroupMemberCheckHeight();
+		int removeNameCheckHeight = BlockChain.getInstance().getRemoveOnlyMintWithNameHeight();
 
 		String myAddress = accountData.getAddress();
 		List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
@@ -236,7 +237,11 @@ public class Account {
 			return true;
 
 		// Can only mint if have registered a name and is member of minter group id
-		if (blockchainHeight >= groupCheckHeight && level >= levelToMint && !myName.isEmpty() && isMember)
+		if (blockchainHeight >= groupCheckHeight && blockchainHeight < removeNameCheckHeight && level >= levelToMint && !myName.isEmpty() && isMember)
+			return true;
+
+		// Can only mint if is member of minter group id
+		if (blockchainHeight >= removeNameCheckHeight && level >= levelToMint && isMember)
 			return true;
 
 		// Founders needs to pass same tests like minters
@@ -253,9 +258,16 @@ public class Account {
 			return true;
 
 		if (blockchainHeight >= groupCheckHeight &&
+				blockchainHeight < removeNameCheckHeight &&
 				Account.isFounder(accountData.getFlags()) &&
 				accountData.getBlocksMintedPenalty() == 0 &&
 				!myName.isEmpty() &&
+				isMember)
+			return true;
+
+		if (blockchainHeight >= removeNameCheckHeight &&
+				Account.isFounder(accountData.getFlags()) &&
+				accountData.getBlocksMintedPenalty() == 0 &&
 				isMember)
 			return true;
 
