@@ -232,6 +232,8 @@ public class Account {
 		if (blockchainHeight < nameCheckHeight && level >= levelToMint)
 			return true;
 
+		LOGGER.info("Calling myName.isEmpty(): myAddress = " + myAddress);
+
 		// Can only mint if have registered a name
 		if (blockchainHeight >= nameCheckHeight && blockchainHeight < groupCheckHeight && level >= levelToMint && !myName.isEmpty())
 			return true;
