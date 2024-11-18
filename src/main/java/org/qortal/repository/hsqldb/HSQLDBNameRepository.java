@@ -1,8 +1,5 @@
 package org.qortal.repository.hsqldb;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.qortal.account.Account;
 import org.qortal.data.naming.NameData;
 import org.qortal.repository.DataException;
 import org.qortal.repository.NameRepository;
@@ -13,8 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class HSQLDBNameRepository implements NameRepository {
-
-	private static final Logger LOGGER = LogManager.getLogger(HSQLDBNameRepository.class);
 
 	protected HSQLDBRepository repository;
 
@@ -269,8 +264,6 @@ public class HSQLDBNameRepository implements NameRepository {
 
 	@Override
 	public List<NameData> getNamesByOwner(String owner, Integer limit, Integer offset, Boolean reverse) throws DataException {
-		LOGGER.info("Executing getNamesByOwner: owner = " + owner);
-
 		StringBuilder sql = new StringBuilder(512);
 
 		sql.append("SELECT name, reduced_name, data, registered_when, updated_when, "
@@ -313,8 +306,6 @@ public class HSQLDBNameRepository implements NameRepository {
 			return names;
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch account's names from repository", e);
-		} finally {
-			LOGGER.info("Executed getNamesByOwner: owner = " + owner);
 		}
 	}
 

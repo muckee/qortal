@@ -222,8 +222,6 @@ public class Account {
 		int removeNameCheckHeight = BlockChain.getInstance().getRemoveOnlyMintWithNameHeight();
 
 		String myAddress = accountData.getAddress();
-		List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
-		boolean isMember = groupRepository.memberExists(groupIdToMint, myAddress);
 
 		if (accountData == null)
 			return false;
@@ -232,45 +230,40 @@ public class Account {
 		if (blockchainHeight < nameCheckHeight && level >= levelToMint)
 			return true;
 
-		LOGGER.info("Calling myName.isEmpty(): myAddress = " + myAddress);
-
 		// Can only mint if have registered a name
-		if (blockchainHeight >= nameCheckHeight && blockchainHeight < groupCheckHeight && level >= levelToMint && !myName.isEmpty())
+		if (blockchainHeight >= nameCheckHeight && blockchainHeight < groupCheckHeight && level >= levelToMint && !nameRepository.getNamesByOwner(myAddress).isEmpty())
 			return true;
 
 		// Can only mint if have registered a name and is member of minter group id
-		if (blockchainHeight >= groupCheckHeight && blockchainHeight < removeNameCheckHeight && level >= levelToMint && !myName.isEmpty() && isMember)
+		if (blockchainHeight >= groupCheckHeight && blockchainHeight < removeNameCheckHeight && level >= levelToMint && groupRepository.memberExists(groupIdToMint, myAddress) && !nameRepository.getNamesByOwner(myAddress).isEmpty() && groupRepository.memberExists(groupIdToMint, myAddress))
 			return true;
 
 		// Can only mint if is member of minter group id
-		if (blockchainHeight >= removeNameCheckHeight && level >= levelToMint && isMember)
+		if (blockchainHeight >= removeNameCheckHeight && level >= levelToMint && groupRepository.memberExists(groupIdToMint, myAddress))
+			return true;
+
+		// if you aren't a legit founder by this point, then you can't mint
+		if( !(Account.isFounder(accountData.getFlags()) &&
+				accountData.getBlocksMintedPenalty() == 0))
+			return false;
+
+		if (blockchainHeight < nameCheckHeight )
 			return true;
 
 		// Founders needs to pass same tests like minters
-		if (blockchainHeight < nameCheckHeight &&
-				Account.isFounder(accountData.getFlags()) &&
-				accountData.getBlocksMintedPenalty() == 0)
-			return true;
-
 		if (blockchainHeight >= nameCheckHeight &&
 				blockchainHeight < groupCheckHeight &&
-				Account.isFounder(accountData.getFlags()) &&
-				accountData.getBlocksMintedPenalty() == 0 &&
-				!myName.isEmpty())
+				!nameRepository.getNamesByOwner(myAddress).isEmpty())
 			return true;
 
 		if (blockchainHeight >= groupCheckHeight &&
 				blockchainHeight < removeNameCheckHeight &&
-				Account.isFounder(accountData.getFlags()) &&
-				accountData.getBlocksMintedPenalty() == 0 &&
-				!myName.isEmpty() &&
-				isMember)
+				!nameRepository.getNamesByOwner(myAddress).isEmpty() &&
+				groupRepository.memberExists(groupIdToMint, myAddress))
 			return true;
 
 		if (blockchainHeight >= removeNameCheckHeight &&
-				Account.isFounder(accountData.getFlags()) &&
-				accountData.getBlocksMintedPenalty() == 0 &&
-				isMember)
+				groupRepository.memberExists(groupIdToMint, myAddress))
 			return true;
 
 		return false;
