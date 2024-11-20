@@ -454,40 +454,41 @@ public class HSQLDBDatabaseUpdates {
 
 				case 12:
 					// Groups
-					stmt.execute("CREATE TABLE Groups (group_id GroupID, owner QortalAddress NOT NULL, group_name GroupName NOT NULL, "
+					// NOTE: We need to set Groups to `Groups` here to avoid SQL Standard Keywords in HSQLDB v2.7.4
+					stmt.execute("CREATE TABLE `Groups` (group_id GroupID, owner QortalAddress NOT NULL, group_name GroupName NOT NULL, "
 							+ "created_when EpochMillis NOT NULL, updated_when EpochMillis, is_open BOOLEAN NOT NULL, "
 							+ "approval_threshold TINYINT NOT NULL, min_block_delay INTEGER NOT NULL, max_block_delay INTEGER NOT NULL, "
 							+ "reference Signature, creation_group_id GroupID, reduced_group_name GroupName NOT NULL, "
 							+ "description GenericDescription NOT NULL, PRIMARY KEY (group_id))");
 					// For finding groups by name
-					stmt.execute("CREATE INDEX GroupNameIndex on Groups (group_name)");
+					stmt.execute("CREATE INDEX GroupNameIndex on `Groups` (group_name)");
 					// For finding groups by reduced name
-					stmt.execute("CREATE INDEX GroupReducedNameIndex on Groups (reduced_group_name)");
+					stmt.execute("CREATE INDEX GroupReducedNameIndex on `Groups` (reduced_group_name)");
 					// For finding groups by owner
-					stmt.execute("CREATE INDEX GroupOwnerIndex ON Groups (owner)");
+					stmt.execute("CREATE INDEX GroupOwnerIndex ON `Groups` (owner)");
 
 					// We need a corresponding trigger to make sure new group_id values are assigned sequentially starting from 1
-					stmt.execute("CREATE TRIGGER Group_ID_Trigger BEFORE INSERT ON Groups "
+					stmt.execute("CREATE TRIGGER Group_ID_Trigger BEFORE INSERT ON `Groups` "
 							+ "REFERENCING NEW ROW AS new_row FOR EACH ROW WHEN (new_row.group_id IS NULL) "
-							+ "SET new_row.group_id = (SELECT IFNULL(MAX(group_id) + 1, 1) FROM Groups)");
+							+ "SET new_row.group_id = (SELECT IFNULL(MAX(group_id) + 1, 1) FROM `Groups`)");
 
 					// Admins
 					stmt.execute("CREATE TABLE GroupAdmins (group_id GroupID, admin QortalAddress, reference Signature NOT NULL, "
-							+ "PRIMARY KEY (group_id, admin), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, admin), FOREIGN KEY (group_id) REFERENCES `Groups` (group_id) ON DELETE CASCADE)");
 					// For finding groups by admin address
 					stmt.execute("CREATE INDEX GroupAdminIndex ON GroupAdmins (admin)");
 
 					// Members
 					stmt.execute("CREATE TABLE GroupMembers (group_id GroupID, address QortalAddress, "
 							+ "joined_when EpochMillis NOT NULL, reference Signature NOT NULL, "
-							+ "PRIMARY KEY (group_id, address), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, address), FOREIGN KEY (group_id) REFERENCES `Groups` (group_id) ON DELETE CASCADE)");
 					// For finding groups by member address
 					stmt.execute("CREATE INDEX GroupMemberIndex ON GroupMembers (address)");
 
 					// Invites
 					stmt.execute("CREATE TABLE GroupInvites (group_id GroupID, inviter QortalAddress, invitee QortalAddress, "
 							+ "expires_when EpochMillis, reference Signature, "
-							+ "PRIMARY KEY (group_id, invitee), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, invitee), FOREIGN KEY (group_id) REFERENCES `Groups` (group_id) ON DELETE CASCADE)");
 					// For finding invites sent by inviter
 					stmt.execute("CREATE INDEX GroupInviteInviterIndex ON GroupInvites (inviter)");
 					// For finding invites by group
@@ -503,7 +504,7 @@ public class HSQLDBDatabaseUpdates {
 					// NULL expires_when means does not expire!
 					stmt.execute("CREATE TABLE GroupBans (group_id GroupID, offender QortalAddress, admin QortalAddress NOT NULL, "
 							+ "banned_when EpochMillis NOT NULL, reason GenericDescription NOT NULL, expires_when EpochMillis, reference Signature NOT NULL, "
-							+ "PRIMARY KEY (group_id, offender), FOREIGN KEY (group_id) REFERENCES Groups (group_id) ON DELETE CASCADE)");
+							+ "PRIMARY KEY (group_id, offender), FOREIGN KEY (group_id) REFERENCES `Groups` (group_id) ON DELETE CASCADE)");
 					// For expiry maintenance
 					stmt.execute("CREATE INDEX GroupBanExpiryIndex ON GroupBans (expires_when)");
 					break;
