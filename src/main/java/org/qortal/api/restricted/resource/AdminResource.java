@@ -459,7 +459,7 @@ public class AdminResource {
 
 			// Qortal: check reward-share's minting account is still allowed to mint
 			Account rewardShareMintingAccount = new Account(repository, rewardShareData.getMinter());
-			if (!rewardShareMintingAccount.canMint())
+			if (!rewardShareMintingAccount.canMint(false))
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.CANNOT_MINT);
 
 			MintingAccountData mintingAccountData = new MintingAccountData(mintingAccount.getPrivateKey(), mintingAccount.getPublicKey());

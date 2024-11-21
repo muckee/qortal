@@ -148,7 +148,7 @@ public class BlockMinter extends Thread {
 						}
 
 						Account mintingAccount = new Account(repository, rewardShareData.getMinter());
-						if (!mintingAccount.canMint()) {
+						if (!mintingAccount.canMint(true)) {
 							// Minting-account component of reward-share can no longer mint - disregard
 							madi.remove();
 							continue;

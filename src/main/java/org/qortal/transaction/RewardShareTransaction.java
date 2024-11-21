@@ -123,7 +123,7 @@ public class RewardShareTransaction extends Transaction {
 		final boolean isCancellingSharePercent = this.rewardShareTransactionData.getSharePercent() < 0;
 
 		// Creator themselves needs to be allowed to mint (unless cancelling)
-		if (!isCancellingSharePercent && !creator.canMint())
+		if (!isCancellingSharePercent && !creator.canMint(false))
 			return ValidationResult.NOT_MINTING_ACCOUNT;
 
 		// Qortal: special rules in play depending whether recipient is also minter

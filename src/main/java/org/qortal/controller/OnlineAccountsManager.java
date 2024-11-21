@@ -13,6 +13,7 @@ import org.qortal.crypto.MemoryPoW;
 import org.qortal.crypto.Qortal25519Extras;
 import org.qortal.data.account.MintingAccountData;
 import org.qortal.data.account.RewardShareData;
+import org.qortal.data.group.GroupMemberData;
 import org.qortal.data.network.OnlineAccountData;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
@@ -224,6 +225,12 @@ public class OnlineAccountsManager {
         Set<OnlineAccountData> onlineAccountsToAdd = new HashSet<>();
         Set<OnlineAccountData> onlineAccountsToRemove = new HashSet<>();
         try (final Repository repository = RepositoryManager.getRepository()) {
+            List<String> mintingGroupMemberAddresses
+                = repository.getGroupRepository()
+                    .getGroupMembers(BlockChain.getInstance().getMintingGroupId()).stream()
+                    .map(GroupMemberData::getMember)
+                    .collect(Collectors.toList());
+
             for (OnlineAccountData onlineAccountData : this.onlineAccountsImportQueue) {
                 if (isStopping)
                     return;
@@ -236,7 +243,7 @@ public class OnlineAccountsManager {
                     continue;
                 }
 
-                boolean isValid = this.isValidCurrentAccount(repository, onlineAccountData);
+                boolean isValid = this.isValidCurrentAccount(repository, mintingGroupMemberAddresses, onlineAccountData);
                 if (isValid)
                     onlineAccountsToAdd.add(onlineAccountData);
 
@@ -315,7 +322,7 @@ public class OnlineAccountsManager {
         return inplaceArray;
     }
 
-    private static boolean isValidCurrentAccount(Repository repository, OnlineAccountData onlineAccountData) throws DataException {
+    private static boolean isValidCurrentAccount(Repository repository, List<String> mintingGroupMemberAddresses, OnlineAccountData onlineAccountData) throws DataException {
         final Long now = NTP.getTime();
         if (now == null)
             return false;
@@ -350,9 +357,14 @@ public class OnlineAccountsManager {
             LOGGER.trace(() -> String.format("Rejecting unknown online reward-share public key %s", Base58.encode(rewardSharePublicKey)));
             return false;
         }
+        // reject account address that are not in the MINTER Group
+        else if( !mintingGroupMemberAddresses.contains(rewardShareData.getMinter())) {
+            LOGGER.trace(() -> String.format("Rejecting online reward-share that is not in MINTER Group, account %s", rewardShareData.getMinter()));
+            return false;
+        }
 
         Account mintingAccount = new Account(repository, rewardShareData.getMinter());
-        if (!mintingAccount.canMint()) {
+        if (!mintingAccount.canMint(true)) {  // group validation is a few lines above
             // Minting-account component of reward-share can no longer mint - disregard
             LOGGER.trace(() -> String.format("Rejecting online reward-share with non-minting account %s", mintingAccount.getAddress()));
             return false;
@@ -539,7 +551,7 @@ public class OnlineAccountsManager {
                     }
 
                     Account mintingAccount = new Account(repository, rewardShareData.getMinter());
-                    if (!mintingAccount.canMint()) {
+                    if (!mintingAccount.canMint(true)) {
                         // Minting-account component of reward-share can no longer mint - disregard
                         iterator.remove();
                         continue;

@@ -205,10 +205,11 @@ public class Account {
 	 * <li>account's address is a member of the minter group</li>
 	 * </ul>
 	 *
+	 * @param isGroupValidated true if this account has already been validated for MINTER Group membership
 	 * @return true if account can be considered "minting account"
 	 * @throws DataException
 	 */
-	public boolean canMint() throws DataException {
+	public boolean canMint(boolean isGroupValidated) throws DataException {
 		AccountData accountData = this.repository.getAccountRepository().getAccount(this.address);
 		NameRepository nameRepository = this.repository.getNameRepository();
 		GroupRepository groupRepository = this.repository.getGroupRepository();
@@ -251,9 +252,9 @@ public class Account {
 		if (blockchainHeight >= groupCheckHeight && blockchainHeight < removeNameCheckHeight) {
 			List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
 			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && !myName.isEmpty() && groupRepository.memberExists(groupIdToMint, myAddress);
+				return accountData.getBlocksMintedPenalty() == 0 && !myName.isEmpty() && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
 			} else {
-				return level >= levelToMint && !myName.isEmpty() && groupRepository.memberExists(groupIdToMint, myAddress);
+				return level >= levelToMint && !myName.isEmpty() && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
 			}
 		}
 
@@ -262,9 +263,9 @@ public class Account {
 		// Account's address is a member of the minter group
 		if (blockchainHeight >= removeNameCheckHeight) {
 			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && groupRepository.memberExists(groupIdToMint, myAddress);
+				return accountData.getBlocksMintedPenalty() == 0 && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
 			} else {
-				return level >= levelToMint && groupRepository.memberExists(groupIdToMint, myAddress);
+				return level >= levelToMint && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
 			}
 		}
 
