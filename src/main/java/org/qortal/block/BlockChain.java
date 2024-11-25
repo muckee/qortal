@@ -87,7 +87,8 @@ public class BlockChain {
 		enableRewardshareHeight,
 		onlyMintWithNameHeight,
 		removeOnlyMintWithNameHeight,
-		groupMemberCheckHeight
+		groupMemberCheckHeight,
+		fixBatchRewardHeight
 	}
 
 	// Custom transaction fees
@@ -655,6 +656,10 @@ public class BlockChain {
 
 	public int getGroupMemberCheckHeight() {
 		return this.featureTriggers.get(FeatureTrigger.groupMemberCheckHeight.name()).intValue();
+	}
+
+	public int getFixBatchRewardHeight() {
+		return this.featureTriggers.get(FeatureTrigger.fixBatchRewardHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp
