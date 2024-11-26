@@ -1518,7 +1518,7 @@ public class Block {
 			return false;
 
 		Account mintingAccount = new PublicKeyAccount(this.repository, rewardShareData.getMinterPublicKey());
-		return mintingAccount.canMint();
+		return mintingAccount.canMint(false);
 	}
 
 	/**
