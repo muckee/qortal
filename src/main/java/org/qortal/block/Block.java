@@ -145,6 +145,8 @@ public class Block {
 
 		private final Account recipientAccount;
 		private final AccountData recipientAccountData;
+		
+		final BlockChain blockChain = BlockChain.getInstance();
 
 		ExpandedAccount(Repository repository, RewardShareData rewardShareData) throws DataException {
 			this.rewardShareData = rewardShareData;
@@ -191,13 +193,12 @@ public class Block {
 			if (accountLevel <= 0)
 				return null; // level 0 isn't included in any share bins
 
-			if (blockHeight >= BlockChain.getInstance().getFixBatchRewardHeight()) {
+			if (blockHeight >= blockChain.getFixBatchRewardHeight()) {
 				if (!this.isMinterMember)
 					return null; // not member of minter group isn't included in any share bins
 			}
 
 			// Select the correct set of share bins based on block height
-			final BlockChain blockChain = BlockChain.getInstance();
 			final AccountLevelShareBin[] shareBinsByLevel = (blockHeight >= blockChain.getSharesByLevelV2Height()) ?
 					blockChain.getShareBinsByAccountLevelV2() : blockChain.getShareBinsByAccountLevelV1();
 
