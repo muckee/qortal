@@ -213,7 +213,7 @@ public class Settings {
 	public long recoveryModeTimeout = 9999999999999L;
 
 	/** Minimum peer version number required in order to sync with them */
-	private String minPeerVersion = "4.6.2";
+	private String minPeerVersion = "4.6.3";
 	/** Whether to allow connections with peers below minPeerVersion
 	 * If true, we won't sync with them but they can still sync with us, and will show in the peers list
 	 * If false, sync will be blocked both ways, and they will not appear in the peers list */
@@ -440,6 +440,14 @@ public class Settings {
 	 * The pause in between archiving blocks to allow other processes to execute.
 	 */
 	private long archivingPause = 3000;
+
+	private boolean balanceRecorderEnabled = false;
+
+	private int balanceRecorderPriority = 1;
+
+	private int balanceRecorderFrequency = 2*60*1000;
+
+	private int balanceRecorderCapacity = 1000;
 
 	// Domain mapping
 	public static class ThreadLimit {
@@ -1229,5 +1237,21 @@ public class Settings {
 
 	public long getArchivingPause() {
 		return archivingPause;
+	}
+
+	public int getBalanceRecorderPriority() {
+		return balanceRecorderPriority;
+	}
+
+	public int getBalanceRecorderFrequency() {
+		return balanceRecorderFrequency;
+	}
+
+	public int getBalanceRecorderCapacity() {
+		return balanceRecorderCapacity;
+	}
+
+	public boolean isBalanceRecorderEnabled() {
+		return balanceRecorderEnabled;
 	}
 }
