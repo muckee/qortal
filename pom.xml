@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.qortal</groupId>
 	<artifactId>qortal</artifactId>
-	<version>4.6.3</version>
+	<version>4.6.5</version>
 	<packaging>jar</packaging>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -16,7 +16,7 @@
 		<ciyam-at.version>1.4.2</ciyam-at.version>
 		<commons-net.version>3.8.0</commons-net.version>
 		<commons-text.version>1.12.0</commons-text.version>
-		<commons-io.version>2.17.0</commons-io.version>
+		<commons-io.version>2.18.0</commons-io.version>
 		<commons-compress.version>1.27.1</commons-compress.version>
 		<commons-lang3.version>3.17.0</commons-lang3.version>
 		<dagger.version>1.2.2</dagger.version>
@@ -28,7 +28,7 @@
 		<homoglyph.version>1.2.1</homoglyph.version>
 		<hsqldb.version>2.7.4</hsqldb.version>
 		<icu4j.version>76.1</icu4j.version>
-		<java-diff-utils.version>4.12</java-diff-utils.version>
+		<java-diff-utils.version>4.15</java-diff-utils.version>
 		<javax.servlet-api.version>4.0.1</javax.servlet-api.version>
 		<jaxb-runtime.version>2.3.9</jaxb-runtime.version>
 		<jersey.version>2.42</jersey.version>
