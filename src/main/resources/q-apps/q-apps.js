@@ -614,6 +614,7 @@ function getDefaultTimeout(action) {
         switch (action) {
             case "GET_USER_ACCOUNT":
             case "SAVE_FILE":
+            case "SIGN_TRANSACTION":
             case "DECRYPT_DATA":
                 // User may take a long time to accept/deny the popup
                 return 60 * 60 * 1000;
@@ -635,6 +636,11 @@ function getDefaultTimeout(action) {
                 // Chat messages rely on PoW computations, so allow extra time
                 return 60 * 1000;
 
+            case "CREATE_TRADE_BUY_ORDER":
+            case "CREATE_TRADE_SELL_ORDER":
+            case "CANCEL_TRADE_SELL_ORDER":
+            case "VOTE_ON_POLL":
+            case "CREATE_POLL":
             case "JOIN_GROUP":
             case "DEPLOY_AT":
             case "SEND_COIN":
@@ -649,7 +655,7 @@ function getDefaultTimeout(action) {
                 break;
         }
     }
-    return 10 * 1000;
+    return 30 * 1000;
 }
 
 /**
