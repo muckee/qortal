@@ -23,7 +23,7 @@ public class HSQLDBChatRepository implements ChatRepository {
 	public HSQLDBChatRepository(HSQLDBRepository repository) {
 		this.repository = repository;
 	}
-
+	
 	@Override
 	public List<ChatMessage> getMessagesMatchingCriteria(Long before, Long after, Integer txGroupId, byte[] referenceBytes,
 														 byte[] chatReferenceBytes, Boolean hasChatReference, List<String> involving, String senderAddress,
@@ -176,14 +176,14 @@ public class HSQLDBChatRepository implements ChatRepository {
 	}
 
 	@Override
-	public ActiveChats getActiveChats(String address, Encoding encoding) throws DataException {
-		List<GroupChat> groupChats = getActiveGroupChats(address, encoding);
-		List<DirectChat> directChats = getActiveDirectChats(address);
+	public ActiveChats getActiveChats(String address, Encoding encoding, Boolean hasChatReference) throws DataException {
+		List<GroupChat> groupChats = getActiveGroupChats(address, encoding, hasChatReference);
+		List<DirectChat> directChats = getActiveDirectChats(address, hasChatReference);
 
 		return new ActiveChats(groupChats, directChats);
 	}
-
-	private List<GroupChat> getActiveGroupChats(String address, Encoding encoding) throws DataException {
+	
+	private List<GroupChat> getActiveGroupChats(String address, Encoding encoding, Boolean hasChatReference) throws DataException {
 		// Find groups where address is a member and potential latest message details
 		String groupsSql = "SELECT group_id, group_name, latest_timestamp, sender, sender_name, signature, data "
 				+ "FROM GroupMembers "
@@ -194,11 +194,19 @@ public class HSQLDBChatRepository implements ChatRepository {
 					+ "JOIN Transactions USING (signature) "
 					+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
 					// NOTE: We need to qualify "Groups.group_id" here to avoid "General error" bug in HSQLDB v2.5.0
-					+ "WHERE tx_group_id = Groups.group_id AND type = " + TransactionType.CHAT.value + " "
-					+ "ORDER BY created_when DESC "
+					+ "WHERE tx_group_id = Groups.group_id AND type = " + TransactionType.CHAT.value + " ";
+
+					if (hasChatReference != null) {
+						if (hasChatReference) {
+							groupsSql += "AND chat_reference IS NOT NULL ";
+						} else {
+							groupsSql += "AND chat_reference IS NULL ";
+						}
+					}
+					groupsSql += "ORDER BY created_when DESC "
 					+ "LIMIT 1"
-				+ ") AS LatestMessages ON TRUE "
-				+ "WHERE address = ?";
+					+ ") AS LatestMessages ON TRUE "
+					+ "WHERE address = ?";
 
 		List<GroupChat> groupChats = new ArrayList<>();
 		try (ResultSet resultSet = this.repository.checkedExecute(groupsSql, address)) {
@@ -230,8 +238,16 @@ public class HSQLDBChatRepository implements ChatRepository {
 				+ "JOIN Transactions USING (signature) "
 				+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
 				+ "WHERE tx_group_id = 0 "
-				+ "AND recipient IS NULL "
-				+ "ORDER BY created_when DESC "
+				+ "AND recipient IS NULL ";
+
+				if (hasChatReference != null) {
+					if (hasChatReference) {
+						grouplessSql += "AND chat_reference IS NOT NULL ";
+					} else {
+						grouplessSql += "AND chat_reference IS NULL ";
+					}
+				}
+				grouplessSql += "ORDER BY created_when DESC "
 				+ "LIMIT 1";
 
 		try (ResultSet resultSet = this.repository.checkedExecute(grouplessSql)) {
@@ -259,7 +275,7 @@ public class HSQLDBChatRepository implements ChatRepository {
 		return groupChats;
 	}
 
-	private List<DirectChat> getActiveDirectChats(String address) throws DataException {
+	private List<DirectChat> getActiveDirectChats(String address, Boolean hasChatReference) throws DataException {
 		// Find chat messages involving address
 		String directSql = "SELECT other_address, name, latest_timestamp, sender, sender_name "
 				+ "FROM ("
@@ -275,11 +291,21 @@ public class HSQLDBChatRepository implements ChatRepository {
 					+ "NATURAL JOIN Transactions "
 					+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
 					+ "WHERE (sender = other_address AND recipient = ?) "
-					+ "OR (sender = ? AND recipient = other_address) "
-					+ "ORDER BY created_when DESC "
-					+ "LIMIT 1"
-				+ ") AS LatestMessages "
-				+ "LEFT OUTER JOIN Names ON owner = other_address";
+					+ "OR (sender = ? AND recipient = other_address) ";
+
+			    // Apply hasChatReference filter
+				if (hasChatReference != null) {
+					if (hasChatReference) {
+						directSql += "AND chat_reference IS NOT NULL ";
+					} else {
+						directSql += "AND chat_reference IS NULL ";
+					}
+				}
+			
+				directSql += "ORDER BY created_when DESC "
+						+ "LIMIT 1"
+						+ ") AS LatestMessages "
+						+ "LEFT OUTER JOIN Names ON owner = other_address";
 
 		Object[] bindParams = new Object[] { address, address, address, address };
 
