@@ -48,7 +48,7 @@ public enum Handshake {
 
 			String versionString = helloMessage.getVersionString();
 
-			Matcher matcher = peer.VERSION_PATTERN.matcher(versionString);
+			Matcher matcher = Peer.VERSION_PATTERN.matcher(versionString);
 			if (!matcher.lookingAt()) {
 				LOGGER.debug(() -> String.format("Peer %s sent invalid HELLO version string '%s'", peer, versionString));
 				return null;
@@ -71,7 +71,7 @@ public enum Handshake {
 
 			// Ensure the peer is running at least the version specified in MIN_PEER_VERSION
 			if (!peer.isAtLeastVersion(MIN_PEER_VERSION)) {
-				LOGGER.debug(String.format("Ignoring peer %s because it is on an old version (%s)", peer, versionString));
+				LOGGER.debug("Ignoring peer {} because it is on an old version ({})", peer, versionString);
 				return null;
 			}
 
@@ -79,7 +79,7 @@ public enum Handshake {
 				// Ensure the peer is running at least the minimum version allowed for connections
 				final String minPeerVersion = Settings.getInstance().getMinPeerVersion();
 				if (!peer.isAtLeastVersion(minPeerVersion)) {
-					LOGGER.debug(String.format("Ignoring peer %s because it is on an old version (%s)", peer, versionString));
+					LOGGER.debug("Ignoring peer {} because it is on an old version ({})", peer, versionString);
 					return null;
 				}
 			}
@@ -106,7 +106,7 @@ public enum Handshake {
 			byte[] peersPublicKey = challengeMessage.getPublicKey();
 			byte[] peersChallenge = challengeMessage.getChallenge();
 
-			// If public key matches our public key then we've connected to self
+			// If public key matches our public key, then we've connected to self
 			byte[] ourPublicKey = Network.getInstance().getOurPublicKey();
 			if (Arrays.equals(ourPublicKey, peersPublicKey)) {
 				// If outgoing connection then record destination as self so we don't try again
@@ -121,11 +121,11 @@ public enum Handshake {
 						peer.disconnect("failed to send CHALLENGE to self");
 
 					/*
-					 * We return CHALLENGE here to prevent us from closing connection. Closing
-					 * connection currently preempts remote end from reading any pending messages,
+					 * We return the CHALLENGE here to prevent us from closing the connection.
+					 * Closing the connection currently preempts the remote end from reading any pending messages,
 					 * specifically the CHALLENGE message we just sent above. When our 'remote'
 					 * outbound counterpart reads our message, they will close both connections.
-					 * Failing that, our connection will timeout or a future handshake error will
+					 * Failing that, our connection will time out or a future handshake error will
 					 * occur.
 					 */
 					return CHALLENGE;
@@ -135,7 +135,7 @@ public enum Handshake {
 			// Are we already connected to this peer?
 			Peer existingPeer = Network.getInstance().getHandshakedPeerWithPublicKey(peersPublicKey);
 			if (existingPeer != null) {
-				LOGGER.info(() -> String.format("We already have a connection with peer %s - discarding", peer));
+				LOGGER.debug(() -> String.format("We already have a connection with peer %s - discarding", peer));
 				// Handshake failure - caller will deal with disconnect
 				return null;
 			}
@@ -148,7 +148,7 @@ public enum Handshake {
 
 		@Override
 		public void action(Peer peer) {
-			// Send challenge
+			// Send a challenge
 			byte[] publicKey = Network.getInstance().getOurPublicKey();
 			byte[] challenge = peer.getOurChallenge();
 
@@ -254,16 +254,17 @@ public enum Handshake {
 
 	private static final Logger LOGGER = LogManager.getLogger(Handshake.class);
 
-	/** Maximum allowed difference between peer's reported timestamp and when they connected, in milliseconds. */
+	/** The Maximum allowed difference between peer's reported timestamp and when they connected, in milliseconds. */
 	private static final long MAX_TIMESTAMP_DELTA = 30 * 1000L; // ms
 
 	private static final long PEER_VERSION_131 = 0x0100030001L;
 
 	/** Minimum peer version that we are allowed to communicate with */
-	private static final String MIN_PEER_VERSION = "4.1.1";
+	private static final String MIN_PEER_VERSION = "4.6.5";
 
 	private static final int POW_BUFFER_SIZE_PRE_131 = 8 * 1024 * 1024; // bytes
 	private static final int POW_DIFFICULTY_PRE_131 = 8; // leading zero bits
+
 	// Can always be made harder in the future...
 	private static final int POW_BUFFER_SIZE_POST_131 = 2 * 1024 * 1024; // bytes
 	private static final int POW_DIFFICULTY_POST_131 = 2; // leading zero bits
@@ -275,12 +276,11 @@ public enum Handshake {
 
 	public final MessageType expectedMessageType;
 
-	private Handshake(MessageType expectedMessageType) {
+	Handshake(MessageType expectedMessageType) {
 		this.expectedMessageType = expectedMessageType;
 	}
 
 	public abstract Handshake onMessage(Peer peer, Message message);
 
 	public abstract void action(Peer peer);
-
 }
