@@ -80,7 +80,7 @@ public class Network {
             "node.qortal.ru", "node2.qortal.ru", "node3.qortal.ru", "node.qortal.uk", "node22.qortal.org",
             "cinfu1.crowetic.com", "node.cwd.systems", "bootstrap.cwd.systems", "node1.qortalnodes.live",
             "node2.qortalnodes.live", "node3.qortalnodes.live", "node4.qortalnodes.live", "node5.qortalnodes.live",
-            "node6.qortalnodes.live", "node7.qortalnodes.live", "node8.qortalnodes.live"
+            "node.qortalnodes.live", "qortex.live",
     };
 
     private static final long NETWORK_EPC_KEEPALIVE = 5L; // seconds
@@ -149,7 +149,7 @@ public class Network {
 
     private final Lock mergePeersLock = new ReentrantLock();
 
-    private List<String> ourExternalIpAddressHistory = new ArrayList<>();
+    private final List<String> ourExternalIpAddressHistory = new ArrayList<>();
     private String ourExternalIpAddress = null;
     private int ourExternalPort = Settings.getInstance().getListenPort();
 
@@ -167,7 +167,7 @@ public class Network {
         ExecutorService networkExecutor = new ThreadPoolExecutor(2,
                 Settings.getInstance().getMaxNetworkThreadPoolSize(),
                 NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,
-                new SynchronousQueue<Runnable>(),
+                new SynchronousQueue<>(),
                 new NamedThreadFactory("Network-EPC", Settings.getInstance().getNetworkThreadPriority()));
         networkEPC = new NetworkProcessor(networkExecutor);
     }
@@ -314,7 +314,7 @@ public class Network {
 
     public List<Peer> getImmutableConnectedDataPeers() {
         return this.getImmutableConnectedPeers().stream()
-                .filter(p -> p.isDataPeer())
+                .filter(Peer::isDataPeer)
                 .collect(Collectors.toList());
     }
 
@@ -346,7 +346,7 @@ public class Network {
     public boolean requestDataFromPeer(String peerAddressString, byte[] signature) {
         if (peerAddressString != null) {
             PeerAddress peerAddress = PeerAddress.fromString(peerAddressString);
-            PeerData peerData = null;
+            PeerData peerData;
 
             // Reuse an existing PeerData instance if it's already in the known peers list
             synchronized (this.allKnownPeers) {
@@ -370,9 +370,9 @@ public class Network {
 
             // Check if we're already connected to and handshaked with this peer
             Peer connectedPeer = this.getImmutableConnectedPeers().stream()
-                        .filter(p -> p.getPeerData().getAddress().equals(peerAddress))
-                        .findFirst()
-                        .orElse(null);
+                    .filter(p -> p.getPeerData().getAddress().equals(peerAddress))
+                    .findFirst()
+                    .orElse(null);
 
             boolean isConnected = (connectedPeer != null);
 
@@ -710,7 +710,7 @@ public class Network {
         return true;
     }
 
-    private Peer getConnectablePeer(final Long now) throws InterruptedException {
+    private Peer getConnectablePeer(final Long now) {
         // We can't block here so use tryRepository(). We don't NEED to connect a new peer.
         try (Repository repository = RepositoryManager.tryRepository()) {
             if (repository == null) {
@@ -807,7 +807,7 @@ public class Network {
         // Find peers that have reached their maximum connection age, and disconnect them
         List<Peer> peersToDisconnect = this.getImmutableConnectedPeers().stream()
                 .filter(peer -> !peer.isSyncInProgress())
-                .filter(peer -> peer.hasReachedMaxConnectionAge())
+                .filter(Peer::hasReachedMaxConnectionAge)
                 .collect(Collectors.toList());
 
         if (peersToDisconnect != null && !peersToDisconnect.isEmpty()) {
@@ -996,9 +996,9 @@ public class Network {
         }
 
         // Add to per-message thread count (first initializing to 0 if not already present)
-        threadsPerMessageType.computeIfAbsent(message.getType(), key -> 0);
+        threadsPerMessageType.putIfAbsent(message.getType(), 0);
         threadsPerMessageType.computeIfPresent(message.getType(), (key, value) -> value + 1);
-        
+
         // Add to total thread count
         synchronized (this) {
             totalThreadCount++;
@@ -1037,7 +1037,7 @@ public class Network {
         }
 
         // Remove from per-message thread count (first initializing to 0 if not already present)
-        threadsPerMessageType.computeIfAbsent(message.getType(), key -> 0);
+        threadsPerMessageType.putIfAbsent(message.getType(), 0);
         threadsPerMessageType.computeIfPresent(message.getType(), (key, value) -> value - 1);
 
         // Remove from total thread count
@@ -1135,7 +1135,7 @@ public class Network {
         Peer existingPeer = getHandshakedPeerWithPublicKey(peer.getPeersPublicKey());
         // NOTE: actual object reference compare, not Peer.equals()
         if (existingPeer != peer) {
-            LOGGER.info("[{}] We already have a connection with peer {} - discarding",
+            LOGGER.debug("[{}] We already have a connection with peer {} - discarding",
                     peer.getPeerConnectionId(), peer);
             peer.disconnect("existing connection");
             return;
@@ -1216,29 +1216,7 @@ public class Network {
      * Returns PEERS message made from peers we've connected to recently, and this node's details
      */
     public Message buildPeersMessage(Peer peer) {
-        List<PeerData> knownPeers = this.getAllKnownPeers();
-
-        // Filter out peers that we've not connected to ever or within X milliseconds
-        final long connectionThreshold = NTP.getTime() - RECENT_CONNECTION_THRESHOLD;
-        Predicate<PeerData> notRecentlyConnected = peerData -> {
-            final Long lastAttempted = peerData.getLastAttempted();
-            final Long lastConnected = peerData.getLastConnected();
-
-            if (lastAttempted == null || lastConnected == null) {
-                return true;
-            }
-
-            if (lastConnected < lastAttempted) {
-                return true;
-            }
-
-            if (lastConnected < connectionThreshold) {
-                return true;
-            }
-
-            return false;
-        };
-        knownPeers.removeIf(notRecentlyConnected);
+        final var knownPeers = getPeerData();
 
         List<PeerAddress> peerAddresses = new ArrayList<>();
 
@@ -1260,6 +1238,29 @@ public class Network {
 
         // New format PEERS_V2 message that supports hostnames, IPv6 and ports
         return new PeersV2Message(peerAddresses);
+    }
+
+    private List<PeerData> getPeerData() {
+        List<PeerData> knownPeers = this.getAllKnownPeers();
+
+        // Filter out peers that we've not connected to ever or within X milliseconds
+        final long connectionThreshold = NTP.getTime() - RECENT_CONNECTION_THRESHOLD;
+        Predicate<PeerData> notRecentlyConnected = peerData -> {
+            final Long lastAttempted = peerData.getLastAttempted();
+            final Long lastConnected = peerData.getLastConnected();
+
+            if (lastAttempted == null || lastConnected == null) {
+                return true;
+            }
+
+            if (lastConnected < lastAttempted) {
+                return true;
+            }
+
+            return lastConnected < connectionThreshold;
+        };
+        knownPeers.removeIf(notRecentlyConnected);
+        return knownPeers;
     }
 
     /** Builds either (legacy) HeightV2Message or (newer) BlockSummariesV2Message, depending on peer version.
@@ -1328,7 +1329,7 @@ public class Network {
             return;
         }
         String host = parts[0];
-        
+
         try {
             InetAddress addr = InetAddress.getByName(host);
             if (addr.isAnyLocalAddress() || addr.isSiteLocalAddress()) {
@@ -1369,12 +1370,12 @@ public class Network {
         for (int i = size-1; i >= 0; i--) {
             String reading = ipAddressHistory.get(i);
             if (lastReading != null) {
-                 if (Objects.equals(reading, lastReading)) {
+                if (Objects.equals(reading, lastReading)) {
                     consecutiveReadings++;
-                 }
-                 else {
-                     consecutiveReadings = 0;
-                 }
+                }
+                else {
+                    consecutiveReadings = 0;
+                }
             }
             lastReading = reading;
         }
@@ -1515,12 +1516,8 @@ public class Network {
                         return true;
                     }
 
-                    if (peerData.getLastConnected() == null
-                            || peerData.getLastConnected() > now - OLD_PEER_CONNECTION_PERIOD) {
-                        return true;
-                    }
-
-                    return false;
+                    return peerData.getLastConnected() == null
+                            || peerData.getLastConnected() > now - OLD_PEER_CONNECTION_PERIOD;
                 };
 
                 // Disregard peers that are NOT 'old'
@@ -1655,7 +1652,7 @@ public class Network {
 
         // Stop processing threads
         try {
-            if (!this.networkEPC.shutdown(5000)) {
+            if (!this.networkEPC.shutdown(10000)) {
                 LOGGER.warn("Network threads failed to terminate");
             }
         } catch (InterruptedException e) {
@@ -1667,5 +1664,4 @@ public class Network {
             peer.shutdown();
         }
     }
-
 }

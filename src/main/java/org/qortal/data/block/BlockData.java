@@ -1,8 +1,11 @@
 package org.qortal.data.block;
 
 import com.google.common.primitives.Bytes;
+import org.qortal.account.Account;
 import org.qortal.block.BlockChain;
-import org.qortal.crypto.Crypto;
+import org.qortal.repository.DataException;
+import org.qortal.repository.Repository;
+import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.utils.NTP;
 
@@ -224,7 +227,7 @@ public class BlockData implements Serializable {
 		}
 		return 0;
 	}
-
+	
 	public boolean isTrimmed() {
 		long onlineAccountSignaturesTrimmedTimestamp = NTP.getTime() - BlockChain.getInstance().getOnlineAccountSignaturesMaxLifetime();
 		long currentTrimmableTimestamp = NTP.getTime() - Settings.getInstance().getAtStatesMaxLifetime();
@@ -232,11 +235,31 @@ public class BlockData implements Serializable {
 		return blockTimestamp < onlineAccountSignaturesTrimmedTimestamp && blockTimestamp < currentTrimmableTimestamp;
 	}
 
+	public String getMinterAddressFromPublicKey() {
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			return Account.getRewardShareMintingAddress(repository, this.minterPublicKey);
+		} catch (DataException e) {
+			return "Unknown";
+		}
+	}
+
+	public int getMinterLevelFromPublicKey() {
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			return Account.getRewardShareEffectiveMintingLevel(repository, this.minterPublicKey);
+		} catch (DataException e) {
+			return 0;
+		}
+	}
+	
 	// JAXB special
 
 	@XmlElement(name = "minterAddress")
 	protected String getMinterAddress() {
-		return Crypto.toAddress(this.minterPublicKey);
+		return getMinterAddressFromPublicKey();
 	}
 
+	@XmlElement(name = "minterLevel")
+	protected int getMinterLevel() {
+		return getMinterLevelFromPublicKey();
+	}
 }
