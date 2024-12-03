@@ -349,8 +349,26 @@ public class Account {
 	}
 
 	/**
-	 * Returns 'effective' minting level, or zero if reward-share does not exist.
+	 * Returns reward-share minting address, or unknown if reward-share does not exist.
 	 * 
+	 * @param repository
+	 * @param rewardSharePublicKey
+	 * @return address or unknown
+	 * @throws DataException
+	 */
+	public static String getRewardShareMintingAddress(Repository repository, byte[] rewardSharePublicKey) throws DataException {
+		// Find actual minter address
+		RewardShareData rewardShareData = repository.getAccountRepository().getRewardShare(rewardSharePublicKey);
+
+		if (rewardShareData == null)
+			return "Unknown";
+
+		return rewardShareData.getMinter();
+	}
+
+	/**
+	 * Returns 'effective' minting level, or zero if reward-share does not exist.
+	 *
 	 * @param repository
 	 * @param rewardSharePublicKey
 	 * @return 0+
