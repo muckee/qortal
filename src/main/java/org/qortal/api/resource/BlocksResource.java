@@ -542,7 +542,6 @@ public class BlocksResource {
 				}
 			}
 
-			String minterAddress = Account.getRewardShareMintingAddress(repository, blockData.getMinterPublicKey());
 			int minterLevel = Account.getRewardShareEffectiveMintingLevel(repository, blockData.getMinterPublicKey());
 			if (minterLevel == 0)
 				// This may be unavailable when requesting a trimmed block
@@ -555,7 +554,6 @@ public class BlocksResource {
 
 			BlockMintingInfo blockMintingInfo = new BlockMintingInfo();
 			blockMintingInfo.minterPublicKey = blockData.getMinterPublicKey();
-			blockMintingInfo.minterAddress = minterAddress;
 			blockMintingInfo.minterLevel = minterLevel;
 			blockMintingInfo.onlineAccountsCount = blockData.getOnlineAccountsCount();
 			blockMintingInfo.maxDistance = new BigDecimal(block.MAX_DISTANCE);
@@ -889,4 +887,5 @@ public class BlocksResource {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
 	}
+
 }
