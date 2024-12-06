@@ -67,7 +67,7 @@ public class Settings {
 	private Integer apiPort;
 	private boolean apiWhitelistEnabled = true;
 	private String[] apiWhitelist = new String[] {
-			"::1", "127.0.0.1"
+		"::1", "127.0.0.1"
 	};
 
 	/** Legacy API key (deprecated Nov 2021). Use /admin/apikey/generate API endpoint instead */
@@ -213,7 +213,7 @@ public class Settings {
 	public long recoveryModeTimeout = 9999999999999L;
 
 	/** Minimum peer version number required in order to sync with them */
-	private String minPeerVersion = "4.6.5";
+	private String minPeerVersion = "4.6.3";
 	/** Whether to allow connections with peers below minPeerVersion
 	 * If true, we won't sync with them but they can still sync with us, and will show in the peers list
 	 * If false, sync will be blocked both ways, and they will not appear in the peers list */
@@ -222,7 +222,7 @@ public class Settings {
 	/** Minimum time (in seconds) that we should attempt to remain connected to a peer for */
 	private int minPeerConnectionTime = 2 * 60 * 60; // seconds
 	/** Maximum time (in seconds) that we should attempt to remain connected to a peer for */
-	private int maxPeerConnectionTime = 6 * 60 * 60; // seconds
+	private int maxPeerConnectionTime = 4 * 60 * 60; // seconds
 	/** Maximum time (in seconds) that a peer should remain connected when requesting QDN data */
 	private int maxDataPeerConnectionTime = 30 * 60; // seconds
 
@@ -272,19 +272,16 @@ public class Settings {
 
 	// Bootstrap sources
 	private String[] bootstrapHosts = new String[] {
-			"http://bootstrap.qortal.org",
-			"http://bootstrap2.qortal.org",
-			"http://bootstrap3.qortal.org",
-			"http://bootstrap4.qortal.org"
+		"http://bootstrap.qortal.org",
+		"http://bootstrap2.qortal.org",
+		"http://bootstrap3.qortal.org",
+		"http://bootstrap4.qortal.org"
 	};
 
 	// Auto-update sources
 	private String[] autoUpdateRepos = new String[] {
-			"https://github.com/Qortal/qortal/raw/%s/qortal.update",
-			"https://raw.githubusercontent.com@151.101.16.133/Qortal/qortal/%s/qortal.update",
-			"https://qortal.link/Auto-Update/%s/qortal.update",
-			"https://qortal.name/Auto-Update/%s/qortal.update",
-			"https://update.qortal.org/Auto-Update/%s/qortal.update"
+		"https://github.com/Qortal/qortal/raw/%s/qortal.update",
+		"https://raw.githubusercontent.com@151.101.16.133/Qortal/qortal/%s/qortal.update"
 	};
 
 	// Lists
@@ -292,36 +289,36 @@ public class Settings {
 
 	/** Array of NTP server hostnames. */
 	private String[] ntpServers = new String[] {
-			"pool.ntp.org",
-			"0.pool.ntp.org",
-			"1.pool.ntp.org",
-			"2.pool.ntp.org",
-			"3.pool.ntp.org",
-			"asia.pool.ntp.org",
-			"0.asia.pool.ntp.org",
-			"1.asia.pool.ntp.org",
-			"2.asia.pool.ntp.org",
-			"3.asia.pool.ntp.org",
-			"europe.pool.ntp.org",
-			"0.europe.pool.ntp.org",
-			"1.europe.pool.ntp.org",
-			"2.europe.pool.ntp.org",
-			"3.europe.pool.ntp.org",
-			"north-america.pool.ntp.org",
-			"0.north-america.pool.ntp.org",
-			"1.north-america.pool.ntp.org",
-			"2.north-america.pool.ntp.org",
-			"3.north-america.pool.ntp.org",
-			"oceania.pool.ntp.org",
-			"0.oceania.pool.ntp.org",
-			"1.oceania.pool.ntp.org",
-			"2.oceania.pool.ntp.org",
-			"3.oceania.pool.ntp.org",
-			"south-america.pool.ntp.org",
-			"0.south-america.pool.ntp.org",
-			"1.south-america.pool.ntp.org",
-			"2.south-america.pool.ntp.org",
-			"3.south-america.pool.ntp.org"
+		"pool.ntp.org",
+		"0.pool.ntp.org",
+		"1.pool.ntp.org",
+		"2.pool.ntp.org",
+		"3.pool.ntp.org",
+		"asia.pool.ntp.org",
+		"0.asia.pool.ntp.org",
+		"1.asia.pool.ntp.org",
+		"2.asia.pool.ntp.org",
+		"3.asia.pool.ntp.org",
+		"europe.pool.ntp.org",
+		"0.europe.pool.ntp.org",
+		"1.europe.pool.ntp.org",
+		"2.europe.pool.ntp.org",
+		"3.europe.pool.ntp.org",
+		"north-america.pool.ntp.org",
+		"0.north-america.pool.ntp.org",
+		"1.north-america.pool.ntp.org",
+		"2.north-america.pool.ntp.org",
+		"3.north-america.pool.ntp.org",
+		"oceania.pool.ntp.org",
+		"0.oceania.pool.ntp.org",
+		"1.oceania.pool.ntp.org",
+		"2.oceania.pool.ntp.org",
+		"3.oceania.pool.ntp.org",
+		"south-america.pool.ntp.org",
+		"0.south-america.pool.ntp.org",
+		"1.south-america.pool.ntp.org",
+		"2.south-america.pool.ntp.org",
+		"3.south-america.pool.ntp.org"
 	};
 	/** Additional offset added to values returned by NTP.getTime() */
 	private Long testNtpOffset = null;
@@ -411,7 +408,7 @@ public class Settings {
 	 * The thread priority (1 is lowest, 10 is highest) of the threads used for network peer connections. This is the
 	 * main thread connecting to a peer in the network.
 	 */
-	private int networkThreadPriority = 7;
+    private int networkThreadPriority = 7;
 
 	/**
 	 * The Handshake Thread Priority
@@ -557,7 +554,7 @@ public class Settings {
 		try {
 			// Create JAXB context aware of Settings
 			jc = JAXBContextFactory.createContext(new Class[] {
-					Settings.class
+				Settings.class
 			}, null);
 
 			// Create unmarshaller
