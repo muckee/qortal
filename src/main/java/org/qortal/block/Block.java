@@ -145,7 +145,7 @@ public class Block {
 
 		private final Account recipientAccount;
 		private final AccountData recipientAccountData;
-		
+
 		final BlockChain blockChain = BlockChain.getInstance();
 
 		ExpandedAccount(Repository repository, RewardShareData rewardShareData) throws DataException {
@@ -407,6 +407,21 @@ public class Block {
 				onlineAccounts.removeIf(a -> {
 					try {
 						return Account.getRewardShareEffectiveMintingLevel(repository, a.getPublicKey()) == 0;
+					} catch (DataException e) {
+						// Something went wrong, so remove the account
+						return true;
+					}
+				});
+			}
+
+			// After feature trigger, remove any online accounts that are not minter group member
+			if (height >= BlockChain.getInstance().getGroupMemberCheckHeight()) {
+				onlineAccounts.removeIf(a -> {
+					try {
+						int groupId = BlockChain.getInstance().getMintingGroupId();
+						String address = Account.getRewardShareMintingAddress(repository, a.getPublicKey());
+						boolean isMinterGroupMember = repository.getGroupRepository().memberExists(groupId, address);
+						return !isMinterGroupMember;
 					} catch (DataException e) {
 						// Something went wrong, so remove the account
 						return true;
@@ -721,19 +736,19 @@ public class Block {
 		List<ExpandedAccount> expandedAccounts = new ArrayList<>();
 
 		for (RewardShareData rewardShare : this.cachedOnlineRewardShares) {
-			if (this.getBlockData().getHeight() < BlockChain.getInstance().getFixBatchRewardHeight()) {
+			int groupId = BlockChain.getInstance().getMintingGroupId();
+			String address = rewardShare.getMinter();
+			boolean isMinterGroupMember = repository.getGroupRepository().memberExists(groupId, address);
+
+			if (this.getBlockData().getHeight() < BlockChain.getInstance().getFixBatchRewardHeight())
 				expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
-			}
-			if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight()) {
-				boolean isMinterGroupMember = repository.getGroupRepository().memberExists(BlockChain.getInstance().getMintingGroupId(), rewardShare.getMinter());
-				if (isMinterGroupMember) {
-					expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
-				}
-			}
+
+			if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight() && isMinterGroupMember)
+				expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
 		}
 
-
 		this.cachedExpandedAccounts = expandedAccounts;
+		LOGGER.trace(() -> String.format("Online reward-shares after expanded accounts %s", this.cachedOnlineRewardShares));
 
 		return this.cachedExpandedAccounts;
 	}
@@ -1143,8 +1158,17 @@ public class Block {
 		if (this.getBlockData().getHeight() >= BlockChain.getInstance().getOnlineAccountMinterLevelValidationHeight()) {
 			List<ExpandedAccount> expandedAccounts = this.getExpandedAccounts();
 			for (ExpandedAccount account : expandedAccounts) {
+				int groupId = BlockChain.getInstance().getMintingGroupId();
+				String address = account.getMintingAccount().getAddress();
+				boolean isMinterGroupMember = repository.getGroupRepository().memberExists(groupId, address);
+
 				if (account.getMintingAccount().getEffectiveMintingLevel() == 0)
 					return ValidationResult.ONLINE_ACCOUNTS_INVALID;
+
+				if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight()) {
+					if (!isMinterGroupMember)
+						return ValidationResult.ONLINE_ACCOUNTS_INVALID;
+				}
 			}
 		}
 
@@ -1273,6 +1297,7 @@ public class Block {
 
 		// Online Accounts
 		ValidationResult onlineAccountsResult = this.areOnlineAccountsValid();
+		LOGGER.trace("Accounts valid = {}", onlineAccountsResult);
 		if (onlineAccountsResult != ValidationResult.OK)
 			return onlineAccountsResult;
 
@@ -1361,7 +1386,7 @@ public class Block {
 				// Check transaction can even be processed
 				validationResult = transaction.isProcessable();
 				if (validationResult != Transaction.ValidationResult.OK) {
-					LOGGER.info(String.format("Error during transaction validation, tx %s: %s", Base58.encode(transactionData.getSignature()), validationResult.name()));
+					LOGGER.debug(String.format("Error during transaction validation, tx %s: %s", Base58.encode(transactionData.getSignature()), validationResult.name()));
 					return ValidationResult.TRANSACTION_INVALID;
 				}
 
@@ -1562,6 +1587,7 @@ public class Block {
 		this.blockData.setHeight(blockchainHeight + 1);
 
 		LOGGER.trace(() -> String.format("Processing block %d", this.blockData.getHeight()));
+		LOGGER.trace(() -> String.format("Online Reward Shares in process %s", this.cachedOnlineRewardShares));
 
 		if (this.blockData.getHeight() > 1) {
 
@@ -2280,7 +2306,6 @@ public class Block {
 		// Select the correct set of share bins based on block height
 		List<AccountLevelShareBin> accountLevelShareBinsForBlock = (this.blockData.getHeight() >= BlockChain.getInstance().getSharesByLevelV2Height()) ?
 				BlockChain.getInstance().getAccountLevelShareBinsV2() : BlockChain.getInstance().getAccountLevelShareBinsV1();
-
 		// Determine reward candidates based on account level
 		// This needs a deep copy, so the shares can be modified when tiers aren't activated yet
 		List<AccountLevelShareBin> accountLevelShareBins = new ArrayList<>();
@@ -2570,9 +2595,11 @@ public class Block {
 				return;
 
 			int minterLevel = Account.getRewardShareEffectiveMintingLevel(this.repository, this.getMinter().getPublicKey());
+			String minterAddress = Account.getRewardShareMintingAddress(this.repository, this.getMinter().getPublicKey());
 
 			LOGGER.debug(String.format("======= BLOCK %d (%.8s) =======", this.getBlockData().getHeight(), Base58.encode(this.getSignature())));
 			LOGGER.debug(String.format("Timestamp: %d", this.getBlockData().getTimestamp()));
+			LOGGER.debug(String.format("Minter address: %s", minterAddress));
 			LOGGER.debug(String.format("Minter level: %d", minterLevel));
 			LOGGER.debug(String.format("Online accounts: %d", this.getBlockData().getOnlineAccountsCount()));
 			LOGGER.debug(String.format("AT count: %d", this.getBlockData().getATCount()));

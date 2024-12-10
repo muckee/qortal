@@ -77,7 +77,9 @@ public class ActiveChatsWebSocket extends ApiWebSocket {
 		}
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			ActiveChats activeChats = repository.getChatRepository().getActiveChats(ourAddress, getTargetEncoding(session));
+			Boolean hasChatReference = getHasChatReference(session);
+
+			ActiveChats activeChats = repository.getChatRepository().getActiveChats(ourAddress, getTargetEncoding(session), hasChatReference);
 
 			StringWriter stringWriter = new StringWriter();
 
@@ -101,6 +103,22 @@ public class ActiveChatsWebSocket extends ApiWebSocket {
 		List<String> encodingList = queryParams.get("encoding");
 		String encoding = (encodingList != null && encodingList.size() == 1) ? encodingList.get(0) : "BASE58";
 		return Encoding.valueOf(encoding);
+	}
+
+	private Boolean getHasChatReference(Session session) {
+		Map<String, List<String>> queryParams = session.getUpgradeRequest().getParameterMap();
+		List<String> hasChatReferenceList = queryParams.get("haschatreference");
+	
+		// Return null if not specified
+		if (hasChatReferenceList != null && hasChatReferenceList.size() == 1) {
+			String value = hasChatReferenceList.get(0).toLowerCase();
+			if (value.equals("true")) {
+				return true;
+			} else if (value.equals("false")) {
+				return false;
+			}
+		}
+		return null; // Ignored if not present
 	}
 
 }
