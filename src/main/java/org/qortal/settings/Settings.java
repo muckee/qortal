@@ -444,13 +444,55 @@ public class Settings {
 	 */
 	private long archivingPause = 3000;
 
+	/**
+	 * Enable Balance Recorder?
+	 *
+	 * True for balance recording, otherwise false.
+	 */
 	private boolean balanceRecorderEnabled = false;
 
+	/**
+	 * Balance Recorder Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the balance recorder thread, if enabled.
+	 */
 	private int balanceRecorderPriority = 1;
 
-	private int balanceRecorderFrequency = 2*60*1000;
+	/**
+	 * Balance Recorder Frequency
+	 *
+	 * How often the balances will be recorded, if enabled, measured in minutes.
+	 */
+	private int balanceRecorderFrequency = 20;
 
+	/**
+	 * Balance Recorder Capacity
+	 *
+	 * The number of balance recorder ranges will be held in memory.
+	 */
 	private int balanceRecorderCapacity = 1000;
+
+	/**
+	 * Minimum Balance Recording
+	 *
+	 * The minimum recored balance change in Qortoshis (1/100000000 QORT)
+	 */
+    private long minimumBalanceRecording = 100000000;
+
+	/**
+	 * Top Balance Logging Limit
+	 *
+	 * When logging the number limit of top balance changes to show in the logs for any given block range.
+	 */
+	private long topBalanceLoggingLimit = 100;
+
+	/**
+	 * Balance Recorder Rollback Allowance
+	 *
+	 * If the balance recorder is enabled, it must protect its prior balances by this number of blocks in case of
+	 * a blockchain rollback and reorganization.
+	 */
+	private int balanceRecorderRollbackAllowance = 100;
 
 	// Domain mapping
 	public static class ThreadLimit {
@@ -1256,5 +1298,17 @@ public class Settings {
 
 	public boolean isBalanceRecorderEnabled() {
 		return balanceRecorderEnabled;
+	}
+
+	public long getMinimumBalanceRecording() {
+		return minimumBalanceRecording;
+	}
+
+	public long getTopBalanceLoggingLimit() {
+		return topBalanceLoggingLimit;
+	}
+
+	public int getBalanceRecorderRollbackAllowance() {
+		return balanceRecorderRollbackAllowance;
 	}
 }

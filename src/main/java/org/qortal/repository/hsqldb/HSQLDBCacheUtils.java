@@ -7,11 +7,16 @@ import org.qortal.arbitrary.misc.Category;
 import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
 import org.qortal.data.account.AccountBalanceData;
+import org.qortal.data.account.AddressAmountData;
+import org.qortal.data.account.BlockHeightRange;
+import org.qortal.data.account.BlockHeightRangeAddressAmounts;
 import org.qortal.data.arbitrary.ArbitraryResourceCache;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
 import org.qortal.repository.DataException;
+import org.qortal.settings.Settings;
+import org.qortal.utils.BalanceRecorderUtils;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -28,6 +33,7 @@ import java.util.Optional;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -389,14 +395,15 @@ public class HSQLDBCacheUtils {
     /**
      * Start Recording Balances
      *
-     * @param queue             the queue to add to, remove oldest data if necssary
-     * @param repository        the db repsoitory
+     * @param balancesByHeight height -> account balances
+     * @param balanceDynamics every balance dynamic
      * @param priorityRequested the requested thread priority
-     * @param frequency         the recording frequencies, in minutes
+     * @param frequency the recording frequencies, in minutes
+     * @param capacity the maximum size of balanceDynamics
      */
     public static void startRecordingBalances(
             final ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight,
-            final ConcurrentHashMap<String, List<AccountBalanceData>> balancesByAddress,
+            CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> balanceDynamics,
             int priorityRequested,
             int frequency,
             int capacity) {
@@ -409,61 +416,99 @@ public class HSQLDBCacheUtils {
 
                 Thread.currentThread().setName(BALANCE_RECORDER_TIMER_TASK);
 
-                try (final HSQLDBRepository repository = (HSQLDBRepository) Controller.REPOSITORY_FACTORY.getRepository()) {
-                    while (balancesByHeight.size() > capacity + 1) {
-                        Optional<Integer> firstHeight = balancesByHeight.keySet().stream().sorted().findFirst();
+                int currentHeight = recordCurrentBalances(balancesByHeight);
 
-                        if (firstHeight.isPresent()) balancesByHeight.remove(firstHeight.get());
-                    }
+                LOGGER.debug("recorded balances: height = " + currentHeight);
 
-                    // get current balances
-                    List<AccountBalanceData> accountBalances = getAccountBalances(repository);
+                // remove invalidated recordings, recording after current height
+                BalanceRecorderUtils.removeRecordingsAboveHeight(currentHeight, balancesByHeight);
 
-                    // get anyone of the balances
-                    Optional<AccountBalanceData> data = accountBalances.stream().findAny();
+                // remove invalidated dynamics, on or after current height
+                BalanceRecorderUtils.removeDynamicsOnOrAboveHeight(currentHeight, balanceDynamics);
 
-                    // if there are any balances, then record them
-                    if (data.isPresent()) {
-                        // map all new balances to the current height
-                        balancesByHeight.put(data.get().getHeight(), accountBalances);
+                // if there are 2 or more recordings, then produce balance dynamics for the first 2 recordings
+                if( balancesByHeight.size() > 1 ) {
 
-                        // for each new balance, map to address
-                        for (AccountBalanceData accountBalance : accountBalances) {
+                    Optional<Integer> priorHeight = BalanceRecorderUtils.getPriorHeight(currentHeight, balancesByHeight);
 
-                            // get recorded balances for this address
-                            List<AccountBalanceData> establishedBalances
-                                    = balancesByAddress.getOrDefault(accountBalance.getAddress(), new ArrayList<>(0));
+                    // if there is a prior height
+                    if(priorHeight.isPresent()) {
 
-                            // start a new list of recordings for this address, add the new balance and add the established
-                            // balances
-                            List<AccountBalanceData> balances = new ArrayList<>(establishedBalances.size() + 1);
-                            balances.add(accountBalance);
-                            balances.addAll(establishedBalances);
+                        BlockHeightRange blockHeightRange = new BlockHeightRange(priorHeight.get(), currentHeight);
 
-                            // reset tha balances for this address
-                            balancesByAddress.put(accountBalance.getAddress(), balances);
+                        LOGGER.debug("building dynamics for block heights: range = " + blockHeightRange);
 
-                            // TODO: reduce account balances to capacity
+                        List<AccountBalanceData> currentBalances = balancesByHeight.get(currentHeight);
+
+                        List<AddressAmountData> currentDynamics
+                            = BalanceRecorderUtils.buildBalanceDynamics(
+                                currentBalances,
+                                balancesByHeight.get(priorHeight.get()),
+                                Settings.getInstance().getMinimumBalanceRecording());
+
+                        LOGGER.debug("dynamics built: count = " + currentDynamics.size());
+
+                        if(LOGGER.isDebugEnabled())
+                            currentDynamics.stream()
+                                .sorted(Comparator.comparingLong(AddressAmountData::getAmount).reversed())
+                                .limit(Settings.getInstance().getTopBalanceLoggingLimit())
+                                .forEach(top5Dynamic -> LOGGER.debug("Top Dynamics = " + top5Dynamic));
+
+                        BlockHeightRangeAddressAmounts amounts
+                            = new BlockHeightRangeAddressAmounts( blockHeightRange, currentDynamics );
+
+                        balanceDynamics.add(amounts);
+
+                        BalanceRecorderUtils.removeRecordingsBelowHeight(currentHeight - Settings.getInstance().getBalanceRecorderRollbackAllowance(), balancesByHeight);
+
+                        while(balanceDynamics.size() > capacity) {
+                            BlockHeightRangeAddressAmounts oldestDynamics = BalanceRecorderUtils.removeOldestDynamics(balanceDynamics);
+
+                            LOGGER.debug("removing oldest dynamics: range " + oldestDynamics.getRange());
                         }
-
-                        // reduce height balances to capacity
-                        while( balancesByHeight.size() > capacity ) {
-                            Optional<Integer> lowestHeight
-                                = balancesByHeight.entrySet().stream()
-                                    .min(Comparator.comparingInt(Map.Entry::getKey))
-                                    .map(Map.Entry::getKey);
-
-                            if (lowestHeight.isPresent()) balancesByHeight.entrySet().remove(lowestHeight);
-                        }
                     }
-                } catch (DataException e) {
-                    LOGGER.error(e.getMessage(), e);
+                    else {
+                        LOGGER.warn("Expecting prior height and nothing was discovered, current height = " + currentHeight);
+                    }
+                }
+                // else this should be the first recording
+                else {
+                    LOGGER.info("first balance recording completed");
                 }
             }
         };
 
         // wait 5 minutes
         timer.scheduleAtFixedRate(task, 300_000, frequency * 60_000);
+    }
+
+    private static int recordCurrentBalances(ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight) {
+        int currentHeight;
+
+        try (final HSQLDBRepository repository = (HSQLDBRepository) Controller.REPOSITORY_FACTORY.getRepository()) {
+
+            // get current balances
+            List<AccountBalanceData> accountBalances = getAccountBalances(repository);
+
+            // get anyone of the balances
+            Optional<AccountBalanceData> data = accountBalances.stream().findAny();
+
+            // if there are any balances, then record them
+            if (data.isPresent()) {
+                // map all new balances to the current height
+                balancesByHeight.put(data.get().getHeight(), accountBalances);
+
+                currentHeight =  data.get().getHeight();
+            }
+            else {
+                currentHeight = Integer.MAX_VALUE;
+            }
+        } catch (DataException e) {
+            LOGGER.error(e.getMessage(), e);
+            currentHeight = Integer.MAX_VALUE;
+        }
+
+        return currentHeight;
     }
 
     /**
