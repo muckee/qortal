@@ -388,6 +388,7 @@ public class ArbitraryTransaction extends Transaction {
 		// Get the latest transaction
 		ArbitraryTransactionData latestTransactionData = repository.getArbitraryRepository().getLatestTransaction(arbitraryTransactionData.getName(), arbitraryTransactionData.getService(), null, arbitraryTransactionData.getIdentifier());
 		if (latestTransactionData == null) {
+			LOGGER.info("We don't have a latest transaction, so delete from cache: arbitraryResourceData = " + arbitraryResourceData);
 			// We don't have a latest transaction, so delete from cache
 			repository.getArbitraryRepository().delete(arbitraryResourceData);
 			return;
