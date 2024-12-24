@@ -52,6 +52,8 @@ import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+
+
 @Path("/crosschain")
 @Tag(name = "Cross-Chain")
 public class CrossChainResource {
@@ -255,6 +257,12 @@ public class CrossChainResource {
 				description = "Only return trades that completed on/after this timestamp (milliseconds since epoch)",
 				example = "1597310000000"
 			) @QueryParam("minimumTimestamp") Long minimumTimestamp,
+			@Parameter(
+				description = "Optionally filter by buyer Qortal address"
+			) @QueryParam("buyerAddress") String buyerAddress,
+			@Parameter(
+				description = "Optionally filter by seller Qortal address"
+			) @QueryParam("sellerAddress") String sellerAddress,
 			@Parameter( ref = "limit") @QueryParam("limit") Integer limit,
 			@Parameter( ref = "offset" ) @QueryParam("offset") Integer offset,
 			@Parameter( ref = "reverse" ) @QueryParam("reverse") Boolean reverse) {
@@ -296,7 +304,7 @@ public class CrossChainResource {
 				byte[] codeHash = acctInfo.getKey().value;
 				ACCT acct = acctInfo.getValue().get();
 
-				List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
+				List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash, buyerAddress, sellerAddress,
 						isFinished, acct.getModeByteOffset(), (long) AcctMode.REDEEMED.value, minimumFinalHeight,
 						limit, offset, reverse);
 
