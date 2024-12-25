@@ -3,6 +3,7 @@ package org.qortal.repository.hsqldb;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.api.SearchMode;
+import org.qortal.api.resource.TransactionsResource;
 import org.qortal.arbitrary.misc.Category;
 import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
@@ -14,7 +15,10 @@ import org.qortal.data.arbitrary.ArbitraryResourceCache;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
+import org.qortal.data.transaction.TransactionData;
 import org.qortal.repository.DataException;
+import org.qortal.repository.Repository;
+import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.utils.BalanceRecorderUtils;
 
@@ -434,37 +438,11 @@ public class HSQLDBCacheUtils {
                     // if there is a prior height
                     if(priorHeight.isPresent()) {
 
-                        BlockHeightRange blockHeightRange = new BlockHeightRange(priorHeight.get(), currentHeight);
+                        boolean isRewardDistribution = BalanceRecorderUtils.isRewardDistributionRange(priorHeight.get(), currentHeight);
 
-                        LOGGER.debug("building dynamics for block heights: range = " + blockHeightRange);
-
-                        List<AccountBalanceData> currentBalances = balancesByHeight.get(currentHeight);
-
-                        List<AddressAmountData> currentDynamics
-                            = BalanceRecorderUtils.buildBalanceDynamics(
-                                currentBalances,
-                                balancesByHeight.get(priorHeight.get()),
-                                Settings.getInstance().getMinimumBalanceRecording());
-
-                        LOGGER.debug("dynamics built: count = " + currentDynamics.size());
-
-                        if(LOGGER.isDebugEnabled())
-                            currentDynamics.stream()
-                                .sorted(Comparator.comparingLong(AddressAmountData::getAmount).reversed())
-                                .limit(Settings.getInstance().getTopBalanceLoggingLimit())
-                                .forEach(top5Dynamic -> LOGGER.debug("Top Dynamics = " + top5Dynamic));
-
-                        BlockHeightRangeAddressAmounts amounts
-                            = new BlockHeightRangeAddressAmounts( blockHeightRange, currentDynamics );
-
-                        balanceDynamics.add(amounts);
-
-                        BalanceRecorderUtils.removeRecordingsBelowHeight(currentHeight - Settings.getInstance().getBalanceRecorderRollbackAllowance(), balancesByHeight);
-
-                        while(balanceDynamics.size() > capacity) {
-                            BlockHeightRangeAddressAmounts oldestDynamics = BalanceRecorderUtils.removeOldestDynamics(balanceDynamics);
-
-                            LOGGER.debug("removing oldest dynamics: range " + oldestDynamics.getRange());
+                        // if this range has a reward recording block or if other blocks are enabled for recording
+                        if( isRewardDistribution || !Settings.getInstance().isRewardRecordingOnly() ) {
+                            produceBalanceDynamics(currentHeight, priorHeight, isRewardDistribution, balancesByHeight, balanceDynamics, capacity);
                         }
                     }
                     else {
@@ -480,6 +458,69 @@ public class HSQLDBCacheUtils {
 
         // wait 5 minutes
         timer.scheduleAtFixedRate(task, 300_000, frequency * 60_000);
+    }
+
+    private static void produceBalanceDynamics(int currentHeight, Optional<Integer> priorHeight, boolean isRewardDistribution, ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight, CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> balanceDynamics, int capacity) {
+        BlockHeightRange blockHeightRange = new BlockHeightRange(priorHeight.get(), currentHeight, isRewardDistribution);
+
+        LOGGER.debug("building dynamics for block heights: range = " + blockHeightRange);
+
+        List<AccountBalanceData> currentBalances = balancesByHeight.get(currentHeight);
+
+        ArrayList<TransactionData> transactions = getTransactionDataForBlocks(blockHeightRange);
+
+        LOGGER.info("transactions counted for balance adjustments: count = " + transactions.size());
+        List<AddressAmountData> currentDynamics
+            = BalanceRecorderUtils.buildBalanceDynamics(
+                currentBalances,
+                balancesByHeight.get(priorHeight.get()),
+                Settings.getInstance().getMinimumBalanceRecording(),
+                transactions);
+
+        LOGGER.debug("dynamics built: count = " + currentDynamics.size());
+
+        if(LOGGER.isDebugEnabled())
+            currentDynamics.stream()
+                .sorted(Comparator.comparingLong(AddressAmountData::getAmount).reversed())
+                .limit(Settings.getInstance().getTopBalanceLoggingLimit())
+                .forEach(top5Dynamic -> LOGGER.debug("Top Dynamics = " + top5Dynamic));
+
+        BlockHeightRangeAddressAmounts amounts
+            = new BlockHeightRangeAddressAmounts( blockHeightRange, currentDynamics );
+
+        balanceDynamics.add(amounts);
+
+        BalanceRecorderUtils.removeRecordingsBelowHeight(currentHeight - Settings.getInstance().getBalanceRecorderRollbackAllowance(), balancesByHeight);
+
+        while(balanceDynamics.size() > capacity) {
+            BlockHeightRangeAddressAmounts oldestDynamics = BalanceRecorderUtils.removeOldestDynamics(balanceDynamics);
+
+            LOGGER.debug("removing oldest dynamics: range " + oldestDynamics.getRange());
+        }
+    }
+
+    private static ArrayList<TransactionData> getTransactionDataForBlocks(BlockHeightRange blockHeightRange) {
+        ArrayList<TransactionData> transactions;
+
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            List<byte[]> signatures
+                = repository.getTransactionRepository().getSignaturesMatchingCriteria(
+                    blockHeightRange.getBegin() + 1, blockHeightRange.getEnd() - blockHeightRange.getBegin(),
+                    null, null,null, null, null,
+                    TransactionsResource.ConfirmationStatus.CONFIRMED,
+                    null, null, null);
+
+            transactions = new ArrayList<>(signatures.size());
+            for (byte[] signature : signatures) {
+                transactions.add(repository.getTransactionRepository().fromSignature(signature));
+            }
+
+            LOGGER.debug(String.format("Found %s transactions for " + blockHeightRange, transactions.size()));
+        } catch (Exception e) {
+            transactions = new ArrayList<>(0);
+            LOGGER.warn("Problems getting transactions for balance recording: " + e.getMessage());
+        }
+        return transactions;
     }
 
     private static int recordCurrentBalances(ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight) {

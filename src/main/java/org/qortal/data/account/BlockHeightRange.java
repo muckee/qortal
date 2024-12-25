@@ -12,12 +12,15 @@ public class BlockHeightRange {
 
     private int end;
 
+    private boolean isRewardDistribution;
+
     public BlockHeightRange() {
     }
 
-    public BlockHeightRange(int begin, int end) {
+    public BlockHeightRange(int begin, int end, boolean isRewardDistribution) {
         this.begin = begin;
         this.end = end;
+        this.isRewardDistribution = isRewardDistribution;
     }
 
     public int getBegin() {
@@ -26,6 +29,10 @@ public class BlockHeightRange {
 
     public int getEnd() {
         return end;
+    }
+
+    public boolean isRewardDistribution() {
+        return isRewardDistribution;
     }
 
     @Override
@@ -46,6 +53,7 @@ public class BlockHeightRange {
         return "BlockHeightRange{" +
                 "begin=" + begin +
                 ", end=" + end +
+                ", isRewardDistribution=" + isRewardDistribution +
                 '}';
     }
 }

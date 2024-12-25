@@ -2,13 +2,27 @@ package org.qortal.test.utils;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.qortal.asset.Asset;
+import org.qortal.block.Block;
+import org.qortal.crypto.Crypto;
+import org.qortal.data.PaymentData;
 import org.qortal.data.account.AccountBalanceData;
 import org.qortal.data.account.AddressAmountData;
 import org.qortal.data.account.BlockHeightRange;
 import org.qortal.data.account.BlockHeightRangeAddressAmounts;
+import org.qortal.data.transaction.ATTransactionData;
+import org.qortal.data.transaction.BaseTransactionData;
+import org.qortal.data.transaction.BuyNameTransactionData;
+import org.qortal.data.transaction.DeployAtTransactionData;
+import org.qortal.data.transaction.MultiPaymentTransactionData;
+import org.qortal.data.transaction.PaymentTransactionData;
+import org.qortal.data.transaction.RegisterNameTransactionData;
+import org.qortal.data.transaction.TransactionData;
+import org.qortal.data.transaction.TransferAssetTransactionData;
 import org.qortal.utils.BalanceRecorderUtils;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -17,6 +31,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
 
 public class BalanceRecorderUtilsTests {
+
+    public static final String RECIPIENT_ADDRESS = "recipient";
+    public static final String AT_ADDRESS = "atAddress";
+    public static final String OTHER = "Other";
 
     @Test
     public void testNotZeroForZero() {
@@ -42,8 +60,8 @@ public class BalanceRecorderUtilsTests {
     @Test
     public void testAddressAmountComparatorReverseOrder() {
 
-        BlockHeightRangeAddressAmounts addressAmounts1 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(2, 3), new ArrayList<>(0));
-        BlockHeightRangeAddressAmounts addressAmounts2 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(1, 2), new ArrayList<>(0));
+        BlockHeightRangeAddressAmounts addressAmounts1 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(2, 3, false), new ArrayList<>(0));
+        BlockHeightRangeAddressAmounts addressAmounts2 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(1, 2, false), new ArrayList<>(0));
 
         int compare = BalanceRecorderUtils.BLOCK_HEIGHT_RANGE_ADDRESS_AMOUNTS_COMPARATOR.compare(addressAmounts1, addressAmounts2);
 
@@ -53,8 +71,8 @@ public class BalanceRecorderUtilsTests {
     @Test
     public void testAddressAmountComparatorForwardOrder() {
 
-        BlockHeightRangeAddressAmounts addressAmounts1 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(1, 2), new ArrayList<>(0));
-        BlockHeightRangeAddressAmounts addressAmounts2 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(2, 3), new ArrayList<>(0));
+        BlockHeightRangeAddressAmounts addressAmounts1 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(1, 2, false), new ArrayList<>(0));
+        BlockHeightRangeAddressAmounts addressAmounts2 = new BlockHeightRangeAddressAmounts(new BlockHeightRange(2, 3, false), new ArrayList<>(0));
 
         int compare = BalanceRecorderUtils.BLOCK_HEIGHT_RANGE_ADDRESS_AMOUNTS_COMPARATOR.compare(addressAmounts1, addressAmounts2);
 
@@ -124,7 +142,7 @@ public class BalanceRecorderUtilsTests {
         List<AccountBalanceData> priorBalances = new ArrayList<>(1);
         priorBalances.add(new AccountBalanceData(address, 0, 1));
 
-        List<AddressAmountData> dynamics = BalanceRecorderUtils.buildBalanceDynamics(balances, priorBalances, 0);
+        List<AddressAmountData> dynamics = BalanceRecorderUtils.buildBalanceDynamics(balances, priorBalances, 0, new ArrayList<>(0));
 
         Assert.assertNotNull(dynamics);
         Assert.assertEquals(1, dynamics.size());
@@ -145,7 +163,7 @@ public class BalanceRecorderUtilsTests {
 
         List<AccountBalanceData> priorBalances = new ArrayList<>(0);
 
-        List<AddressAmountData> dynamics = BalanceRecorderUtils.buildBalanceDynamics(balances, priorBalances, 0);
+        List<AddressAmountData> dynamics = BalanceRecorderUtils.buildBalanceDynamics(balances, priorBalances, 0, new ArrayList<>(0));
 
         Assert.assertNotNull(dynamics);
         Assert.assertEquals(1, dynamics.size());
@@ -154,6 +172,55 @@ public class BalanceRecorderUtilsTests {
         Assert.assertNotNull(addressAmountData);
         Assert.assertEquals(address, addressAmountData.getAddress());
         Assert.assertEquals(2, addressAmountData.getAmount());
+    }
+
+    @Test
+    public void testBuildBalanceDynamicOneAccountAdjustment() {
+        List<AccountBalanceData> balances = new ArrayList<>(1);
+        balances.add(new AccountBalanceData(RECIPIENT_ADDRESS, 0, 20));
+
+        List<AccountBalanceData> priorBalances = new ArrayList<>(0);
+        priorBalances.add(new AccountBalanceData(RECIPIENT_ADDRESS, 0, 12));
+
+        List<TransactionData> transactions = new ArrayList<>();
+
+        final long amount = 5L;
+        final long fee = 1L;
+
+        boolean exceptionThrown = false;
+
+        try {
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+
+            PaymentTransactionData paymentData
+                = new PaymentTransactionData(
+                    new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    RECIPIENT_ADDRESS,
+                    amount
+            );
+
+            transactions.add(paymentData);
+
+            List<AddressAmountData> dynamics
+                = BalanceRecorderUtils.buildBalanceDynamics(
+                    balances,
+                    priorBalances,
+                    0,
+                    transactions
+            );
+
+            Assert.assertNotNull(dynamics);
+            Assert.assertEquals(1, dynamics.size());
+
+            AddressAmountData addressAmountData = dynamics.get(0);
+            Assert.assertNotNull(addressAmountData);
+            Assert.assertEquals(RECIPIENT_ADDRESS, addressAmountData.getAddress());
+            Assert.assertEquals(3, addressAmountData.getAmount());
+        } catch( Exception e ) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
     }
 
     @Test
@@ -170,7 +237,7 @@ public class BalanceRecorderUtilsTests {
         priorBalances.add(new AccountBalanceData(address2, 0, 200));
         priorBalances.add(new AccountBalanceData(address1, 0, 5000));
 
-        List<AddressAmountData> dynamics = BalanceRecorderUtils.buildBalanceDynamics(balances, priorBalances, -100L);
+        List<AddressAmountData> dynamics = BalanceRecorderUtils.buildBalanceDynamics(balances, priorBalances, -100L, new ArrayList<>(0));
 
         Assert.assertNotNull(dynamics);
         Assert.assertEquals(2, dynamics.size());
@@ -304,10 +371,10 @@ public class BalanceRecorderUtilsTests {
 
         CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> dynamics = new CopyOnWriteArrayList<>();
 
-        BlockHeightRange range1 = new BlockHeightRange(10, 20);
+        BlockHeightRange range1 = new BlockHeightRange(10, 20, false);
         dynamics.add(new BlockHeightRangeAddressAmounts(range1, new ArrayList<>()));
 
-        BlockHeightRange range2 = new BlockHeightRange(1, 4);
+        BlockHeightRange range2 = new BlockHeightRange(1, 4, false);
         dynamics.add(new BlockHeightRangeAddressAmounts(range2, new ArrayList<>()));
 
         Assert.assertEquals(2, dynamics.size());
@@ -323,13 +390,13 @@ public class BalanceRecorderUtilsTests {
 
         CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> dynamics = new CopyOnWriteArrayList<>();
 
-        BlockHeightRange range1 = new BlockHeightRange(1,5);
+        BlockHeightRange range1 = new BlockHeightRange(1,5, false);
         dynamics.add(new BlockHeightRangeAddressAmounts(range1, new ArrayList<>()));
 
-        BlockHeightRange range2 = new BlockHeightRange(6, 11);
+        BlockHeightRange range2 = new BlockHeightRange(6, 11, false);
         dynamics.add((new BlockHeightRangeAddressAmounts(range2, new ArrayList<>())));
 
-        BlockHeightRange range3 = new BlockHeightRange(22, 16);
+        BlockHeightRange range3 = new BlockHeightRange(22, 16, false);
         dynamics.add(new BlockHeightRangeAddressAmounts(range3, new ArrayList<>()));
 
         Assert.assertEquals(3, dynamics.size());
@@ -344,18 +411,353 @@ public class BalanceRecorderUtilsTests {
     public void testRemoveOldestDynamicsTwice() {
         CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> dynamics = new CopyOnWriteArrayList<>();
 
-        dynamics.add(new BlockHeightRangeAddressAmounts(new BlockHeightRange(1, 5), new ArrayList<>()));
-        dynamics.add(new BlockHeightRangeAddressAmounts(new BlockHeightRange(5, 9), new ArrayList<>()));
+        dynamics.add(new BlockHeightRangeAddressAmounts(new BlockHeightRange(1, 5, false), new ArrayList<>()));
+        dynamics.add(new BlockHeightRangeAddressAmounts(new BlockHeightRange(5, 9, false), new ArrayList<>()));
 
         Assert.assertEquals(2, dynamics.size());
 
         BalanceRecorderUtils.removeOldestDynamics(dynamics);
 
         Assert.assertEquals(1, dynamics.size());
-        Assert.assertTrue(dynamics.get(0).getRange().equals(new BlockHeightRange(5, 9)));
+        Assert.assertTrue(dynamics.get(0).getRange().equals(new BlockHeightRange(5, 9, false)));
 
         BalanceRecorderUtils.removeOldestDynamics(dynamics);
 
         Assert.assertEquals(0, dynamics.size());
+    }
+
+    @Test
+    public void testMapBalanceModificationsForPaymentTransaction() {
+
+        boolean exceptionThrown = false;
+
+        try {
+            final long amount = 1L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+
+            PaymentTransactionData paymentData
+                = new PaymentTransactionData(
+                    new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    RECIPIENT_ADDRESS,
+                    amount
+            );
+
+            // map balance modifications for addresses in the transaction
+            Map<String, Long> amountsByAddress = new HashMap<>();
+            BalanceRecorderUtils.mapBalanceModicationsForPaymentTransaction(amountsByAddress, paymentData);
+
+            // this will not add the fee, that is done in a different place
+            assertAmountsByAddress(amountsByAddress, amount, creatorPublicKey, RECIPIENT_ADDRESS);
+        } catch (Exception e) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForAssetOrderTransaction() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 1L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+
+            TransferAssetTransactionData transferAssetData
+             = new TransferAssetTransactionData(
+                     new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    RECIPIENT_ADDRESS,
+                    amount,
+                    0
+            );
+
+            // map balance modifications for addresses in the transaction
+            Map<String, Long> amountsByAddress = new HashMap<>();
+            BalanceRecorderUtils.mapBalanceModificationsForTransferAssetTransaction(amountsByAddress, transferAssetData);
+
+            assertAmountsByAddress(amountsByAddress, amount, creatorPublicKey, RECIPIENT_ADDRESS);
+        } catch( Exception e) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForATTransactionMessageType() {
+
+        boolean exceptionThrown = false;
+
+        try {
+
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            ATTransactionData atTransactionData = new ATTransactionData(new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    AT_ADDRESS,
+                    RECIPIENT_ADDRESS,
+                    new byte[0]);
+            BalanceRecorderUtils.mapBalanceModificationsForAtTransaction( amountsByAddress, atTransactionData);
+
+            // no balance changes for AT message
+            Assert.assertTrue(amountsByAddress.size() == 0);
+        } catch( Exception e) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForATTransactionPaymentType() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 1L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            ATTransactionData atTransactionData
+                = new ATTransactionData(
+                    new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    AT_ADDRESS,
+                    RECIPIENT_ADDRESS,
+                    amount,
+                    0
+                );
+
+            BalanceRecorderUtils.mapBalanceModificationsForAtTransaction( amountsByAddress, atTransactionData);
+
+            assertAmountByAddress(amountsByAddress, amount, RECIPIENT_ADDRESS);
+
+            assertAmountByAddress(amountsByAddress, -amount, AT_ADDRESS);
+        } catch( Exception e) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForBuyNameTransaction() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 100L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            BuyNameTransactionData buyNameData
+                = new BuyNameTransactionData(
+                    new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    "null",
+                    amount,
+                    RECIPIENT_ADDRESS
+            );
+
+            BalanceRecorderUtils.mapBalanceModificationsForBuyNameTransaction(amountsByAddress, buyNameData);
+
+            assertAmountsByAddress(amountsByAddress, amount, creatorPublicKey, RECIPIENT_ADDRESS);
+        } catch( Exception e) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForMultiPaymentTransaction() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 100L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            List<PaymentData> payments = new ArrayList<>();
+
+            payments.add(new PaymentData(RECIPIENT_ADDRESS, 0, amount));
+
+            MultiPaymentTransactionData multiPayment
+                    = new MultiPaymentTransactionData(new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    payments);
+            BalanceRecorderUtils.mapBalanceModificationsForMultiPaymentTransaction(amountsByAddress,multiPayment);
+            assertAmountsByAddress(amountsByAddress, amount, creatorPublicKey, RECIPIENT_ADDRESS);
+        } catch( Exception e ) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForMultiPaymentTransaction2PaymentsOneAddress() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 100L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            List<PaymentData> payments = new ArrayList<>();
+
+            payments.add(new PaymentData(RECIPIENT_ADDRESS, 0, amount));
+            payments.add(new PaymentData(RECIPIENT_ADDRESS, 0, amount));
+
+            MultiPaymentTransactionData multiPayment
+                    = new MultiPaymentTransactionData(new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    payments);
+            BalanceRecorderUtils.mapBalanceModificationsForMultiPaymentTransaction(amountsByAddress,multiPayment);
+            assertAmountsByAddress(amountsByAddress, 2*amount, creatorPublicKey, RECIPIENT_ADDRESS);
+        } catch( Exception e ) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForMultiPaymentTransaction2PaymentsTwoAddresses() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 100L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            List<PaymentData> payments = new ArrayList<>();
+
+            payments.add(new PaymentData(RECIPIENT_ADDRESS, 0, amount));
+            payments.add(new PaymentData(OTHER, 0, amount));
+
+            MultiPaymentTransactionData multiPayment
+                    = new MultiPaymentTransactionData(new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    payments);
+            BalanceRecorderUtils.mapBalanceModificationsForMultiPaymentTransaction(amountsByAddress,multiPayment);
+            assertAmountByAddress(amountsByAddress, amount, RECIPIENT_ADDRESS);
+            assertAmountByAddress(amountsByAddress, amount, OTHER);
+
+            String creatorAddress = Crypto.toAddress(creatorPublicKey);
+
+            assertAmountByAddress(amountsByAddress, 2*-amount, creatorAddress);
+        } catch( Exception e ) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForDeployAtTransaction() {
+
+        boolean exceptionThrown = false;
+
+        try{
+            final long amount = 3L;
+            final long fee = 1L;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            DeployAtTransactionData deployAt
+                = new DeployAtTransactionData(
+                    new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                    AT_ADDRESS, "name", "description", "type", "tags", new byte[0], amount, Asset.QORT
+                );
+
+            BalanceRecorderUtils.mapBalanceModificationsForDeployAtTransaction(amountsByAddress,deployAt);
+            assertAmountsByAddress(amountsByAddress, amount, creatorPublicKey, AT_ADDRESS);
+        } catch( Exception e) {
+            exceptionThrown = true;
+            e.printStackTrace();
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testMapBalanceModificationsForTransaction() {
+
+        boolean exceptionThrown = false;
+
+        try {
+            final long fee = 2;
+
+            byte[] creatorPublicKey = TestUtils.generatePublicKey();
+            Map<String, Long> amountsByAddress = new HashMap<>();
+
+            BalanceRecorderUtils.mapBalanceModificationsForTransaction(
+                    amountsByAddress,
+                    new RegisterNameTransactionData(
+                            new BaseTransactionData(0L, 0, null, creatorPublicKey, fee, null),
+                            "aaa", "data", "aaa")
+            );
+
+            String creatorAddress = Crypto.toAddress(creatorPublicKey);
+
+            assertAmountByAddress(amountsByAddress, -fee, creatorAddress);
+        } catch(Exception e) {
+            exceptionThrown = true;
+        }
+
+        Assert.assertFalse(exceptionThrown);
+    }
+
+    @Test
+    public void testBlockHeightRangeEqualityTrue() {
+
+        BlockHeightRange range1 = new BlockHeightRange(2, 4, false);
+        BlockHeightRange range2 = new BlockHeightRange(2, 4, true);
+
+        Assert.assertTrue(range1.equals(range2));
+        Assert.assertEquals(range1, range2);
+    }
+
+    @Test
+    public void testBloHeightRangeEqualityFalse() {
+
+        BlockHeightRange range1 = new BlockHeightRange(2, 3, true);
+        BlockHeightRange range2 = new BlockHeightRange(2, 4, true);
+
+        Assert.assertFalse(range1.equals(range2));
+    }
+
+    private static void assertAmountsByAddress(Map<String, Long> amountsByAddress, long amount, byte[] creatorPublicKey, String recipientAddress) {
+        assertAmountByAddress(amountsByAddress, amount, recipientAddress);
+
+        String creatorAddress = Crypto.toAddress(creatorPublicKey);
+
+        assertAmountByAddress(amountsByAddress, -amount, creatorAddress);
+    }
+
+    private static void assertAmountByAddress(Map<String, Long> amountsByAddress, long amount, String address) {
+        Long amountForAddress = amountsByAddress.get(address);
+
+        Assert.assertTrue(amountsByAddress.containsKey(address));
+        Assert.assertNotNull(amountForAddress);
+        Assert.assertEquals(amount, amountForAddress.longValue());
     }
 }

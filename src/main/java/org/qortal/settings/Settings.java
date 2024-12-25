@@ -494,7 +494,14 @@ public class Settings {
 	 */
 	private int balanceRecorderRollbackAllowance = 100;
 
-	// Domain mapping
+	/**
+	 * Is Reward Recording Only
+	 *
+	 * Set true to only retain the recordings that cover reward distributions, otherwise set false.
+	 */
+    private boolean rewardRecordingOnly = true;
+
+    // Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
 		private Integer limit;
@@ -1310,5 +1317,9 @@ public class Settings {
 
 	public int getBalanceRecorderRollbackAllowance() {
 		return balanceRecorderRollbackAllowance;
+	}
+
+	public boolean isRewardRecordingOnly() {
+		return rewardRecordingOnly;
 	}
 }

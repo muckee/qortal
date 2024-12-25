@@ -283,7 +283,7 @@ public class AssetsResource {
 		Optional<HSQLDBBalanceRecorder> recorder = HSQLDBBalanceRecorder.getInstance();
 
 		if( recorder.isPresent()) {
-			Optional<BlockHeightRangeAddressAmounts> addressAmounts = recorder.get().getAddressAmounts(new BlockHeightRange(begin, end));
+			Optional<BlockHeightRangeAddressAmounts> addressAmounts = recorder.get().getAddressAmounts(new BlockHeightRange(begin, end, false));
 
 			if( addressAmounts.isPresent() ) {
 				return addressAmounts.get().getAmounts().stream()
