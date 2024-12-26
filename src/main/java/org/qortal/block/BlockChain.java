@@ -88,7 +88,9 @@ public class BlockChain {
 		onlyMintWithNameHeight,
 		removeOnlyMintWithNameHeight,
 		groupMemberCheckHeight,
-		fixBatchRewardHeight
+		fixBatchRewardHeight,
+		adminsReplaceFoundersHeight,
+		onlineValidationFailSafeHeight
 	}
 
 	// Custom transaction fees
@@ -660,6 +662,14 @@ public class BlockChain {
 
 	public int getFixBatchRewardHeight() {
 		return this.featureTriggers.get(FeatureTrigger.fixBatchRewardHeight.name()).intValue();
+	}
+
+	public int getAdminsReplaceFoundersHeight() {
+		return this.featureTriggers.get(FeatureTrigger.adminsReplaceFoundersHeight.name()).intValue();
+	}
+
+	public int getOnlineValidationFailSafeHeight() {
+		return this.featureTriggers.get(FeatureTrigger.onlineValidationFailSafeHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp

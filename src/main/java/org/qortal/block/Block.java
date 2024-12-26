@@ -23,6 +23,7 @@ import org.qortal.data.at.ATStateData;
 import org.qortal.data.block.BlockData;
 import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.block.BlockTransactionData;
+import org.qortal.data.group.GroupAdminData;
 import org.qortal.data.network.OnlineAccountData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.repository.*;
@@ -170,6 +171,19 @@ public class Block {
 			}
 		}
 
+		/**
+		 * Get Effective Minting Level
+		 *
+		 * @return the effective minting level, if a data exception is thrown, it catches the exception and returns a zero
+		 */
+		public int getEffectiveMintingLevel() {
+			try {
+				return this.mintingAccount.getEffectiveMintingLevel();
+			} catch (DataException e) {
+				return 0;
+			}
+		}
+
 		public Account getMintingAccount() {
 			return this.mintingAccount;
 		}
@@ -186,7 +200,7 @@ public class Block {
 		 *  @return account-level share "bin" from blockchain config, or null if founder / none found
 		 */
 		public AccountLevelShareBin getShareBin(int blockHeight) {
-			if (this.isMinterFounder)
+			if (this.isMinterFounder && blockHeight < BlockChain.getInstance().getAdminsReplaceFoundersHeight())
 				return null;
 
 			final int accountLevel = this.mintingAccountData.getLevel();
@@ -736,15 +750,7 @@ public class Block {
 		List<ExpandedAccount> expandedAccounts = new ArrayList<>();
 
 		for (RewardShareData rewardShare : this.cachedOnlineRewardShares) {
-			int groupId = BlockChain.getInstance().getMintingGroupId();
-			String address = rewardShare.getMinter();
-			boolean isMinterGroupMember = repository.getGroupRepository().memberExists(groupId, address);
-
-			if (this.getBlockData().getHeight() < BlockChain.getInstance().getFixBatchRewardHeight())
-				expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
-
-			if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight() && isMinterGroupMember)
-				expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
+			expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
 		}
 
 		this.cachedExpandedAccounts = expandedAccounts;
@@ -1156,19 +1162,31 @@ public class Block {
 
 		// After feature trigger, require all online account minters to be greater than level 0
 		if (this.getBlockData().getHeight() >= BlockChain.getInstance().getOnlineAccountMinterLevelValidationHeight()) {
-			List<ExpandedAccount> expandedAccounts = this.getExpandedAccounts();
-			for (ExpandedAccount account : expandedAccounts) {
-				int groupId = BlockChain.getInstance().getMintingGroupId();
-				String address = account.getMintingAccount().getAddress();
-				boolean isMinterGroupMember = repository.getGroupRepository().memberExists(groupId, address);
+			if( this.blockData.getHeight() < BlockChain.getInstance().getOnlineValidationFailSafeHeight()) {
+				List<ExpandedAccount> expandedAccounts
+					= this.getExpandedAccounts().stream()
+						.filter(expandedAccount -> expandedAccount.isMinterMember)
+						.collect(Collectors.toList());
 
-				if (account.getMintingAccount().getEffectiveMintingLevel() == 0)
-					return ValidationResult.ONLINE_ACCOUNTS_INVALID;
-
-				if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight()) {
-					if (!isMinterGroupMember)
+				for (ExpandedAccount account : expandedAccounts) {
+					if (account.getMintingAccount().getEffectiveMintingLevel() == 0)
 						return ValidationResult.ONLINE_ACCOUNTS_INVALID;
+
+					if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight()) {
+						if (!account.isMinterMember)
+							return ValidationResult.ONLINE_ACCOUNTS_INVALID;
+					}
 				}
+			}
+			// this.blockData.getHeight() >= BlockChain.getInstance().getOnlineValidationFailSafeHeight()
+			else {
+				Optional<ExpandedAccount> anyInvalidAccount
+					= this.getExpandedAccounts().stream()
+						.filter(
+							account -> account.getEffectiveMintingLevel() == 0 ||
+									!account.isMinterMember)
+						.findAny();
+				if( anyInvalidAccount.isPresent() ) return ValidationResult.ONLINE_ACCOUNTS_INVALID;
 			}
 		}
 
@@ -1659,7 +1677,17 @@ public class Block {
 		final List<Integer> cumulativeBlocksByLevel = BlockChain.getInstance().getCumulativeBlocksByLevel();
 		final int maximumLevel = cumulativeBlocksByLevel.size() - 1;
 
-		final List<ExpandedAccount> expandedAccounts = this.getExpandedAccounts();
+		final List<ExpandedAccount> expandedAccounts;
+
+		if (this.getBlockData().getHeight() < BlockChain.getInstance().getFixBatchRewardHeight()) {
+			expandedAccounts = this.getExpandedAccounts().stream().collect(Collectors.toList());
+		}
+		else {
+			expandedAccounts
+				= this.getExpandedAccounts().stream()
+					.filter(expandedAccount -> expandedAccount.isMinterMember)
+					.collect(Collectors.toList());
+		}
 
 		Set<AccountData> allUniqueExpandedAccounts = new HashSet<>();
 		for (ExpandedAccount expandedAccount : expandedAccounts) {
@@ -2059,7 +2087,17 @@ public class Block {
 		final List<Integer> cumulativeBlocksByLevel = BlockChain.getInstance().getCumulativeBlocksByLevel();
 		final int maximumLevel = cumulativeBlocksByLevel.size() - 1;
 
-		final List<ExpandedAccount> expandedAccounts = this.getExpandedAccounts();
+		final List<ExpandedAccount> expandedAccounts;
+
+		if (this.getBlockData().getHeight() < BlockChain.getInstance().getFixBatchRewardHeight()) {
+			expandedAccounts = this.getExpandedAccounts().stream().collect(Collectors.toList());
+		}
+		else {
+			expandedAccounts
+				= this.getExpandedAccounts().stream()
+					.filter(expandedAccount -> expandedAccount.isMinterMember)
+					.collect(Collectors.toList());
+		}
 
 		Set<AccountData> allUniqueExpandedAccounts = new HashSet<>();
 		for (ExpandedAccount expandedAccount : expandedAccounts) {
@@ -2263,7 +2301,17 @@ public class Block {
 		List<BlockRewardCandidate> rewardCandidates = new ArrayList<>();
 
 		// All online accounts
-		final List<ExpandedAccount> expandedAccounts = this.getExpandedAccounts();
+		final List<ExpandedAccount> expandedAccounts;
+
+		if (this.getBlockData().getHeight() < BlockChain.getInstance().getFixBatchRewardHeight()) {
+			expandedAccounts = this.getExpandedAccounts().stream().collect(Collectors.toList());
+		}
+		else {
+			expandedAccounts
+				= this.getExpandedAccounts().stream()
+					.filter(expandedAccount -> expandedAccount.isMinterMember)
+					.collect(Collectors.toList());
+		}
 
 		/*
 		 * Distribution rules:
@@ -2388,7 +2436,7 @@ public class Block {
 		final long qoraHoldersShare = BlockChain.getInstance().getQoraHoldersShareAtHeight(this.blockData.getHeight());
 
 		// Perform account-level-based reward scaling if appropriate
-		if (!haveFounders) {
+		if (!haveFounders && this.blockData.getHeight() < BlockChain.getInstance().getAdminsReplaceFoundersHeight() ) {
 			// Recalculate distribution ratios based on candidates
 
 			// Nothing shared? This shouldn't happen
@@ -2424,7 +2472,7 @@ public class Block {
 		}
 
 		// Add founders as reward candidate if appropriate
-		if (haveFounders) {
+		if (haveFounders && this.blockData.getHeight() < BlockChain.getInstance().getAdminsReplaceFoundersHeight()) {
 			// Yes: add to reward candidates list
 			BlockRewardDistributor founderDistributor = (distributionAmount, balanceChanges) -> distributeBlockRewardShare(distributionAmount, onlineFounderAccounts, balanceChanges);
 
@@ -2432,8 +2480,75 @@ public class Block {
 			BlockRewardCandidate rewardCandidate = new BlockRewardCandidate("Founders", foundersShare, founderDistributor);
 			rewardCandidates.add(rewardCandidate);
 		}
+		else if (this.blockData.getHeight() >= BlockChain.getInstance().getAdminsReplaceFoundersHeight()) {
+			try (final Repository repository = RepositoryManager.getRepository()) {
+				GroupRepository groupRepository = repository.getGroupRepository();
+
+				// all minter admins
+				List<String> minterAdmins
+					= groupRepository.getGroupAdmins(BlockChain.getInstance().getMintingGroupId()).stream()
+						.map(GroupAdminData::getAdmin)
+						.collect(Collectors.toList());
+
+				// all minter admins that are online
+				List<ExpandedAccount> onlineMinterAdminAccounts
+					= expandedAccounts.stream()
+						.filter(expandedAccount ->  minterAdmins.contains(expandedAccount.getMintingAccount().getAddress()))
+						.collect(Collectors.toList());
+
+				BlockRewardDistributor minterAdminDistributor
+					= (distributionAmount, balanceChanges)
+						->
+						distributeBlockRewardShare(distributionAmount, onlineMinterAdminAccounts, balanceChanges);
+
+				long adminShare = 1_00000000 - totalShares;
+
+				long minterAdminShare = adminShare / 2;
+				BlockRewardCandidate minterAdminRewardCandidate
+					= new BlockRewardCandidate("Minter Admins", minterAdminShare, minterAdminDistributor);
+				rewardCandidates.add(minterAdminRewardCandidate);
+
+				totalShares -= adminShare;
+
+				// all dev admins
+				List<String> devAdminAddresses
+						= groupRepository.getGroupAdmins(1).stream()
+						.map(GroupAdminData::getAdmin)
+						.collect(Collectors.toList());
+
+				BlockRewardDistributor devAdminDistributor
+					= (distributionAmount, balanceChanges) -> distributeToAccounts(distributionAmount, devAdminAddresses, balanceChanges);
+
+				long devAdminShare = 1_00000000 - totalShares;
+				BlockRewardCandidate devAdminRewardCandidate
+					= new BlockRewardCandidate("Dev Admins", devAdminShare,devAdminDistributor);
+				rewardCandidates.add(devAdminRewardCandidate);
+			}
+		}
 
 		return rewardCandidates;
+	}
+
+	/**
+	 * Distribute To Accounts
+	 *
+	 * Merges distribute shares to a map of distribution shares.
+	 *
+	 * @param distributionAmount the amount to distribute
+	 * @param accountAddressess the addresses to distribute to
+	 * @param balanceChanges the map of distribution shares, this gets appended to
+	 *
+	 * @return the total amount mapped to addresses for distribution
+	 */
+	public static long distributeToAccounts(long distributionAmount, List<String> accountAddressess, Map<String, Long> balanceChanges) {
+
+		long distibutionShare = distributionAmount / accountAddressess.size();
+
+		for(String accountAddress : accountAddressess ) {
+			balanceChanges.merge(accountAddress, distibutionShare, Long::sum);
+		}
+
+		return distibutionShare * accountAddressess.size();
 	}
 
 	private static long distributeBlockRewardShare(long distributionAmount, List<ExpandedAccount> accounts, Map<String, Long> balanceChanges) {
