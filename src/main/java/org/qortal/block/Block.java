@@ -2508,7 +2508,7 @@ public class Block {
 					= new BlockRewardCandidate("Minter Admins", minterAdminShare, minterAdminDistributor);
 				rewardCandidates.add(minterAdminRewardCandidate);
 
-				totalShares -= adminShare;
+				totalShares -= minterAdminShare;
 
 				// all dev admins
 				List<String> devAdminAddresses
