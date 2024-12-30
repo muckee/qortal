@@ -26,7 +26,7 @@ public class CrossChainApiTests extends ApiCommon {
 	@Test
 	public void testGetCompletedTrades() {
 		long minimumTimestamp = System.currentTimeMillis();
-		assertNoApiError((limit, offset, reverse) -> this.crossChainResource.getCompletedTrades(SPECIFIC_BLOCKCHAIN, minimumTimestamp, limit, offset, reverse));
+		assertNoApiError((limit, offset, reverse) -> this.crossChainResource.getCompletedTrades(SPECIFIC_BLOCKCHAIN, minimumTimestamp, null, null, limit, offset, reverse));
 	}
 
 	@Test
@@ -35,8 +35,8 @@ public class CrossChainApiTests extends ApiCommon {
 		Integer offset = null;
 		Boolean reverse = null;
 
-		assertApiError(ApiError.INVALID_CRITERIA, () -> this.crossChainResource.getCompletedTrades(SPECIFIC_BLOCKCHAIN, -1L /*minimumTimestamp*/, limit, offset, reverse));
-		assertApiError(ApiError.INVALID_CRITERIA, () -> this.crossChainResource.getCompletedTrades(SPECIFIC_BLOCKCHAIN, 0L /*minimumTimestamp*/, limit, offset, reverse));
+		assertApiError(ApiError.INVALID_CRITERIA, () -> this.crossChainResource.getCompletedTrades(SPECIFIC_BLOCKCHAIN, -1L /*minimumTimestamp*/, null, null, limit, offset, reverse));
+		assertApiError(ApiError.INVALID_CRITERIA, () -> this.crossChainResource.getCompletedTrades(SPECIFIC_BLOCKCHAIN, 0L /*minimumTimestamp*/, null, null, limit, offset, reverse));
 	}
 
 }
