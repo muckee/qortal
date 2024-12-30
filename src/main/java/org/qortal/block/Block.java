@@ -2479,6 +2479,7 @@ public class Block {
 			final long foundersShare = 1_00000000 - totalShares;
 			BlockRewardCandidate rewardCandidate = new BlockRewardCandidate("Founders", foundersShare, founderDistributor);
 			rewardCandidates.add(rewardCandidate);
+			LOGGER.info("logging foundersShare prior to reward modifications {}",foundersShare);
 		}
 		else if (this.blockData.getHeight() >= BlockChain.getInstance().getAdminsReplaceFoundersHeight()) {
 			try (final Repository repository = RepositoryManager.getRepository()) {
@@ -2502,6 +2503,8 @@ public class Block {
 						distributeBlockRewardShare(distributionAmount, onlineMinterAdminAccounts, balanceChanges);
 
 				long adminShare = 1_00000000 - totalShares;
+				LOGGER.info("initial total Shares: {}",totalShares);
+				LOGGER.info("logging adminShare after hardfork, this is the primary reward that will be split {}",adminShare);
 
 				long minterAdminShare = adminShare / 2;
 				BlockRewardCandidate minterAdminRewardCandidate
@@ -2509,6 +2512,8 @@ public class Block {
 				rewardCandidates.add(minterAdminRewardCandidate);
 
 				totalShares -= minterAdminShare;
+
+				LOGGER.info("MINTER ADMIN SHARE: {}",minterAdminShare);
 
 				// all dev admins
 				List<String> devAdminAddresses
@@ -2520,6 +2525,7 @@ public class Block {
 					= (distributionAmount, balanceChanges) -> distributeToAccounts(distributionAmount, devAdminAddresses, balanceChanges);
 
 				long devAdminShare = 1_00000000 - totalShares;
+				LOGGER.info("DEV ADMIN SHARE: {}",devAdminShare);
 				BlockRewardCandidate devAdminRewardCandidate
 					= new BlockRewardCandidate("Dev Admins", devAdminShare,devAdminDistributor);
 				rewardCandidates.add(devAdminRewardCandidate);
