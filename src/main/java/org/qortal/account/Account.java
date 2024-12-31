@@ -342,8 +342,13 @@ public class Account {
 			return 0;
 
 		// Founders are assigned a different effective minting level, as long as they have no penalty
-		if (Account.isFounder(accountData.getFlags()) && accountData.getBlocksMintedPenalty() == 0)
-			return BlockChain.getInstance().getFounderEffectiveMintingLevel();
+		if (Account.isFounder(accountData.getFlags()) && accountData.getBlocksMintedPenalty() == 0) {
+
+			// but only if it is before the admins replace founders hardfork
+			if( this.repository.getBlockRepository().getBlockchainHeight() < BlockChain.getInstance().getAdminsReplaceFoundersHeight() ) {
+				return BlockChain.getInstance().getFounderEffectiveMintingLevel();
+			}
+		}
 
 		return accountData.getLevel();
 	}
