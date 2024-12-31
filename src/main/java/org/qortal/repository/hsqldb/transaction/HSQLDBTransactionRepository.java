@@ -1125,12 +1125,12 @@ public class HSQLDBTransactionRepository implements TransactionRepository {
 	public List<TransactionData> getApprovalPendingTransactions(int blockHeight) throws DataException {
 		StringBuilder sql = new StringBuilder(512);
 		sql.append("SELECT signature FROM Transactions "
-			+ "JOIN `Groups` g on g.group_id = Transactions.tx_group_id "
+			+ "JOIN Groups on Groups.group_id = Transactions.tx_group_id "
 			+ "WHERE Transactions.approval_status = ");
 		// Enum int value safe to use literally
 		sql.append(ApprovalStatus.PENDING.value);
 
-		sql.append(" AND Transactions.block_height < ? - g.min_block_delay");
+		sql.append(" AND Transactions.block_height < ? - Groups.min_block_delay");
 
 		List<TransactionData> transactions = new ArrayList<>();
 
@@ -1160,12 +1160,12 @@ public class HSQLDBTransactionRepository implements TransactionRepository {
 	public List<TransactionData> getApprovalExpiringTransactions(int blockHeight) throws DataException {
 		StringBuilder sql = new StringBuilder(512);
 		sql.append("SELECT signature FROM Transactions "
-			+ "JOIN `Groups` g on g.group_id = Transactions.tx_group_id "
+			+ "JOIN Groups on Groups.group_id = Transactions.tx_group_id "
 			+ "WHERE Transactions.approval_status = ");
 		// Enum int value safe to use literally
 		sql.append(ApprovalStatus.PENDING.value);
 
-		sql.append(" AND Transactions.block_height < ? - g.max_block_delay");
+		sql.append(" AND Transactions.block_height < ? - Groups.max_block_delay");
 
 		List<TransactionData> transactions = new ArrayList<>();
 

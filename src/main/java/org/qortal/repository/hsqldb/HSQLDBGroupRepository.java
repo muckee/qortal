@@ -24,7 +24,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	public GroupData fromGroupId(int groupId) throws DataException {
 		String sql = "SELECT group_name, owner, description, created_when, updated_when, reference, is_open, "
 				+ "approval_threshold, min_block_delay, max_block_delay, creation_group_id, reduced_group_name "
-				+ "FROM `Groups` WHERE group_id = ?";
+				+ "FROM Groups WHERE group_id = ?";
 
 		try (ResultSet resultSet = this.repository.checkedExecute(sql, groupId)) {
 			if (resultSet == null)
@@ -62,7 +62,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	public GroupData fromGroupName(String groupName) throws DataException {
 		String sql = "SELECT group_id, owner, description, created_when, updated_when, reference, is_open, "
 				+ "approval_threshold, min_block_delay, max_block_delay, creation_group_id, reduced_group_name "
-				+ "FROM `Groups` WHERE group_name = ?";
+				+ "FROM Groups WHERE group_name = ?";
 
 		try (ResultSet resultSet = this.repository.checkedExecute(sql, groupName)) {
 			if (resultSet == null)
@@ -99,7 +99,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	@Override
 	public boolean groupExists(int groupId) throws DataException {
 		try {
-			return this.repository.exists("`Groups`", "group_id = ?", groupId);
+			return this.repository.exists("Groups", "group_id = ?", groupId);
 		} catch (SQLException e) {
 			throw new DataException("Unable to check for group in repository", e);
 		}
@@ -108,7 +108,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	@Override
 	public boolean groupExists(String groupName) throws DataException {
 		try {
-			return this.repository.exists("`Groups`", "group_name = ?", groupName);
+			return this.repository.exists("Groups", "group_name = ?", groupName);
 		} catch (SQLException e) {
 			throw new DataException("Unable to check for group in repository", e);
 		}
@@ -117,7 +117,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	@Override
 	public boolean reducedGroupNameExists(String reducedGroupName) throws DataException {
 		try {
-			return this.repository.exists("`Groups`", "reduced_group_name = ?", reducedGroupName);
+			return this.repository.exists("Groups", "reduced_group_name = ?", reducedGroupName);
 		} catch (SQLException e) {
 			throw new DataException("Unable to check for reduced group name in repository", e);
 		}
@@ -129,7 +129,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 
 		sql.append("SELECT group_id, owner, group_name, description, created_when, updated_when, reference, is_open, "
 				+ "approval_threshold, min_block_delay, max_block_delay, creation_group_id, reduced_group_name "
-				+ "FROM `Groups` ORDER BY group_name");
+				+ "FROM Groups ORDER BY group_name");
 
 		if (reverse != null && reverse)
 			sql.append(" DESC");
@@ -181,7 +181,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 
 		sql.append("SELECT group_id, group_name, description, created_when, updated_when, reference, is_open, "
 				+ "approval_threshold, min_block_delay, max_block_delay, creation_group_id, reduced_group_name "
-				+ "FROM `Groups` WHERE owner = ? ORDER BY group_name");
+				+ "FROM Groups WHERE owner = ? ORDER BY group_name");
 
 		if (reverse != null && reverse)
 			sql.append(" DESC");
@@ -231,7 +231,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 		StringBuilder sql = new StringBuilder(512);
 
 		sql.append("SELECT group_id, owner, group_name, description, created_when, updated_when, reference, is_open, "
-				+ "approval_threshold, min_block_delay, max_block_delay, creation_group_id, reduced_group_name, admin FROM `Groups` "
+				+ "approval_threshold, min_block_delay, max_block_delay, creation_group_id, reduced_group_name, admin FROM Groups "
 				+ "JOIN GroupMembers USING (group_id) "
 				+ "LEFT OUTER JOIN GroupAdmins ON GroupAdmins.group_id = GroupMembers.group_id AND GroupAdmins.admin = GroupMembers.address "
 				+ "WHERE address = ? ORDER BY group_name");
@@ -289,7 +289,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 
 	@Override
 	public void save(GroupData groupData) throws DataException {
-		HSQLDBSaver saveHelper = new HSQLDBSaver("`Groups`");
+		HSQLDBSaver saveHelper = new HSQLDBSaver("Groups");
 
 		saveHelper.bind("group_id", groupData.getGroupId()).bind("owner", groupData.getOwner()).bind("group_name", groupData.getGroupName())
 				.bind("description", groupData.getDescription()).bind("created_when", groupData.getCreated()).bind("updated_when", groupData.getUpdated())
@@ -302,7 +302,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 
 			if (groupData.getGroupId() == null) {
 				// Fetch new groupId
-				try (ResultSet resultSet = this.repository.checkedExecute("SELECT group_id FROM `Groups` WHERE reference = ?", groupData.getReference())) {
+				try (ResultSet resultSet = this.repository.checkedExecute("SELECT group_id FROM Groups WHERE reference = ?", groupData.getReference())) {
 					if (resultSet == null)
 						throw new DataException("Unable to fetch new group ID from repository");
 
@@ -318,7 +318,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	public void delete(int groupId) throws DataException {
 		try {
 			// Remove group
-			this.repository.delete("`Groups`", "group_id = ?", groupId);
+			this.repository.delete("Groups", "group_id = ?", groupId);
 		} catch (SQLException e) {
 			throw new DataException("Unable to delete group info from repository", e);
 		}
@@ -328,7 +328,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 	public void delete(String groupName) throws DataException {
 		try {
 			// Remove group
-			this.repository.delete("`Groups`", "group_name = ?", groupName);
+			this.repository.delete("Groups", "group_name = ?", groupName);
 		} catch (SQLException e) {
 			throw new DataException("Unable to delete group info from repository", e);
 		}
@@ -338,7 +338,7 @@ public class HSQLDBGroupRepository implements GroupRepository {
 
 	@Override
 	public String getOwner(int groupId) throws DataException {
-		try (ResultSet resultSet = this.repository.checkedExecute("SELECT owner FROM `Groups` WHERE group_id = ?", groupId)) {
+		try (ResultSet resultSet = this.repository.checkedExecute("SELECT owner FROM Groups WHERE group_id = ?", groupId)) {
 			if (resultSet == null)
 				return null;
 
