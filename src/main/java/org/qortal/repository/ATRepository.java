@@ -76,7 +76,7 @@ public interface ATRepository {
 	 * Although <tt>expectedValue</tt>, if provided, is natively an unsigned long,
 	 * the data segment comparison is done via unsigned hex string.
 	 */
-	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, Boolean isFinished,
+	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, String buyerAddress, String sellerAddress, Boolean isFinished,
 			Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
 			Integer limit, Integer offset, Boolean reverse) throws DataException;
 

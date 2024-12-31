@@ -98,7 +98,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 						byte[] codeHash = acctInfo.getKey().value;
 						ACCT acct = acctInfo.getValue().get();
 
-						List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
+						List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash, null, null,
 								isFinished, dataByteOffset, expectedValue, minimumFinalHeight,
 								null, null, null);
 
@@ -259,7 +259,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 				ACCT acct = acctInfo.getValue().get();
 
 				Integer dataByteOffset = acct.getModeByteOffset();
-				List<ATStateData> initialAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
+				List<ATStateData> initialAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash, null, null,
 					isFinished, dataByteOffset, expectedValue, minimumFinalHeight,
 					null, null, null);
 
@@ -298,7 +298,7 @@ public class TradeOffersWebSocket extends ApiWebSocket implements Listener {
 				byte[] codeHash = acctInfo.getKey().value;
 				ACCT acct = acctInfo.getValue().get();
 
-				List<ATStateData> historicAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash,
+				List<ATStateData> historicAtStates = repository.getATRepository().getMatchingFinalATStates(codeHash, null, null,
 					isFinished, dataByteOffset, expectedValue, minimumFinalHeight,
 					null, null, null);
 

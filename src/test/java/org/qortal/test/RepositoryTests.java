@@ -405,7 +405,7 @@ public class RepositoryTests extends Common {
 			Integer offset = null;
 			Boolean reverse = null;
 
-			hsqldb.getATRepository().getMatchingFinalATStates(codeHash, isFinished, dataByteOffset, expectedValue, minimumFinalHeight, limit, offset, reverse);
+			hsqldb.getATRepository().getMatchingFinalATStates(codeHash,null, null, isFinished, dataByteOffset, expectedValue, minimumFinalHeight, limit, offset, reverse);
 		} catch (DataException e) {
 			fail("HSQLDB bug #1580");
 		}
