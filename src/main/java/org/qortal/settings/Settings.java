@@ -501,6 +501,13 @@ public class Settings {
 	 */
     private boolean rewardRecordingOnly = true;
 
+	/**
+	 * Is The Connection Monitored?
+	 *
+	 * Is the database connection pooled monitored?
+	 */
+    private boolean connectionPoolMonitorEnabled = false;
+
     // Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
@@ -1321,5 +1328,9 @@ public class Settings {
 
 	public boolean isRewardRecordingOnly() {
 		return rewardRecordingOnly;
+	}
+
+	public boolean isConnectionPoolMonitorEnabled() {
+		return connectionPoolMonitorEnabled;
 	}
 }
