@@ -2511,7 +2511,7 @@ public class Block {
 					= new BlockRewardCandidate("Minter Admins", minterAdminShare, minterAdminDistributor);
 				rewardCandidates.add(minterAdminRewardCandidate);
 
-				totalShares -= minterAdminShare;
+				totalShares += minterAdminShare;
 
 				LOGGER.info("MINTER ADMIN SHARE: {}",minterAdminShare);
 
