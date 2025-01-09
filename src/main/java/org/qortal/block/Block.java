@@ -26,6 +26,7 @@ import org.qortal.data.block.BlockTransactionData;
 import org.qortal.data.group.GroupAdminData;
 import org.qortal.data.network.OnlineAccountData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.group.Group;
 import org.qortal.repository.*;
 import org.qortal.settings.Settings;
 import org.qortal.transaction.AtTransaction;
@@ -2497,21 +2498,28 @@ public class Block {
 						.filter(expandedAccount ->  minterAdmins.contains(expandedAccount.getMintingAccount().getAddress()))
 						.collect(Collectors.toList());
 
-				BlockRewardDistributor minterAdminDistributor
-					= (distributionAmount, balanceChanges)
-						->
-						distributeBlockRewardShare(distributionAmount, onlineMinterAdminAccounts, balanceChanges);
+				long minterAdminShare;
 
-				long adminShare = 1_00000000 - totalShares;
-				LOGGER.info("initial total Shares: {}",totalShares);
-				LOGGER.info("logging adminShare after hardfork, this is the primary reward that will be split {}",adminShare);
+				if( onlineMinterAdminAccounts.isEmpty() ) {
+					minterAdminShare = 0;
+				}
+				else {
+					BlockRewardDistributor minterAdminDistributor
+							= (distributionAmount, balanceChanges)
+							->
+							distributeBlockRewardShare(distributionAmount, onlineMinterAdminAccounts, balanceChanges);
 
-				long minterAdminShare = adminShare / 2;
-				BlockRewardCandidate minterAdminRewardCandidate
-					= new BlockRewardCandidate("Minter Admins", minterAdminShare, minterAdminDistributor);
-				rewardCandidates.add(minterAdminRewardCandidate);
+					long adminShare = 1_00000000 - totalShares;
+					LOGGER.info("initial total Shares: {}", totalShares);
+					LOGGER.info("logging adminShare after hardfork, this is the primary reward that will be split {}", adminShare);
 
-				totalShares += minterAdminShare;
+					minterAdminShare = adminShare / 2;
+					BlockRewardCandidate minterAdminRewardCandidate
+							= new BlockRewardCandidate("Minter Admins", minterAdminShare, minterAdminDistributor);
+					rewardCandidates.add(minterAdminRewardCandidate);
+
+					totalShares += minterAdminShare;
+				}
 
 				LOGGER.info("MINTER ADMIN SHARE: {}",minterAdminShare);
 
@@ -2520,6 +2528,10 @@ public class Block {
 						= groupRepository.getGroupAdmins(1).stream()
 						.map(GroupAdminData::getAdmin)
 						.collect(Collectors.toList());
+
+				LOGGER.info("Removing NULL Account Address, Dev Admin Count = {}", devAdminAddresses.size());
+				devAdminAddresses.removeIf( address -> Group.NULL_OWNER_ADDRESS.equals(address) );
+				LOGGER.info("Removed NULL Account Address, Dev Admin Count = {}", devAdminAddresses.size());
 
 				BlockRewardDistributor devAdminDistributor
 					= (distributionAmount, balanceChanges) -> distributeToAccounts(distributionAmount, devAdminAddresses, balanceChanges);
@@ -2547,6 +2559,8 @@ public class Block {
 	 * @return the total amount mapped to addresses for distribution
 	 */
 	public static long distributeToAccounts(long distributionAmount, List<String> accountAddressess, Map<String, Long> balanceChanges) {
+
+		if( accountAddressess.isEmpty() ) return 0;
 
 		long distibutionShare = distributionAmount / accountAddressess.size();
 
