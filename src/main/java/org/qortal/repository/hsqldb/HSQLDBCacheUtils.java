@@ -180,7 +180,10 @@ public class HSQLDBCacheUtils {
             Optional<Boolean> reverse) {
 
         // retain only candidates with names
-        Stream<ArbitraryResourceData> stream = candidates.stream().filter(candidate -> candidate.name != null);
+        Stream<ArbitraryResourceData> stream = candidates.stream().filter(candidate -> candidate.name != null );
+
+        if(exclude.isPresent())
+            stream = stream.filter( candidate -> !exclude.get().get().contains( candidate.name ));
 
         // filter by service
         if( service.isPresent() )

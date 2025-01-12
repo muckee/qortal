@@ -399,7 +399,7 @@ public class HSQLDBCacheUtilsTests {
     }
 
     @Test
-    public void testExcludeBlockedPositive() {
+    public void testExcludeBlockedNegative() {
 
         ArbitraryResourceData data = new ArbitraryResourceData();
         data.name = "Joe";
@@ -410,6 +410,21 @@ public class HSQLDBCacheUtilsTests {
                 List.of(data),
                 NAME_LEVEL, new HashMap<>(Map.of(EXCLUDE_BLOCKED, supplier)),
                 1
+        );
+    }
+
+    @Test
+    public void testExcludeBlockedPositive() {
+
+        ArbitraryResourceData data = new ArbitraryResourceData();
+        data.name = "Joe";
+
+        Supplier<List<String>> supplier = () -> List.of("Joe");
+
+        filterListByMap(
+                List.of(data),
+                NAME_LEVEL, new HashMap<>(Map.of(EXCLUDE_BLOCKED, supplier)),
+                0
         );
     }
 
