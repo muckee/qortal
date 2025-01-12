@@ -216,7 +216,16 @@ public class Account {
 		String myAddress = accountData.getAddress();
 
 		int blockchainHeight = this.repository.getBlockRepository().getBlockchainHeight();
-		int levelToMint = BlockChain.getInstance().getMinAccountLevelToMint();
+
+		int levelToMint;
+
+		if( blockchainHeight >= BlockChain.getInstance().getIgnoreLevelForRewardShareHeight() ) {
+			levelToMint = 0;
+		}
+		else {
+			levelToMint = BlockChain.getInstance().getMinAccountLevelToMint();
+		}
+
 		int level = accountData.getLevel();
 		int groupIdToMint = BlockChain.getInstance().getMintingGroupId();
 		int nameCheckHeight = BlockChain.getInstance().getOnlyMintWithNameHeight();
@@ -304,6 +313,9 @@ public class Account {
 			return true;
 
 		if (Account.isFounder(accountData.getFlags()) && accountData.getBlocksMintedPenalty() == 0)
+			return true;
+
+		if( this.repository.getBlockRepository().getBlockchainHeight() >= BlockChain.getInstance().getIgnoreLevelForRewardShareHeight() )
 			return true;
 
 		return false;
