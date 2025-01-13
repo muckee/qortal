@@ -90,7 +90,6 @@ public class BlockChain {
 		groupMemberCheckHeight,
 		fixBatchRewardHeight,
 		adminsReplaceFoundersHeight,
-		onlineValidationFailSafeHeight,
 		nullGroupMembershipHeight,
 		ignoreLevelForRewardShareHeight
 	}
@@ -668,10 +667,6 @@ public class BlockChain {
 
 	public int getAdminsReplaceFoundersHeight() {
 		return this.featureTriggers.get(FeatureTrigger.adminsReplaceFoundersHeight.name()).intValue();
-	}
-
-	public int getOnlineValidationFailSafeHeight() {
-		return this.featureTriggers.get(FeatureTrigger.onlineValidationFailSafeHeight.name()).intValue();
 	}
 
 	public int getNullGroupMembershipHeight() {

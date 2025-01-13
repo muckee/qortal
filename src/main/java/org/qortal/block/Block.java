@@ -418,7 +418,9 @@ public class Block {
 			onlineAccounts.removeIf(a -> a.getNonce() == null || a.getNonce() < 0);
 
 			// After feature trigger, remove any online accounts that are level 0
-			if (height >= BlockChain.getInstance().getOnlineAccountMinterLevelValidationHeight()) {
+			// but only if they are before the ignore level feature trigger
+			if (height < BlockChain.getInstance().getIgnoreLevelForRewardShareHeight() &&
+					height >= BlockChain.getInstance().getOnlineAccountMinterLevelValidationHeight()) {
 				onlineAccounts.removeIf(a -> {
 					try {
 						return Account.getRewardShareEffectiveMintingLevel(repository, a.getPublicKey()) == 0;
@@ -1161,34 +1163,31 @@ public class Block {
 		if (onlineRewardShares == null)
 			return ValidationResult.ONLINE_ACCOUNT_UNKNOWN;
 
-		// After feature trigger, require all online account minters to be greater than level 0
-		if (this.getBlockData().getHeight() >= BlockChain.getInstance().getOnlineAccountMinterLevelValidationHeight()) {
-			if( this.blockData.getHeight() < BlockChain.getInstance().getOnlineValidationFailSafeHeight()) {
-				List<ExpandedAccount> expandedAccounts
+		// After feature trigger, require all online account minters to be greater than level 0,
+		// but only if it is before the feature trigger where we ignore level again
+		if (this.blockData.getHeight() < BlockChain.getInstance().getIgnoreLevelForRewardShareHeight() &&
+			this.getBlockData().getHeight() >= BlockChain.getInstance().getOnlineAccountMinterLevelValidationHeight()) {
+			List<ExpandedAccount> expandedAccounts
 					= this.getExpandedAccounts().stream()
-						.filter(expandedAccount -> expandedAccount.isMinterMember)
-						.collect(Collectors.toList());
+					.filter(expandedAccount -> expandedAccount.isMinterMember)
+					.collect(Collectors.toList());
 
-				for (ExpandedAccount account : expandedAccounts) {
-					if (account.getMintingAccount().getEffectiveMintingLevel() == 0)
+			for (ExpandedAccount account : expandedAccounts) {
+				if (account.getMintingAccount().getEffectiveMintingLevel() == 0)
+					return ValidationResult.ONLINE_ACCOUNTS_INVALID;
+
+				if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight()) {
+					if (!account.isMinterMember)
 						return ValidationResult.ONLINE_ACCOUNTS_INVALID;
-
-					if (this.getBlockData().getHeight() >= BlockChain.getInstance().getFixBatchRewardHeight()) {
-						if (!account.isMinterMember)
-							return ValidationResult.ONLINE_ACCOUNTS_INVALID;
-					}
 				}
 			}
-			// this.blockData.getHeight() >= BlockChain.getInstance().getOnlineValidationFailSafeHeight()
-			else {
-				Optional<ExpandedAccount> anyInvalidAccount
+		}
+		else if (this.blockData.getHeight() >= BlockChain.getInstance().getIgnoreLevelForRewardShareHeight()){
+			Optional<ExpandedAccount> anyInvalidAccount
 					= this.getExpandedAccounts().stream()
-						.filter(
-							account -> account.getEffectiveMintingLevel() == 0 ||
-									!account.isMinterMember)
-						.findAny();
-				if( anyInvalidAccount.isPresent() ) return ValidationResult.ONLINE_ACCOUNTS_INVALID;
-			}
+					.filter(account -> !account.isMinterMember)
+					.findAny();
+			if( anyInvalidAccount.isPresent() ) return ValidationResult.ONLINE_ACCOUNTS_INVALID;
 		}
 
 		// If block is past a certain age then we simply assume the signatures were correct
