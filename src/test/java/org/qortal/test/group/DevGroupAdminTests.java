@@ -6,6 +6,7 @@ import org.junit.Test;
 import org.qortal.account.PrivateKeyAccount;
 import org.qortal.block.Block;
 import org.qortal.block.BlockChain;
+import org.qortal.data.group.GroupAdminData;
 import org.qortal.data.transaction.*;
 import org.qortal.group.Group;
 import org.qortal.repository.DataException;
@@ -564,6 +565,26 @@ public class DevGroupAdminTests extends Common {
 
 			// assert dilbert is not in the group
 			assertFalse(isMember(repository, dilbert.getAddress(), DEV_GROUP_ID));
+		}
+	}
+
+	@Test
+	public void testGetAdmin()  throws DataException{
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			// establish accounts
+			PrivateKeyAccount alice = Common.getTestAccount(repository, ALICE);
+			PrivateKeyAccount bob = Common.getTestAccount(repository, BOB);
+
+			GroupAdminData aliceAdminData = repository.getGroupRepository().getAdmin(DEV_GROUP_ID, alice.getAddress());
+
+			assertNotNull(aliceAdminData);
+			assertEquals( alice.getAddress(), aliceAdminData.getAdmin() );
+			assertEquals( DEV_GROUP_ID, aliceAdminData.getGroupId());
+
+			GroupAdminData bobAdminData = repository.getGroupRepository().getAdmin(DEV_GROUP_ID, bob.getAddress());
+
+			assertNull(bobAdminData);
 		}
 	}
 

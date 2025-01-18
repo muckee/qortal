@@ -2,6 +2,7 @@ package org.qortal.group;
 
 import org.qortal.account.Account;
 import org.qortal.account.PublicKeyAccount;
+import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.group.*;
@@ -150,7 +151,12 @@ public class Group {
 	// Adminship
 
 	private GroupAdminData getAdmin(String admin) throws DataException {
-		return groupRepository.getAdmin(this.groupData.getGroupId(), admin);
+		if( repository.getBlockRepository().getBlockchainHeight() < BlockChain.getInstance().getAdminQueryFixHeight()) {
+			return groupRepository.getAdminFaulty(this.groupData.getGroupId(), admin);
+		}
+		else {
+			return groupRepository.getAdmin(this.groupData.getGroupId(), admin);
+		}
 	}
 
 	private boolean adminExists(String admin) throws DataException {

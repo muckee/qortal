@@ -91,7 +91,8 @@ public class BlockChain {
 		fixBatchRewardHeight,
 		adminsReplaceFoundersHeight,
 		nullGroupMembershipHeight,
-		ignoreLevelForRewardShareHeight
+		ignoreLevelForRewardShareHeight,
+		adminQueryFixHeight
 	}
 
 	// Custom transaction fees
@@ -675,6 +676,10 @@ public class BlockChain {
 
 	public int getIgnoreLevelForRewardShareHeight() {
 		return this.featureTriggers.get(FeatureTrigger.ignoreLevelForRewardShareHeight.name()).intValue();
+	}
+
+	public int getAdminQueryFixHeight() {
+		return this.featureTriggers.get(FeatureTrigger.adminQueryFixHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp
