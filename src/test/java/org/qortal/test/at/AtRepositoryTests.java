@@ -218,6 +218,8 @@ public class AtRepositoryTests extends Common {
 
 			List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(
 					codeHash,
+					null,
+					null,
 					isFinished,
 					dataByteOffset,
 					expectedValue,
@@ -264,6 +266,8 @@ public class AtRepositoryTests extends Common {
 
 			List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(
 					codeHash,
+					null,
+					null,
 					isFinished,
 					dataByteOffset,
 					expectedValue,

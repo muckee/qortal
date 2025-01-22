@@ -32,6 +32,7 @@ import org.qortal.controller.Synchronizer.SynchronizationResult;
 import org.qortal.controller.repository.BlockArchiveRebuilder;
 import org.qortal.data.account.MintingAccountData;
 import org.qortal.data.account.RewardShareData;
+import org.qortal.data.system.DbConnectionInfo;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
@@ -40,6 +41,7 @@ import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
+import org.qortal.data.system.SystemInfo;
 import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 
@@ -52,6 +54,7 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -1064,4 +1067,50 @@ public class AdminResource {
 		return "true";
 	}
 
+	@GET
+	@Path("/systeminfo")
+	@Operation(
+			summary = "System Information",
+			description = "System memory usage and available processors.",
+			responses = {
+					@ApiResponse(
+							description = "memory usage and available processors",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = SystemInfo.class))
+					)
+			}
+	)
+	@ApiErrors({ApiError.REPOSITORY_ISSUE})
+	public SystemInfo getSystemInformation() {
+
+		SystemInfo info
+			= new SystemInfo(
+				Runtime.getRuntime().freeMemory(),
+				Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory(),
+				Runtime.getRuntime().totalMemory(),
+				Runtime.getRuntime().maxMemory(),
+				Runtime.getRuntime().availableProcessors());
+
+		return info;
+	}
+
+	@GET
+	@Path("/dbstates")
+	@Operation(
+			summary = "Get DB States",
+			description = "Get DB States",
+			responses = {
+					@ApiResponse(
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = DbConnectionInfo.class)))
+					)
+			}
+	)
+	public List<DbConnectionInfo> getDbConnectionsStates() {
+
+		try {
+			return Controller.REPOSITORY_FACTORY.getDbConnectionsStates();
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			return new ArrayList<>(0);
+		}
+	}
 }

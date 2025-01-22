@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 import org.hsqldb.HsqlException;
 import org.hsqldb.error.ErrorCode;
 import org.hsqldb.jdbc.HSQLDBPool;
+import org.hsqldb.jdbc.HSQLDBPoolMonitored;
+import org.qortal.data.system.DbConnectionInfo;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryFactory;
@@ -14,6 +16,8 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 public class HSQLDBRepositoryFactory implements RepositoryFactory {
@@ -57,7 +61,13 @@ public class HSQLDBRepositoryFactory implements RepositoryFactory {
 			HSQLDBRepository.attemptRecovery(connectionUrl, "backup");
 		}
 
-		this.connectionPool = new HSQLDBPool(Settings.getInstance().getRepositoryConnectionPoolSize());
+		if(Settings.getInstance().isConnectionPoolMonitorEnabled()) {
+			this.connectionPool = new HSQLDBPoolMonitored(Settings.getInstance().getRepositoryConnectionPoolSize());
+		}
+		else {
+			this.connectionPool = new HSQLDBPool(Settings.getInstance().getRepositoryConnectionPoolSize());
+		}
+
 		this.connectionPool.setUrl(this.connectionUrl);
 
 		Properties properties = new Properties();
@@ -153,4 +163,19 @@ public class HSQLDBRepositoryFactory implements RepositoryFactory {
 		return HSQLDBRepository.isDeadlockException(e);
 	}
 
+	/**
+	 * Get Connection States
+	 *
+	 * Get the database connection states, if database connection pool monitoring is enabled.
+	 *
+	 * @return the connection states if enabled, otherwise an empty list
+	 */
+	public List<DbConnectionInfo> getDbConnectionsStates() {
+		if( Settings.getInstance().isConnectionPoolMonitorEnabled() ) {
+			return ((HSQLDBPoolMonitored) this.connectionPool).getDbConnectionsStates();
+		}
+		else {
+			return new ArrayList<>(0);
+		}
+	}
 }

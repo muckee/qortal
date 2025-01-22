@@ -388,6 +388,7 @@ public class ArbitraryTransaction extends Transaction {
 		// Get the latest transaction
 		ArbitraryTransactionData latestTransactionData = repository.getArbitraryRepository().getLatestTransaction(arbitraryTransactionData.getName(), arbitraryTransactionData.getService(), null, arbitraryTransactionData.getIdentifier());
 		if (latestTransactionData == null) {
+			LOGGER.info("We don't have a latest transaction, so delete from cache: arbitraryResourceData = " + arbitraryResourceData);
 			// We don't have a latest transaction, so delete from cache
 			repository.getArbitraryRepository().delete(arbitraryResourceData);
 			return;
@@ -397,11 +398,14 @@ public class ArbitraryTransaction extends Transaction {
 		ArbitraryResourceData existingArbitraryResourceData = repository.getArbitraryRepository()
 				.getArbitraryResource(service, name, identifier);
 
+		LOGGER.info("updating existing arbitraryResourceData" + existingArbitraryResourceData);
+
 		// Check for existing cached data
 		if (existingArbitraryResourceData == null) {
 			// Nothing exists yet, so set creation date from the current transaction (it will be reduced later if needed)
 			arbitraryResourceData.created = arbitraryTransactionData.getTimestamp();
 			arbitraryResourceData.updated = null;
+			LOGGER.info("updated = null, reason = existingArbitraryResourceData == null" );
 		}
 		else {
 			// An entry already exists - update created time from current transaction if this is older
@@ -411,13 +415,19 @@ public class ArbitraryTransaction extends Transaction {
 			if (existingArbitraryResourceData.created == latestTransactionData.getTimestamp()) {
 				// Latest transaction matches created time, so it hasn't been updated
 				arbitraryResourceData.updated = null;
+				LOGGER.info(
+						"updated = null, reason: existingArbitraryResourceData.created == latestTransactionData.getTimestamp() == " +
+						existingArbitraryResourceData.created );
 			}
 			else {
 				arbitraryResourceData.updated = latestTransactionData.getTimestamp();
+				LOGGER.info("setting updated to a non-null value");
 			}
 		}
 
 		arbitraryResourceData.size = latestTransactionData.getSize();
+
+		LOGGER.info("saving updated arbitraryResourceData: updated = " +  arbitraryResourceData.updated);
 
 		// Save
 		repository.getArbitraryRepository().save(arbitraryResourceData);
