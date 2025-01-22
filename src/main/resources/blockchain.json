@@ -114,10 +114,10 @@
 		"removeOnlyMintWithNameHeight": 1935500,
 		"groupMemberCheckHeight": 1902700,
 		"fixBatchRewardHeight": 1945900,
-		"adminsReplaceFoundersHeight": 9999999,
-		"nullGroupMembershipHeight": 9999999,
-		"ignoreLevelForRewardShareHeight": 9999999,
-		"adminQueryFixHeight": 9999999
+		"adminsReplaceFoundersHeight": 2012300,
+		"nullGroupMembershipHeight": 2012300,
+		"ignoreLevelForRewardShareHeight": 2012300,
+		"adminQueryFixHeight": 2012300
 	},
 	"checkpoints": [
 		{ "height": 1136300, "signature": "3BbwawEF2uN8Ni5ofpJXkukoU8ctAPxYoFB7whq9pKfBnjfZcpfEJT4R95NvBDoTP8WDyWvsUvbfHbcr9qSZuYpSKZjUQTvdFf6eqznHGEwhZApWfvXu6zjGCxYCp65F4jsVYYJjkzbjmkCg5WAwN5voudngA23kMK6PpTNygapCzXt" }
