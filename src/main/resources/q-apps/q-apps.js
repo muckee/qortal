@@ -288,7 +288,7 @@ window.addEventListener("message", async (event) => {
 
     let url;
     let data = event.data;
-
+    let identifier;
     switch (data.action) {
         case "GET_ACCOUNT_DATA":
             return httpGetAsyncWithEvent(event, "/addresses/" + data.address);
@@ -419,7 +419,7 @@ window.addEventListener("message", async (event) => {
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_QDN_RESOURCE_PROPERTIES":
-            let identifier = (data.identifier != null) ? data.identifier : "default";
+            identifier = (data.identifier != null) ? data.identifier : "default";
             url = "/arbitrary/resource/properties/" + data.service + "/" + data.name + "/" + identifier;
             return httpGetAsyncWithEvent(event, url);
 
