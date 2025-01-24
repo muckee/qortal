@@ -456,7 +456,7 @@ window.addEventListener("message", async (event) => {
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_AT":
-            url = "/at" + data.atAddress;
+            url = "/at/" + data.atAddress;
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_AT_DATA":
