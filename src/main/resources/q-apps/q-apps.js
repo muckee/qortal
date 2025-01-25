@@ -473,7 +473,7 @@ window.addEventListener("message", async (event) => {
 
         case "FETCH_BLOCK":
             if (data.signature != null) {
-                url = "/blocks/" + data.signature;
+                url = "/blocks/signature/" + data.signature;
             } else if (data.height != null) {
                 url = "/blocks/byheight/" + data.height;
             }
