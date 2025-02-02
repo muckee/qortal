@@ -674,8 +674,8 @@ public class Group {
 	public void uninvite(GroupInviteTransactionData groupInviteTransactionData) throws DataException {
 		String invitee = groupInviteTransactionData.getInvitee();
 
-		// If member exists then they were added when invite matched join request
-		if (this.memberExists(invitee)) {
+		// If member exists and the join request is present then they were added when invite matched join request
+		if (this.memberExists(invitee) && groupInviteTransactionData.getJoinReference() != null) {
 			// Rebuild join request using cached reference to transaction that created join request.
 			this.rebuildJoinRequest(invitee, groupInviteTransactionData.getJoinReference());
 
