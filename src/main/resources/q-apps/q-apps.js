@@ -712,7 +712,6 @@ resetVariables()
  * Handle app navigation
  */
 navigation.addEventListener('navigate', (event) => {
-    console.log('navigate', event)
 
     const url = new URL(event.destination.url);
 
