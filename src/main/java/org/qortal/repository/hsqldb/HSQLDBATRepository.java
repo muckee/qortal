@@ -5,6 +5,7 @@ import com.google.common.primitives.Longs;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
+import org.qortal.crypto.Crypto;
 import org.qortal.data.at.ATData;
 import org.qortal.data.at.ATStateData;
 import org.qortal.repository.ATRepository;
@@ -403,9 +404,9 @@ public class HSQLDBATRepository implements ATRepository {
 	}
 
 	@Override
-	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, String buyerAddress, String sellerAddress, Boolean isFinished,
-			Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
-			Integer limit, Integer offset, Boolean reverse) throws DataException {
+	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, byte[] buyerPublicKey, byte[] sellerPublicKey, Boolean isFinished,
+			  Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
+			  Integer limit, Integer offset, Boolean reverse) throws DataException {
 		StringBuilder sql = new StringBuilder(1024);
 		List<Object> bindParams = new ArrayList<>();
 
@@ -426,9 +427,9 @@ public class HSQLDBATRepository implements ATRepository {
 		// Both must be the same direction (DESC) also
 		sql.append("ORDER BY ATStates.height DESC LIMIT 1) AS FinalATStates ");
 
-		// Optional LEFT JOIN with ATTRANSACTIONS for buyerAddress
-		if (buyerAddress != null && !buyerAddress.isEmpty()) {
-			sql.append("LEFT JOIN ATTRANSACTIONS tx ON tx.at_address = ATs.AT_address ");
+		// Optional JOIN with ATTRANSACTIONS for buyerAddress
+		if (buyerPublicKey != null && buyerPublicKey.length > 0) {
+			sql.append("JOIN ATTRANSACTIONS tx ON tx.at_address = ATs.AT_address ");
 		}
 	
 		sql.append("WHERE ATs.code_hash = ? ");
@@ -450,18 +451,18 @@ public class HSQLDBATRepository implements ATRepository {
 			bindParams.add(rawExpectedValue);
 		}
 
-		if (buyerAddress != null && !buyerAddress.isEmpty()) {
-			sql.append("AND tx.recipient = ? ");
-			bindParams.add(buyerAddress);
+		if (buyerPublicKey != null && buyerPublicKey.length > 0 ) {
+			// the buyer must be the recipient of the transaction and not the creator of the AT
+			sql.append("AND tx.recipient = ? AND ATs.creator != ? ");
+
+			bindParams.add(Crypto.toAddress(buyerPublicKey));
+			bindParams.add(buyerPublicKey);
 		}
 
 
-		if (sellerAddress != null && !sellerAddress.isEmpty()) {
-			// Convert sellerAddress to publicKey (method depends on your implementation)
-			AccountData accountData = this.repository.getAccountRepository().getAccount(sellerAddress);
-			byte[] publicKey = accountData.getPublicKey();
+		if (sellerPublicKey != null && sellerPublicKey.length > 0) {
 			sql.append("AND ATs.creator = ? ");
-			bindParams.add(publicKey);
+			bindParams.add(sellerPublicKey);
 		}
 
 		sql.append(" ORDER BY FinalATStates.height ");
