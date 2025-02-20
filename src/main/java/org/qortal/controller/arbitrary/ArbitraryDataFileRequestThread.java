@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.transaction.ArbitraryTransactionData;
+import org.qortal.event.DataMonitorEvent;
+import org.qortal.event.EventBus;
 import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -118,8 +120,32 @@ public class ArbitraryDataFileRequestThread implements Runnable {
                 return;
             }
 
+            EventBus.INSTANCE.notify(
+                new DataMonitorEvent(
+                    System.currentTimeMillis(),
+                    arbitraryTransactionData.getIdentifier(),
+                    arbitraryTransactionData.getName(),
+                    arbitraryTransactionData.getService().name(),
+                    "fetching file from peer",
+                    arbitraryTransactionData.getTimestamp(),
+                    arbitraryTransactionData.getTimestamp()
+                )
+            );
+
             LOGGER.trace("Fetching file {} from peer {} via request thread...", hash58, peer);
             arbitraryDataFileManager.fetchArbitraryDataFiles(repository, peer, signature, arbitraryTransactionData, Arrays.asList(hash));
+
+            EventBus.INSTANCE.notify(
+                new DataMonitorEvent(
+                    System.currentTimeMillis(),
+                    arbitraryTransactionData.getIdentifier(),
+                    arbitraryTransactionData.getName(),
+                    arbitraryTransactionData.getService().name(),
+                    "fetched file from peer",
+                    arbitraryTransactionData.getTimestamp(),
+                    arbitraryTransactionData.getTimestamp()
+                )
+            );
 
         } catch (DataException e) {
             LOGGER.debug("Unable to process file hashes: {}", e.getMessage());

@@ -10,6 +10,8 @@ import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.event.DataMonitorEvent;
+import org.qortal.event.EventBus;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
@@ -225,12 +227,35 @@ public class ArbitraryDataManager extends Thread {
 					// Skip transactions that we don't need to proactively store data for
 					if (!storageManager.shouldPreFetchData(repository, arbitraryTransactionData)) {
 						iterator.remove();
+
+						EventBus.INSTANCE.notify(
+							new DataMonitorEvent(
+								System.currentTimeMillis(),
+								arbitraryTransactionData.getIdentifier(),
+								arbitraryTransactionData.getName(),
+								arbitraryTransactionData.getService().name(),
+								"don't need to proactively store, skipping",
+								arbitraryTransactionData.getTimestamp(),
+								arbitraryTransactionData.getTimestamp()
+							)
+						);
 						continue;
 					}
 
 					// Remove transactions that we already have local data for
 					if (hasLocalData(arbitraryTransaction)) {
 						iterator.remove();
+						EventBus.INSTANCE.notify(
+							new DataMonitorEvent(
+								System.currentTimeMillis(),
+								arbitraryTransactionData.getIdentifier(),
+								arbitraryTransactionData.getName(),
+								arbitraryTransactionData.getService().name(),
+								"already have local data, skipping",
+								arbitraryTransactionData.getTimestamp(),
+								arbitraryTransactionData.getTimestamp()
+							)
+						);
                     }
 				}
 
@@ -248,8 +273,21 @@ public class ArbitraryDataManager extends Thread {
 
 				// Check to see if we have had a more recent PUT
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
-				boolean hasMoreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
-				if (hasMoreRecentPutTransaction) {
+
+				Optional<ArbitraryTransactionData> moreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
+
+				if (moreRecentPutTransaction.isPresent()) {
+					EventBus.INSTANCE.notify(
+						new DataMonitorEvent(
+							System.currentTimeMillis(),
+							arbitraryTransactionData.getIdentifier(),
+							arbitraryTransactionData.getName(),
+							arbitraryTransactionData.getService().name(),
+							"not fetching old data",
+							arbitraryTransactionData.getTimestamp(),
+							moreRecentPutTransaction.get().getTimestamp()
+						)
+					);
 					// There is a more recent PUT transaction than the one we are currently processing.
 					// When a PUT is issued, it replaces any layers that would have been there before.
 					// Therefore any data relating to this older transaction is no longer needed and we
@@ -257,9 +295,33 @@ public class ArbitraryDataManager extends Thread {
 					continue;
 				}
 
+				EventBus.INSTANCE.notify(
+					new DataMonitorEvent(
+						System.currentTimeMillis(),
+						arbitraryTransactionData.getIdentifier(),
+						arbitraryTransactionData.getName(),
+						arbitraryTransactionData.getService().name(),
+						"fetching data",
+						arbitraryTransactionData.getTimestamp(),
+						arbitraryTransactionData.getTimestamp()
+					)
+				);
+
 				// Ask our connected peers if they have files for this signature
 				// This process automatically then fetches the files themselves if a peer is found
 				fetchData(arbitraryTransactionData);
+
+				EventBus.INSTANCE.notify(
+					new DataMonitorEvent(
+						System.currentTimeMillis(),
+						arbitraryTransactionData.getIdentifier(),
+						arbitraryTransactionData.getName(),
+						arbitraryTransactionData.getService().name(),
+						"fetched data",
+						arbitraryTransactionData.getTimestamp(),
+						arbitraryTransactionData.getTimestamp()
+					)
+				);
 
 			} catch (DataException e) {
 				LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
@@ -330,8 +392,22 @@ public class ArbitraryDataManager extends Thread {
 
 				// Check to see if we have had a more recent PUT
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
-				boolean hasMoreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
-				if (hasMoreRecentPutTransaction) {
+				Optional<ArbitraryTransactionData> moreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
+
+				if (moreRecentPutTransaction.isPresent()) {
+
+					EventBus.INSTANCE.notify(
+						new DataMonitorEvent(
+							System.currentTimeMillis(),
+							arbitraryTransactionData.getIdentifier(),
+							arbitraryTransactionData.getName(),
+							arbitraryTransactionData.getService().name(),
+							"not fetching old metadata",
+							arbitraryTransactionData.getTimestamp(),
+							moreRecentPutTransaction.get().getTimestamp()
+						)
+					);
+
 					// There is a more recent PUT transaction than the one we are currently processing.
 					// When a PUT is issued, it replaces any layers that would have been there before.
 					// Therefore any data relating to this older transaction is no longer needed and we
@@ -339,9 +415,32 @@ public class ArbitraryDataManager extends Thread {
 					continue;
 				}
 
+				EventBus.INSTANCE.notify(
+					new DataMonitorEvent(
+						System.currentTimeMillis(),
+						arbitraryTransactionData.getIdentifier(),
+						arbitraryTransactionData.getName(),
+						arbitraryTransactionData.getService().name(),
+						"fetching metadata",
+						arbitraryTransactionData.getTimestamp(),
+						arbitraryTransactionData.getTimestamp()
+					)
+				);
+
 				// Ask our connected peers if they have metadata for this signature
 				fetchMetadata(arbitraryTransactionData);
 
+				EventBus.INSTANCE.notify(
+					new DataMonitorEvent(
+						System.currentTimeMillis(),
+						arbitraryTransactionData.getIdentifier(),
+						arbitraryTransactionData.getName(),
+						arbitraryTransactionData.getService().name(),
+						"fetched metadata",
+						arbitraryTransactionData.getTimestamp(),
+						arbitraryTransactionData.getTimestamp()
+					)
+				);
 			} catch (DataException e) {
 				LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
 			}
