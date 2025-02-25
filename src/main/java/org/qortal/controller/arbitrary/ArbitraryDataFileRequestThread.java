@@ -120,32 +120,8 @@ public class ArbitraryDataFileRequestThread implements Runnable {
                 return;
             }
 
-            EventBus.INSTANCE.notify(
-                new DataMonitorEvent(
-                    System.currentTimeMillis(),
-                    arbitraryTransactionData.getIdentifier(),
-                    arbitraryTransactionData.getName(),
-                    arbitraryTransactionData.getService().name(),
-                    "fetching file from peer",
-                    arbitraryTransactionData.getTimestamp(),
-                    arbitraryTransactionData.getTimestamp()
-                )
-            );
-
             LOGGER.trace("Fetching file {} from peer {} via request thread...", hash58, peer);
             arbitraryDataFileManager.fetchArbitraryDataFiles(repository, peer, signature, arbitraryTransactionData, Arrays.asList(hash));
-
-            EventBus.INSTANCE.notify(
-                new DataMonitorEvent(
-                    System.currentTimeMillis(),
-                    arbitraryTransactionData.getIdentifier(),
-                    arbitraryTransactionData.getName(),
-                    arbitraryTransactionData.getService().name(),
-                    "fetched file from peer",
-                    arbitraryTransactionData.getTimestamp(),
-                    arbitraryTransactionData.getTimestamp()
-                )
-            );
 
         } catch (DataException e) {
             LOGGER.debug("Unable to process file hashes: {}", e.getMessage());

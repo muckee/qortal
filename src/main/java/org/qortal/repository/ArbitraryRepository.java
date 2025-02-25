@@ -27,6 +27,8 @@ public interface ArbitraryRepository {
 
 	public List<ArbitraryTransactionData> getArbitraryTransactions(String name, Service service, String identifier, long since) throws DataException;
 
+	List<ArbitraryTransactionData> getLatestArbitraryTransactions(int limit) throws DataException;
+
 	public ArbitraryTransactionData getInitialTransaction(String name, Service service, Method method, String identifier) throws DataException;
 
 	public ArbitraryTransactionData getLatestTransaction(String name, Service service, Method method, String identifier) throws DataException;
