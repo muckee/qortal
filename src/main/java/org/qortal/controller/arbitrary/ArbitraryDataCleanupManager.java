@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 import org.qortal.api.resource.TransactionsResource.ConfirmationStatus;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.event.DataMonitorEvent;
+import org.qortal.event.EventBus;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -23,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.qortal.controller.arbitrary.ArbitraryDataStorageManager.DELETION_THRESHOLD;
 
@@ -167,11 +170,24 @@ public class ArbitraryDataCleanupManager extends Thread {
 							LOGGER.info("Deleting transaction {} because we can't host its data",
 									Base58.encode(arbitraryTransactionData.getSignature()));
 							ArbitraryTransactionUtils.deleteCompleteFileAndChunks(arbitraryTransactionData);
+
+							EventBus.INSTANCE.notify(
+								new DataMonitorEvent(
+									System.currentTimeMillis(),
+									arbitraryTransactionData.getIdentifier(),
+									arbitraryTransactionData.getName(),
+									arbitraryTransactionData.getService().name(),
+									"can't store data, deleting",
+									arbitraryTransactionData.getTimestamp(),
+									arbitraryTransactionData.getTimestamp()
+								)
+							);
 							continue;
 						}
 
 						// Check to see if we have had a more recent PUT
-						boolean hasMoreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
+						Optional<ArbitraryTransactionData> moreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
+						boolean hasMoreRecentPutTransaction = moreRecentPutTransaction.isPresent();
 						if (hasMoreRecentPutTransaction) {
 							// There is a more recent PUT transaction than the one we are currently processing.
 							// When a PUT is issued, it replaces any layers that would have been there before.
@@ -181,6 +197,17 @@ public class ArbitraryDataCleanupManager extends Thread {
 									arbitraryTransactionData.getName(), Base58.encode(signature)));
 
 							ArbitraryTransactionUtils.deleteCompleteFileAndChunks(arbitraryTransactionData);
+							EventBus.INSTANCE.notify(
+								new DataMonitorEvent(
+									System.currentTimeMillis(),
+									arbitraryTransactionData.getIdentifier(),
+									arbitraryTransactionData.getName(),
+									arbitraryTransactionData.getService().name(),
+									"deleting data due to replacement",
+									arbitraryTransactionData.getTimestamp(),
+									moreRecentPutTransaction.get().getTimestamp()
+								)
+							);
 							continue;
 						}
 
@@ -200,6 +227,17 @@ public class ArbitraryDataCleanupManager extends Thread {
 									Base58.encode(arbitraryTransactionData.getSignature())));
 
 							ArbitraryTransactionUtils.deleteCompleteFile(arbitraryTransactionData, now, STALE_FILE_TIMEOUT);
+							EventBus.INSTANCE.notify(
+								new DataMonitorEvent(
+									System.currentTimeMillis(),
+									arbitraryTransactionData.getIdentifier(),
+									arbitraryTransactionData.getName(),
+									arbitraryTransactionData.getService().name(),
+									"deleting data due to age",
+									arbitraryTransactionData.getTimestamp(),
+									arbitraryTransactionData.getTimestamp()
+								)
+							);
 							continue;
 						}
 
@@ -414,6 +452,18 @@ public class ArbitraryDataCleanupManager extends Thread {
 								// Relates to a different name - don't delete it
 								return false;
 							}
+
+							EventBus.INSTANCE.notify(
+								new DataMonitorEvent(
+									System.currentTimeMillis(),
+									arbitraryTransactionData.getIdentifier(),
+									arbitraryTransactionData.getName(),
+									arbitraryTransactionData.getService().name(),
+									"randomly selected for deletion",
+									arbitraryTransactionData.getTimestamp(),
+									arbitraryTransactionData.getTimestamp()
+								)
+							);
 						}
 
 					} catch (DataException e) {

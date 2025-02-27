@@ -3,10 +3,15 @@ package org.qortal.test.api;
 import org.json.simple.JSONObject;
 import org.junit.Assert;
 import org.junit.Test;
+import org.qortal.api.model.CrossChainTradeLedgerEntry;
 import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.test.common.ApiCommon;
 
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class CrossChainUtilsTests extends ApiCommon {
@@ -136,5 +141,54 @@ public class CrossChainUtilsTests extends ApiCommon {
 
         Assert.assertEquals(5, versionDecimal, 0.001);
         Assert.assertFalse(thrown);
+    }
+
+    @Test
+    public void testWriteToLedgerHeaderOnly() throws IOException {
+        CrossChainUtils.writeToLedger(new PrintWriter(System.out), new ArrayList<>());
+    }
+
+    @Test
+    public void testWriteToLedgerOneRow() throws IOException {
+        CrossChainUtils.writeToLedger(
+            new PrintWriter(System.out),
+            List.of(
+                new CrossChainTradeLedgerEntry(
+                    "QORT",
+                    "LTC",
+                    1000,
+                    0,
+                    "LTC",
+                    1,
+                    System.currentTimeMillis())
+            )
+        );
+    }
+
+    @Test
+    public void testWriteToLedgerTwoRows() throws IOException {
+        CrossChainUtils.writeToLedger(
+            new PrintWriter(System.out),
+                List.of(
+                    new CrossChainTradeLedgerEntry(
+                        "QORT",
+                        "LTC",
+                        1000,
+                        0,
+                        "LTC",
+                        1,
+                        System.currentTimeMillis()
+                    ),
+                    new CrossChainTradeLedgerEntry(
+                        "LTC",
+                        "QORT",
+                        1,
+                        0,
+                        "LTC",
+                        1000,
+                        System.currentTimeMillis()
+                    )
+                )
+        );
     }
 }

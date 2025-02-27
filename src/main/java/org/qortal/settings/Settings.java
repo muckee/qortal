@@ -508,6 +508,8 @@ public class Settings {
 	 */
     private boolean connectionPoolMonitorEnabled = false;
 
+    private int dataFetchLimit = 1_000_000;
+
     // Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
@@ -1332,5 +1334,9 @@ public class Settings {
 
 	public boolean isConnectionPoolMonitorEnabled() {
 		return connectionPoolMonitorEnabled;
+	}
+
+	public int getDataFetchLimit() {
+		return dataFetchLimit;
 	}
 }
