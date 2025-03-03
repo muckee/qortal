@@ -198,13 +198,35 @@ public class ArbitraryDataManager extends Thread {
 		final int limit = 100;
 		int offset = 0;
 
+		List<ArbitraryTransactionData> allArbitraryTransactionsInDescendingOrder;
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			if( name == null ) {
+				allArbitraryTransactionsInDescendingOrder
+						= repository.getArbitraryRepository()
+						.getLatestArbitraryTransactions();
+			}
+			else {
+				allArbitraryTransactionsInDescendingOrder
+						= repository.getArbitraryRepository()
+						.getLatestArbitraryTransactionsByName(name);
+			}
+		} catch( Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			allArbitraryTransactionsInDescendingOrder = new ArrayList<>(0);
+		}
+
+		// collect processed transactions in a set to ensure outdated data transactions do not get fetched
+		Set<ArbitraryTransactionDataHashWrapper> processedTransactions = new HashSet<>();
+
 		while (!isStopping) {
 			Thread.sleep(1000L);
 
 			// Any arbitrary transactions we want to fetch data for?
 			try (final Repository repository = RepositoryManager.getRepository()) {
-				List<byte[]> signatures = repository.getTransactionRepository().getSignaturesMatchingCriteria(null, null, null, ARBITRARY_TX_TYPE, null, name, null, ConfirmationStatus.BOTH, limit, offset, true);
-				// LOGGER.trace("Found {} arbitrary transactions at offset: {}, limit: {}", signatures.size(), offset, limit);
+				List<byte[]> signatures = processTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
+
 				if (signatures == null || signatures.isEmpty()) {
 					offset = 0;
 					break;
@@ -226,7 +248,8 @@ public class ArbitraryDataManager extends Thread {
 					ArbitraryTransactionData arbitraryTransactionData = (ArbitraryTransactionData) arbitraryTransaction.getTransactionData();
 
 					// Skip transactions that we don't need to proactively store data for
-					if (!storageManager.shouldPreFetchData(repository, arbitraryTransactionData)) {
+					ArbitraryDataExamination arbitraryDataExamination = storageManager.shouldPreFetchData(repository, arbitraryTransactionData);
+					if (!arbitraryDataExamination.isPass()) {
 						iterator.remove();
 
 						EventBus.INSTANCE.notify(
@@ -235,7 +258,7 @@ public class ArbitraryDataManager extends Thread {
 								arbitraryTransactionData.getIdentifier(),
 								arbitraryTransactionData.getName(),
 								arbitraryTransactionData.getService().name(),
-								"don't need to proactively store, skipping",
+								arbitraryDataExamination.getNotes(),
 								arbitraryTransactionData.getTimestamp(),
 								arbitraryTransactionData.getTimestamp()
 							)
@@ -342,7 +365,7 @@ public class ArbitraryDataManager extends Thread {
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			allArbitraryTransactionsInDescendingOrder
 					= repository.getArbitraryRepository()
-						.getLatestArbitraryTransactions(Settings.getInstance().getDataFetchLimit());
+						.getLatestArbitraryTransactions();
 		} catch( Exception e) {
 			LOGGER.error(e.getMessage(), e);
 			allArbitraryTransactionsInDescendingOrder = new ArrayList<>(0);
@@ -410,18 +433,6 @@ public class ArbitraryDataManager extends Thread {
 				// fetch the metadata and notify the event bus again
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
 
-				EventBus.INSTANCE.notify(
-					new DataMonitorEvent(
-						System.currentTimeMillis(),
-						arbitraryTransactionData.getIdentifier(),
-						arbitraryTransactionData.getName(),
-						arbitraryTransactionData.getService().name(),
-						"fetching metadata",
-						arbitraryTransactionData.getTimestamp(),
-						arbitraryTransactionData.getTimestamp()
-					)
-				);
-
 				// Ask our connected peers if they have metadata for this signature
 				fetchMetadata(arbitraryTransactionData);
 
@@ -444,10 +455,14 @@ public class ArbitraryDataManager extends Thread {
 		}
 	}
 
-	private static List<byte[]> processTransactionsForSignatures(int limit, int offset, List<ArbitraryTransactionData> allArbitraryTransactionsInDescendingOrder, Set<ArbitraryTransactionDataHashWrapper> processedTransactions) {
+	private static List<byte[]> processTransactionsForSignatures(
+			int limit,
+			int offset,
+			List<ArbitraryTransactionData> transactionsInDescendingOrder,
+			Set<ArbitraryTransactionDataHashWrapper> processedTransactions) {
 		// these transactions are in descending order, latest transactions come first
 		List<ArbitraryTransactionData> transactions
-				= allArbitraryTransactionsInDescendingOrder.stream()
+				= transactionsInDescendingOrder.stream()
 					.skip(offset)
 					.limit(limit)
 					.collect(Collectors.toList());

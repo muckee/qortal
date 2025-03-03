@@ -2,7 +2,6 @@ package org.qortal.controller.arbitrary;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.qortal.api.resource.TransactionsResource;
 import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
@@ -14,12 +13,16 @@ import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.transaction.ArbitraryTransaction;
-import org.qortal.transaction.Transaction;
 import org.qortal.utils.Base58;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class ArbitraryDataCacheManager extends Thread {
 
@@ -86,46 +89,9 @@ public class ArbitraryDataCacheManager extends Thread {
 
                 // Update arbitrary resource caches
                 try {
-                    EventBus.INSTANCE.notify(
-                        new DataMonitorEvent(
-                            System.currentTimeMillis(),
-                            transactionData.getIdentifier(),
-                            transactionData.getName(),
-                            transactionData.getService().name(),
-                            "updating resource cache, queue",
-                            transactionData.getTimestamp(),
-                            transactionData.getTimestamp()
-                        )
-                    );
-
                     ArbitraryTransaction arbitraryTransaction = new ArbitraryTransaction(repository, transactionData);
-                    arbitraryTransaction.updateArbitraryResourceCache(repository);
-                    arbitraryTransaction.updateArbitraryMetadataCache(repository);
+                    arbitraryTransaction.updateArbitraryResourceCacheIncludingMetadata(repository, new HashSet<>(0), new HashMap<>(0));
                     repository.saveChanges();
-
-                    EventBus.INSTANCE.notify(
-                        new DataMonitorEvent(
-                            System.currentTimeMillis(),
-                            transactionData.getIdentifier(),
-                            transactionData.getName(),
-                            transactionData.getService().name(),
-                            "updated resource cache",
-                            transactionData.getTimestamp(),
-                            transactionData.getTimestamp()
-                        )
-                    );
-
-                    EventBus.INSTANCE.notify(
-                        new DataMonitorEvent(
-                            System.currentTimeMillis(),
-                            transactionData.getIdentifier(),
-                            transactionData.getName(),
-                            transactionData.getService().name(),
-                            "updating resource status, queue",
-                            transactionData.getTimestamp(),
-                            transactionData.getTimestamp()
-                        )
-                    );
 
                     // Update status as separate commit, as this is more prone to failure
                     arbitraryTransaction.updateArbitraryResourceStatus(repository);
@@ -137,7 +103,7 @@ public class ArbitraryDataCacheManager extends Thread {
                             transactionData.getIdentifier(),
                             transactionData.getName(),
                             transactionData.getService().name(),
-                            "updated resource status",
+                            "updated resource cache and status, queue",
                             transactionData.getTimestamp(),
                             transactionData.getTimestamp()
                         )
@@ -201,64 +167,61 @@ public class ArbitraryDataCacheManager extends Thread {
             LOGGER.info("Building arbitrary resources cache...");
             SplashFrame.getInstance().updateStatus("Building QDN cache - please wait...");
 
-            final int batchSize = 100;
+            final int batchSize = Settings.getInstance().getBuildArbitraryResourcesBatchSize();
             int offset = 0;
+
+            List<ArbitraryTransactionData> allArbitraryTransactionsInDescendingOrder
+                    = repository.getArbitraryRepository().getLatestArbitraryTransactions();
+
+            LOGGER.info("arbitrary transactions: count = " + allArbitraryTransactionsInDescendingOrder.size());
+
+            List<ArbitraryResourceData> resources = repository.getArbitraryRepository().getArbitraryResources(null, null, true);
+
+            Map<ArbitraryTransactionDataHashWrapper, ArbitraryResourceData> resourceByWrapper = new HashMap<>(resources.size());
+            for( ArbitraryResourceData resource : resources ) {
+                resourceByWrapper.put(
+                    new ArbitraryTransactionDataHashWrapper(resource.service.value, resource.name, resource.identifier),
+                    resource
+                );
+            }
+
+            LOGGER.info("arbitrary resources: count = " + resourceByWrapper.size());
+
+            Set<ArbitraryTransactionDataHashWrapper> latestTransactionsWrapped = new HashSet<>(allArbitraryTransactionsInDescendingOrder.size());
 
             // Loop through all ARBITRARY transactions, and determine latest state
             while (!Controller.isStopping()) {
                 LOGGER.info("Fetching arbitrary transactions {} - {}", offset, offset+batchSize-1);
 
-                List<byte[]> signatures = repository.getTransactionRepository().getSignaturesMatchingCriteria(null, null, null, List.of(Transaction.TransactionType.ARBITRARY), null, null, null, TransactionsResource.ConfirmationStatus.BOTH, batchSize, offset, false);
-                if (signatures.isEmpty()) {
+                List<ArbitraryTransactionData> transactionsToProcess
+                    = allArbitraryTransactionsInDescendingOrder.stream()
+                        .skip(offset)
+                        .limit(batchSize)
+                        .collect(Collectors.toList());
+
+                if (transactionsToProcess.isEmpty()) {
                     // Complete
                     break;
                 }
 
-                // Expand signatures to transactions
-                for (byte[] signature : signatures) {
-                    try {
-                        ArbitraryTransactionData transactionData = (ArbitraryTransactionData) repository
-                                .getTransactionRepository().fromSignature(signature);
-
+                try {
+                    for( ArbitraryTransactionData transactionData : transactionsToProcess) {
                         if (transactionData.getService() == null) {
                             // Unsupported service - ignore this resource
                             continue;
                         }
 
-                        EventBus.INSTANCE.notify(
-                            new DataMonitorEvent(
-                                System.currentTimeMillis(),
-                                transactionData.getIdentifier(),
-                                transactionData.getName(),
-                                transactionData.getService().name(),
-                                "updating resource cache, build",
-                                transactionData.getTimestamp(),
-                                transactionData.getTimestamp()
-                            )
-                        );
+                        latestTransactionsWrapped.add(new ArbitraryTransactionDataHashWrapper(transactionData));
 
                         // Update arbitrary resource caches
                         ArbitraryTransaction arbitraryTransaction = new ArbitraryTransaction(repository, transactionData);
-                        arbitraryTransaction.updateArbitraryResourceCache(repository);
-                        arbitraryTransaction.updateArbitraryMetadataCache(repository);
-                        repository.saveChanges();
-
-                        EventBus.INSTANCE.notify(
-                            new DataMonitorEvent(
-                                System.currentTimeMillis(),
-                                transactionData.getIdentifier(),
-                                transactionData.getName(),
-                                transactionData.getService().name(),
-                                "updated resource cache",
-                                transactionData.getTimestamp(),
-                                transactionData.getTimestamp()
-                            )
-                        );
-                    } catch (DataException e) {
-                        repository.discardChanges();
-
-                        LOGGER.error(e.getMessage(), e);
+                        arbitraryTransaction.updateArbitraryResourceCacheIncludingMetadata(repository, latestTransactionsWrapped, resourceByWrapper);
                     }
+                    repository.saveChanges();
+                } catch (DataException e) {
+                    repository.discardChanges();
+
+                    LOGGER.error(e.getMessage(), e);
                 }
                 offset += batchSize;
             }
@@ -288,7 +251,7 @@ public class ArbitraryDataCacheManager extends Thread {
             LOGGER.info("Refreshing arbitrary resource statuses for locally hosted transactions...");
             SplashFrame.getInstance().updateStatus("Refreshing statuses - please wait...");
 
-            final int batchSize = 100;
+            final int batchSize = Settings.getInstance().getBuildArbitraryResourcesBatchSize();
             int offset = 0;
 
             // Loop through all ARBITRARY transactions, and determine latest state
@@ -301,45 +264,21 @@ public class ArbitraryDataCacheManager extends Thread {
                     break;
                 }
 
-                // Loop through hosted transactions
-                for (ArbitraryTransactionData transactionData : hostedTransactions) {
-
-                    try {
-                        EventBus.INSTANCE.notify(
-                            new DataMonitorEvent(
-                                System.currentTimeMillis(),
-                                transactionData.getIdentifier(),
-                                transactionData.getName(),
-                                transactionData.getService().name(),
-                                "updating resource status",
-                                transactionData.getTimestamp(),
-                                transactionData.getTimestamp()
-                            )
-                        );
+                try {
+                    // Loop through hosted transactions
+                    for (ArbitraryTransactionData transactionData : hostedTransactions) {
 
                         // Determine status and update cache
                         ArbitraryTransaction arbitraryTransaction = new ArbitraryTransaction(repository, transactionData);
                         arbitraryTransaction.updateArbitraryResourceStatus(repository);
-                        repository.saveChanges();
-
-                        EventBus.INSTANCE.notify(
-                            new DataMonitorEvent(
-                                System.currentTimeMillis(),
-                                transactionData.getIdentifier(),
-                                transactionData.getName(),
-                                transactionData.getService().name(),
-                                "updated resource status",
-                                transactionData.getTimestamp(),
-                                transactionData.getTimestamp()
-                            )
-                        );
-
-                    } catch (DataException e) {
-                        repository.discardChanges();
-
-                        LOGGER.error(e.getMessage(), e);
                     }
+                    repository.saveChanges();
+                } catch (DataException e) {
+                    repository.discardChanges();
+
+                    LOGGER.error(e.getMessage(), e);
                 }
+
                 offset += batchSize;
             }
 

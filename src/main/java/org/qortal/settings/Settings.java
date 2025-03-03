@@ -508,9 +508,9 @@ public class Settings {
 	 */
     private boolean connectionPoolMonitorEnabled = false;
 
-    private int dataFetchLimit = 1_000_000;
+	private int buildArbitraryResourcesBatchSize = 200;
 
-    // Domain mapping
+	// Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
 		private Integer limit;
@@ -1336,7 +1336,7 @@ public class Settings {
 		return connectionPoolMonitorEnabled;
 	}
 
-	public int getDataFetchLimit() {
-		return dataFetchLimit;
+	public int getBuildArbitraryResourcesBatchSize() {
+		return buildArbitraryResourcesBatchSize;
 	}
 }

@@ -155,31 +155,31 @@ public class ArbitraryDataStorageManager extends Thread {
      * @param arbitraryTransactionData - the transaction
      * @return boolean - whether to prefetch or not
      */
-    public boolean shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
+    public ArbitraryDataExamination shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
         String name = arbitraryTransactionData.getName();
 
         // Only fetch data associated with hashes, as we already have RAW_DATA
         if (arbitraryTransactionData.getDataType() != ArbitraryTransactionData.DataType.DATA_HASH) {
-            return false;
+            return new ArbitraryDataExamination(false, "Only fetch data associated with hashes");
         }
 
         // Don't fetch anything more if we're (nearly) out of space
         // Make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
         // avoid a fetch/delete loop
         if (!this.isStorageSpaceAvailable(STORAGE_FULL_THRESHOLD)) {
-            return false;
+            return new ArbitraryDataExamination(false,"Don't fetch anything more if we're (nearly) out of space");
         }
 
         // Don't fetch anything if we're (nearly) out of space for this name
         // Again, make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
         // avoid a fetch/delete loop
         if (!this.isStorageSpaceAvailableForName(repository, arbitraryTransactionData.getName(), STORAGE_FULL_THRESHOLD)) {
-            return false;
+            return new ArbitraryDataExamination(false, "Don't fetch anything if we're (nearly) out of space for this name");
         }
 
         // Don't store data unless it's an allowed type (public/private)
         if (!this.isDataTypeAllowed(arbitraryTransactionData)) {
-            return false;
+            return new ArbitraryDataExamination(false, "Don't store data unless it's an allowed type (public/private)");
         }
 
         // Handle transactions without names differently
@@ -189,21 +189,21 @@ public class ArbitraryDataStorageManager extends Thread {
 
         // Never fetch data from blocked names, even if they are followed
         if (ListUtils.isNameBlocked(name)) {
-            return false;
+            return new ArbitraryDataExamination(false, "blocked name");
         }
 
         switch (Settings.getInstance().getStoragePolicy()) {
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
-                return ListUtils.isFollowingName(name);
+                return new ArbitraryDataExamination(ListUtils.isFollowingName(name), Settings.getInstance().getStoragePolicy().name());
                 
             case ALL:
-                return true;
+                return new ArbitraryDataExamination(true, Settings.getInstance().getStoragePolicy().name());
 
             case NONE:
             case VIEWED:
             default:
-                return false;
+                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
         }
     }
 
@@ -214,17 +214,17 @@ public class ArbitraryDataStorageManager extends Thread {
      *
      * @return boolean - whether the storage policy allows for unnamed data
      */
-    private boolean shouldPreFetchDataWithoutName() {
+    private ArbitraryDataExamination shouldPreFetchDataWithoutName() {
         switch (Settings.getInstance().getStoragePolicy()) {
             case ALL:
-                return true;
+                return new ArbitraryDataExamination(true, "Fetching all data");
 
             case NONE:
             case VIEWED:
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
             default:
-                return false;
+                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
         }
     }
 

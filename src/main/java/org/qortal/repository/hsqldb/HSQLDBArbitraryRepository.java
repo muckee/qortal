@@ -227,18 +227,86 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 	}
 
 	@Override
-	public List<ArbitraryTransactionData> getLatestArbitraryTransactions(int limit) throws DataException {
+	public List<ArbitraryTransactionData> getLatestArbitraryTransactions() throws DataException {
 		String sql = "SELECT type, reference, signature, creator, created_when, fee, " +
 				"tx_group_id, block_height, approval_status, approval_height, " +
 				"version, nonce, service, size, is_data_raw, data, metadata_hash, " +
 				"name, identifier, update_method, secret, compression FROM ArbitraryTransactions " +
 				"JOIN Transactions USING (signature) " +
 				"WHERE name IS NOT NULL " +
-				"ORDER BY created_when DESC " +
-				"LIMIT ?";
+				"ORDER BY created_when DESC";
 		List<ArbitraryTransactionData> arbitraryTransactionData = new ArrayList<>();
 
-		try (ResultSet resultSet = this.repository.checkedExecute(sql, limit)) {
+		try (ResultSet resultSet = this.repository.checkedExecute(sql)) {
+			if (resultSet == null)
+				return new ArrayList<>(0);
+
+			do {
+				byte[] reference = resultSet.getBytes(2);
+				byte[] signature = resultSet.getBytes(3);
+				byte[] creatorPublicKey = resultSet.getBytes(4);
+				long timestamp = resultSet.getLong(5);
+
+				Long fee = resultSet.getLong(6);
+				if (fee == 0 && resultSet.wasNull())
+					fee = null;
+
+				int txGroupId = resultSet.getInt(7);
+
+				Integer blockHeight = resultSet.getInt(8);
+				if (blockHeight == 0 && resultSet.wasNull())
+					blockHeight = null;
+
+				ApprovalStatus approvalStatus = ApprovalStatus.valueOf(resultSet.getInt(9));
+				Integer approvalHeight = resultSet.getInt(10);
+				if (approvalHeight == 0 && resultSet.wasNull())
+					approvalHeight = null;
+
+				BaseTransactionData baseTransactionData = new BaseTransactionData(timestamp, txGroupId, reference, creatorPublicKey, fee, approvalStatus, blockHeight, approvalHeight, signature);
+
+				int version = resultSet.getInt(11);
+				int nonce = resultSet.getInt(12);
+				int serviceInt = resultSet.getInt(13);
+				int size = resultSet.getInt(14);
+				boolean isDataRaw = resultSet.getBoolean(15); // NOT NULL, so no null to false
+				DataType dataType = isDataRaw ? DataType.RAW_DATA : DataType.DATA_HASH;
+				byte[] data = resultSet.getBytes(16);
+				byte[] metadataHash = resultSet.getBytes(17);
+				String nameResult = resultSet.getString(18);
+				String identifierResult = resultSet.getString(19);
+				Method method = Method.valueOf(resultSet.getInt(20));
+				byte[] secret = resultSet.getBytes(21);
+				Compression compression = Compression.valueOf(resultSet.getInt(22));
+				// FUTURE: get payments from signature if needed. Avoiding for now to reduce database calls.
+
+				ArbitraryTransactionData transactionData = new ArbitraryTransactionData(baseTransactionData,
+						version, serviceInt, nonce, size, nameResult, identifierResult, method, secret,
+						compression, data, dataType, metadataHash, null);
+
+				arbitraryTransactionData.add(transactionData);
+			} while (resultSet.next());
+
+			return arbitraryTransactionData;
+		} catch (SQLException e) {
+			throw new DataException("Unable to fetch arbitrary transactions from repository", e);
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			return new ArrayList<>(0);
+		}
+	}
+
+	@Override
+	public List<ArbitraryTransactionData> getLatestArbitraryTransactionsByName( String name ) throws DataException {
+		String sql = "SELECT type, reference, signature, creator, created_when, fee, " +
+				"tx_group_id, block_height, approval_status, approval_height, " +
+				"version, nonce, service, size, is_data_raw, data, metadata_hash, " +
+				"name, identifier, update_method, secret, compression FROM ArbitraryTransactions " +
+				"JOIN Transactions USING (signature) " +
+				"WHERE name = ? " +
+				"ORDER BY created_when DESC";
+		List<ArbitraryTransactionData> arbitraryTransactionData = new ArrayList<>();
+
+		try (ResultSet resultSet = this.repository.checkedExecute(sql, name)) {
 			if (resultSet == null)
 				return new ArrayList<>(0);
 
