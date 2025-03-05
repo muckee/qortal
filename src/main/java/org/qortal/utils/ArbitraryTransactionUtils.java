@@ -209,7 +209,15 @@ public class ArbitraryTransactionUtils {
         return ArbitraryTransactionUtils.isFileRecent(filePath, now, cleanupAfter);
     }
 
-    public static void deleteCompleteFile(ArbitraryTransactionData arbitraryTransactionData, long now, long cleanupAfter) throws DataException {
+    /**
+     *
+     * @param arbitraryTransactionData
+     * @param now
+     * @param cleanupAfter
+     * @return true if file is deleted, otherwise return false
+     * @throws DataException
+     */
+    public static boolean deleteCompleteFile(ArbitraryTransactionData arbitraryTransactionData, long now, long cleanupAfter) throws DataException {
         byte[] completeHash = arbitraryTransactionData.getData();
         byte[] signature = arbitraryTransactionData.getSignature();
 
@@ -220,6 +228,11 @@ public class ArbitraryTransactionUtils {
                     "if needed", Base58.encode(completeHash));
 
             arbitraryDataFile.delete();
+
+            return true;
+        }
+        else {
+            return false;
         }
     }
 

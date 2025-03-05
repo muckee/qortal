@@ -7,7 +7,7 @@ import java.util.Objects;
 
 public class ArbitraryTransactionDataHashWrapper {
 
-    private final ArbitraryTransactionData data;
+    private ArbitraryTransactionData data;
 
     private int service;
 
@@ -21,6 +21,12 @@ public class ArbitraryTransactionDataHashWrapper {
         this.service = data.getService().value;
         this.name = data.getName();
         this.identifier = data.getIdentifier();
+    }
+
+    public ArbitraryTransactionDataHashWrapper(int service, String name, String identifier) {
+        this.service = service;
+        this.name = name;
+        this.identifier = identifier;
     }
 
     public ArbitraryTransactionData getData() {
