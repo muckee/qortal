@@ -28,6 +28,7 @@ import org.qortal.utils.ListUtils;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -861,12 +862,11 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 	}
 
 	@Override
-	public List<ArbitraryResourceData> searchArbitraryResources(Service service, String query, String identifier, List<String> names, String title, String description, boolean prefixOnly,
+	public List<ArbitraryResourceData> searchArbitraryResources(Service service, String query, String identifier, List<String> names, String title, String description, List<String> keywords, boolean prefixOnly,
 																List<String> exactMatchNames, boolean defaultResource, SearchMode mode, Integer minLevel, Boolean followedOnly, Boolean excludeBlocked,
 																Boolean includeMetadata, Boolean includeStatus, Long before, Long after, Integer limit, Integer offset, Boolean reverse) throws DataException {
 
 		if(Settings.getInstance().isDbCacheEnabled()) {
-
 			List<ArbitraryResourceData> list
 				= HSQLDBCacheUtils.callCache(
 					ArbitraryResourceCache.getInstance(),
@@ -888,6 +888,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 						Optional.ofNullable(description),
 						prefixOnly,
 						Optional.ofNullable(exactMatchNames),
+						Optional.ofNullable(keywords),
 						defaultResource,
 						Optional.ofNullable(minLevel),
 						Optional.ofNullable(() -> ListUtils.followedNames()),
@@ -907,6 +908,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 				LOGGER.info("Db Enabled Cache has zero candidates.");
 			}
 		}
+
 
 		StringBuilder sql = new StringBuilder(512);
 		List<Object> bindParams = new ArrayList<>();
@@ -993,6 +995,26 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 			sql.append(" AND LCASE(description) LIKE ?");
 			bindParams.add(queryWildcard);
 		}
+
+		if (keywords != null && !keywords.isEmpty()) {
+			List<String> searchKeywords = new ArrayList<>(keywords); 
+		
+			List<String> conditions = new ArrayList<>();
+			List<String> bindValues = new ArrayList<>();
+		
+			for (int i = 0; i < searchKeywords.size(); i++) {
+				conditions.add("LOWER(description) LIKE ?"); 
+				bindValues.add("%" + searchKeywords.get(i).trim().toLowerCase() + "%"); 
+			}
+		
+			String finalCondition = String.join(" OR ", conditions);
+			sql.append(" AND (").append(finalCondition).append(")");
+		
+			bindParams.addAll(bindValues); 
+		}
+		
+		
+		
 
 		// Handle name searches
 		if (names != null && !names.isEmpty()) {
