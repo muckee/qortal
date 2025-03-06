@@ -343,6 +343,25 @@ public class HSQLDBCacheUtilsTests {
     }
 
     @Test
+    public void testMetadataNullificationBugSolution(){
+
+        ArbitraryResourceData data = new ArbitraryResourceData();
+        data.metadata = new ArbitraryResourceMetadata();
+        data.metadata.setDescription("Once upon a time.");
+        data.name = "Joe";
+
+        List<ArbitraryResourceData> list = List.of(data);
+
+        filterListByMap(
+                List.of(data),
+                NAME_LEVEL, new HashMap<>(Map.of(DESCRIPTION, "Once upon a time.")),
+                1
+        );
+
+        Assert.assertNotNull(data.metadata);
+    }
+
+    @Test
     public void testMinLevelPositive() {
 
         ArbitraryResourceData data = new ArbitraryResourceData();

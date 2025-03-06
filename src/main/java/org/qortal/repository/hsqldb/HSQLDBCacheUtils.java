@@ -262,15 +262,58 @@ public class HSQLDBCacheUtils {
         // truncate to limit
         if( limit.isPresent() && limit.get() > 0 ) stream = stream.limit(limit.get());
 
-        // include metadata
-        if( includeMetadata.isEmpty() || !includeMetadata.get() )
-            stream = stream.peek( candidate -> candidate.metadata = null );
+        List<ArbitraryResourceData> listCopy1 = stream.collect(Collectors.toList());
 
-        // include status
-        if( includeStatus.isEmpty() || !includeStatus.get() )
-            stream = stream.peek( candidate -> candidate.status = null);
+        List<ArbitraryResourceData> listCopy2 = new ArrayList<>(listCopy1.size());
 
-        return stream.collect(Collectors.toList());
+        // remove metadata from the first copy
+        if( includeMetadata.isEmpty() || !includeMetadata.get() ) {
+            for( ArbitraryResourceData data : listCopy1 ) {
+                ArbitraryResourceData copy = new ArbitraryResourceData();
+                copy.name = data.name;
+                copy.service = data.service;
+                copy.identifier = data.identifier;
+                copy.status = data.status;
+                copy.metadata = null;
+
+                copy.size = data.size;
+                copy.created = data.created;
+                copy.updated = data.updated;
+
+                listCopy2.add(copy);
+            }
+        }
+        // put the list copy 1 into the second copy
+        else {
+            listCopy2.addAll(listCopy1);
+        }
+
+        // remove status from final copy
+        if( includeStatus.isEmpty() || !includeStatus.get() ) {
+
+            List<ArbitraryResourceData> finalCopy = new ArrayList<>(listCopy2.size());
+
+            for( ArbitraryResourceData data : listCopy2 ) {
+                ArbitraryResourceData copy = new ArbitraryResourceData();
+                copy.name = data.name;
+                copy.service = data.service;
+                copy.identifier = data.identifier;
+                copy.status = null;
+                copy.metadata = data.metadata;
+
+                copy.size = data.size;
+                copy.created = data.created;
+                copy.updated = data.updated;
+
+                finalCopy.add(copy);
+            }
+
+            return finalCopy;
+        }
+        // keep status included by returning the second copy
+        else {
+            return listCopy2;
+        }
     }
 
     /**
