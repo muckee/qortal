@@ -167,6 +167,7 @@ public class HSQLDBCacheUtils {
             Optional<String> description,
             boolean prefixOnly,
             Optional<List<String>> exactMatchNames,
+            Optional<List<String>> keywords,
             boolean defaultResource,
             Optional<Integer> minLevel,
             Optional<Supplier<List<String>>> includeOnly,
@@ -206,6 +207,36 @@ public class HSQLDBCacheUtils {
         stream = filterTerm(identifier, data -> data.identifier, prefixOnly, stream);
         stream = filterTerm(title, data -> data.metadata != null ? data.metadata.getTitle() : null, prefixOnly, stream);
         stream = filterTerm(description, data -> data.metadata != null ? data.metadata.getDescription() : null, prefixOnly, stream);
+
+        // New: Filter by keywords if provided
+        if (keywords.isPresent() && !keywords.get().isEmpty()) {
+            List<String> searchKeywords = keywords.get().stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toList());
+
+            stream = stream.filter(candidate -> {
+                
+                if (candidate.metadata != null && candidate.metadata.getDescription() != null) {
+                    String descriptionLower = candidate.metadata.getDescription().toLowerCase();
+                    return searchKeywords.stream().anyMatch(descriptionLower::contains);
+                }
+                return false;
+            });
+        }
+
+        if (keywords.isPresent() && !keywords.get().isEmpty()) {
+            List<String> searchKeywords = keywords.get().stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toList());
+
+            stream = stream.filter(candidate -> {
+                if (candidate.metadata != null && candidate.metadata.getDescription() != null) {
+            String descriptionLower = candidate.metadata.getDescription().toLowerCase();
+            return searchKeywords.stream().anyMatch(descriptionLower::contains);
+                }
+                return false;
+            });
+        }
 
         // if exact names is set, retain resources with exact names
         if( exactMatchNames.isPresent() && !exactMatchNames.get().isEmpty()) {

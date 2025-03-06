@@ -26,6 +26,7 @@ public class HSQLDBCacheUtilsTests {
     private static final String DESCRIPTION = "description";
     private static final String PREFIX_ONLY = "prefixOnly";
     private static final String EXACT_MATCH_NAMES = "exactMatchNames";
+    private static final String KEYWORDS = "keywords";
     private static final String DEFAULT_RESOURCE = "defaultResource";
     private static final String MODE = "mode";
     private static final String MIN_LEVEL = "minLevel";
@@ -634,6 +635,7 @@ public class HSQLDBCacheUtilsTests {
         Optional<String> description = Optional.ofNullable((String) valueByKey.get(DESCRIPTION));
         boolean prefixOnly = valueByKey.containsKey(PREFIX_ONLY);
         Optional<List<String>> exactMatchNames = Optional.ofNullable((List<String>) valueByKey.get(EXACT_MATCH_NAMES));
+        Optional<List<String>> keywords = Optional.ofNullable((List<String>) valueByKey.get(KEYWORDS));
         boolean defaultResource = valueByKey.containsKey(DEFAULT_RESOURCE);
         Optional<SearchMode> mode = Optional.of((SearchMode) valueByKey.getOrDefault(MODE, SearchMode.ALL));
         Optional<Integer> minLevel = Optional.ofNullable((Integer) valueByKey.get(MIN_LEVEL));
@@ -660,6 +662,7 @@ public class HSQLDBCacheUtilsTests {
                 description,
                 prefixOnly,
                 exactMatchNames,
+                keywords,
                 defaultResource,
                 minLevel,
                 followedOnly,

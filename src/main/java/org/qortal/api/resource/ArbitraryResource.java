@@ -172,7 +172,7 @@ public class ArbitraryResource {
 			@Parameter(description = "Name (searches name field only)") @QueryParam("name") List<String> names,
 			@Parameter(description = "Title (searches title metadata field only)") @QueryParam("title") String title,
 			@Parameter(description = "Description (searches description metadata field only)") @QueryParam("description") String description,
-			@Parameter(description = "Keywords (searches description metadata field by keywords. Input is a string of keywords separated by commas.)") @QueryParam("keywords") String keywords,
+			@Parameter(description = "Keyword (searches description metadata field by keywords)") @QueryParam("keywords") List<String> keywords,
 			@Parameter(description = "Prefix only (if true, only the beginning of fields are matched)") @QueryParam("prefix") Boolean prefixOnly,
 			@Parameter(description = "Exact match names only (if true, partial name matches are excluded)") @QueryParam("exactmatchnames") Boolean exactMatchNamesOnly,
 			@Parameter(description = "Default resources (without identifiers) only") @QueryParam("default") Boolean defaultResource,
