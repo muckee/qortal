@@ -2,6 +2,7 @@ package org.qortal.utils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -95,18 +96,22 @@ public class ArbitraryIndexUtils {
             // process all index resources
             for( ArbitraryResourceData indexResource : indexResources ) {
 
-                LOGGER.debug("processing index resource: name = " + indexResource.name + ", identifier = " + indexResource.identifier);
-                String json = ArbitraryIndexUtils.getJson(indexResource.name, indexResource.identifier);
+                try {
+                    LOGGER.debug("processing index resource: name = " + indexResource.name + ", identifier = " + indexResource.identifier);
+                    String json = ArbitraryIndexUtils.getJson(indexResource.name, indexResource.identifier);
 
-                // map the JSON string to a list of Java objects
-                List<ArbitraryDataIndex> indices = OBJECT_MAPPER.readValue(json, new TypeReference<List<ArbitraryDataIndex>>() {});
+                    // map the JSON string to a list of Java objects
+                    List<ArbitraryDataIndex> indices = OBJECT_MAPPER.readValue(json, new TypeReference<List<ArbitraryDataIndex>>() {});
 
-                LOGGER.debug("processed indices = " + indices);
+                    LOGGER.debug("processed indices = " + indices);
 
-                // rank and create index detail for each index in this index resource
-                for( int rank = 1; rank <= indices.size(); rank++ ) {
+                    // rank and create index detail for each index in this index resource
+                    for( int rank = 1; rank <= indices.size(); rank++ ) {
 
-                    indexDetails.add( new ArbitraryDataIndexDetail(indexResource.name, rank, indices.get(rank - 1) ));
+                        indexDetails.add( new ArbitraryDataIndexDetail(indexResource.name, rank, indices.get(rank - 1) ));
+                    }
+                } catch (InvalidFormatException e) {
+                   LOGGER.warn("invalid format, skipping: " + indexResource);
                 }
             }
 
@@ -123,7 +128,7 @@ public class ArbitraryIndexUtils {
                     )
             );
 
-            LOGGER.info("processed indices by term = " + indicesByTerm);
+            LOGGER.info("processed indices by term: count = " + indicesByTerm.size());
 
             // lock, clear old, load new
             synchronized( IndexCache.getInstance().getIndicesByTerm() ) {
