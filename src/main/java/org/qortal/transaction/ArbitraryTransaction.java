@@ -462,12 +462,8 @@ public class ArbitraryTransaction extends Transaction {
 
 		arbitraryResourceData.size = latestTransactionData.getSize();
 
-		LOGGER.info("saving to arbitrary resource cache: " + arbitraryResourceData);
-
 		// Save
 		repository.getArbitraryRepository().save(arbitraryResourceData);
-
-		LOGGER.info("saved to arbitrary resource cache: " + arbitraryResourceData);
 
 		// Update metadata for latest transaction if it is local
 		if (latestTransactionData.getMetadataHash() != null) {
