@@ -25,6 +25,7 @@ import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.utils.Base58;
+import org.qortal.utils.Groups;
 import org.qortal.utils.NTP;
 import org.qortal.utils.NamedThreadFactory;
 
@@ -225,11 +226,14 @@ public class OnlineAccountsManager {
         Set<OnlineAccountData> onlineAccountsToAdd = new HashSet<>();
         Set<OnlineAccountData> onlineAccountsToRemove = new HashSet<>();
         try (final Repository repository = RepositoryManager.getRepository()) {
+
+            int blockHeight = repository.getBlockRepository().getBlockchainHeight();
+
             List<String> mintingGroupMemberAddresses
-                = repository.getGroupRepository()
-                    .getGroupMembers(BlockChain.getInstance().getMintingGroupId()).stream()
-                    .map(GroupMemberData::getMember)
-                    .collect(Collectors.toList());
+                = Groups.getAllMembers(
+                    repository.getGroupRepository(),
+                    Groups.getGroupIdsToMint(BlockChain.getInstance(), blockHeight)
+            );
 
             for (OnlineAccountData onlineAccountData : this.onlineAccountsImportQueue) {
                 if (isStopping)

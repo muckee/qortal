@@ -84,6 +84,7 @@ isDOMContentLoaded: isDOMContentLoaded ? true : false
 
 function handleQDNResourceDisplayed(pathurl, isDOMContentLoaded) {
 // make sure that an empty string the root path
+if(pathurl?.startsWith('/render/hash/')) return;
 const path = pathurl || '/'
     if (!isManualNavigation) {
     isManualNavigation = true
@@ -284,11 +285,9 @@ window.addEventListener("message", async (event) => {
         return;
     }
 
-    console.log("Core received action: " + JSON.stringify(event.data.action));
-
     let url;
     let data = event.data;
-
+    let identifier;
     switch (data.action) {
         case "GET_ACCOUNT_DATA":
             return httpGetAsyncWithEvent(event, "/addresses/" + data.address);
@@ -383,6 +382,7 @@ window.addEventListener("message", async (event) => {
             if (data.identifier != null) url = url.concat("&identifier=" + data.identifier);
             if (data.name != null) url = url.concat("&name=" + data.name);
             if (data.names != null) data.names.forEach((x, i) => url = url.concat("&name=" + x));
+            if (data.keywords != null) data.keywords.forEach((x, i) => url = url.concat("&keywords=" + x));
             if (data.title != null) url = url.concat("&title=" + data.title);
             if (data.description != null) url = url.concat("&description=" + data.description);
             if (data.prefix != null) url = url.concat("&prefix=" + new Boolean(data.prefix).toString());
@@ -419,7 +419,7 @@ window.addEventListener("message", async (event) => {
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_QDN_RESOURCE_PROPERTIES":
-            let identifier = (data.identifier != null) ? data.identifier : "default";
+            identifier = (data.identifier != null) ? data.identifier : "default";
             url = "/arbitrary/resource/properties/" + data.service + "/" + data.name + "/" + identifier;
             return httpGetAsyncWithEvent(event, url);
 
@@ -456,7 +456,7 @@ window.addEventListener("message", async (event) => {
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_AT":
-            url = "/at" + data.atAddress;
+            url = "/at/" + data.atAddress;
             return httpGetAsyncWithEvent(event, url);
 
         case "GET_AT_DATA":
@@ -473,7 +473,7 @@ window.addEventListener("message", async (event) => {
 
         case "FETCH_BLOCK":
             if (data.signature != null) {
-                url = "/blocks/" + data.signature;
+                url = "/blocks/signature/" + data.signature;
             } else if (data.height != null) {
                 url = "/blocks/byheight/" + data.height;
             }
@@ -694,6 +694,7 @@ const qortalRequestWithTimeout = (request, timeout) =>
  * Send current page details to UI
  */
 document.addEventListener('DOMContentLoaded', (event) => {
+ 
 resetVariables()
     qortalRequest({
         action: "QDN_RESOURCE_DISPLAYED",
@@ -712,6 +713,7 @@ resetVariables()
  * Handle app navigation
  */
 navigation.addEventListener('navigate', (event) => {
+
     const url = new URL(event.destination.url);
 
     let fullpath = url.pathname + url.hash;

@@ -31,6 +31,12 @@
 	"blockRewardBatchStartHeight": 999999000,
 	"blockRewardBatchSize": 10,
 	"blockRewardBatchAccountsBlockCount": 3,
+	"mintingGroupIds": [
+		{ "height": 0, "ids": []},
+		{ "height": 5, "ids": [694]},
+		{ "height": 8, "ids": [694, 800]},
+		{ "height": 12, "ids": [800]}
+	],
 	"rewardsByHeight": [
 		{ "height": 1, "reward": 100 },
 		{ "height": 11, "reward": 10 },

@@ -53,10 +53,10 @@ public class Blocks {
 
             // all minting group member addresses
             List<String> mintingGroupAddresses
-                = repository.getGroupRepository()
-                    .getGroupMembers(BlockChain.getInstance().getMintingGroupId()).stream()
-                    .map(GroupMemberData::getMember)
-                    .collect(Collectors.toList());
+                = Groups.getAllMembers(
+                    repository.getGroupRepository(),
+                    Groups.getGroupIdsToMint(BlockChain.getInstance(), blockData.getHeight())
+                );
 
             // all names, indexed by address
             Map<String, String> nameByAddress

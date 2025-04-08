@@ -83,6 +83,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 		return this.bitcoinjContext;
 	}
 
+	@Override
 	public String getCurrencyCode() {
 		return this.currencyCode;
 	}

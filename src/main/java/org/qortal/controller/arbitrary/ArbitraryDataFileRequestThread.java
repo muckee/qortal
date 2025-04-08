@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.transaction.ArbitraryTransactionData;
+import org.qortal.event.DataMonitorEvent;
+import org.qortal.event.EventBus;
 import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;

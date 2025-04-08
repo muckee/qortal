@@ -24,6 +24,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static java.nio.file.StandardCopyOption.REPLACE_EXISTING;
@@ -72,23 +73,23 @@ public class ArbitraryTransactionUtils {
         return latestPut;
     }
 
-    public static boolean hasMoreRecentPutTransaction(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
+    public static Optional<ArbitraryTransactionData> hasMoreRecentPutTransaction(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
         byte[] signature = arbitraryTransactionData.getSignature();
         if (signature == null) {
             // We can't make a sensible decision without a signature
             // so it's best to assume there is nothing newer
-            return false;
+            return Optional.empty();
         }
 
         ArbitraryTransactionData latestPut = ArbitraryTransactionUtils.fetchLatestPut(repository, arbitraryTransactionData);
         if (latestPut == null) {
-            return false;
+            return Optional.empty();
         }
 
         // If the latest PUT transaction has a newer timestamp, it will override the existing transaction
         // Any data relating to the older transaction is no longer needed
         boolean hasNewerPut = (latestPut.getTimestamp() > arbitraryTransactionData.getTimestamp());
-        return hasNewerPut;
+        return hasNewerPut ? Optional.of(latestPut) : Optional.empty();
     }
 
     public static boolean completeFileExists(ArbitraryTransactionData transactionData) throws DataException {
@@ -208,7 +209,15 @@ public class ArbitraryTransactionUtils {
         return ArbitraryTransactionUtils.isFileRecent(filePath, now, cleanupAfter);
     }
 
-    public static void deleteCompleteFile(ArbitraryTransactionData arbitraryTransactionData, long now, long cleanupAfter) throws DataException {
+    /**
+     *
+     * @param arbitraryTransactionData
+     * @param now
+     * @param cleanupAfter
+     * @return true if file is deleted, otherwise return false
+     * @throws DataException
+     */
+    public static boolean deleteCompleteFile(ArbitraryTransactionData arbitraryTransactionData, long now, long cleanupAfter) throws DataException {
         byte[] completeHash = arbitraryTransactionData.getData();
         byte[] signature = arbitraryTransactionData.getSignature();
 
@@ -219,6 +228,11 @@ public class ArbitraryTransactionUtils {
                     "if needed", Base58.encode(completeHash));
 
             arbitraryDataFile.delete();
+
+            return true;
+        }
+        else {
+            return false;
         }
     }
 
