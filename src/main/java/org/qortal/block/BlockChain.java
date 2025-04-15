@@ -212,7 +212,13 @@ public class BlockChain {
 	private int minAccountLevelToRewardShare;
 	private int maxRewardSharesPerFounderMintingAccount;
 	private int founderEffectiveMintingLevel;
-	private int mintingGroupId;
+
+	public static class IdsForHeight {
+		public int height;
+		public List<Integer> ids;
+	}
+
+	private List<IdsForHeight> mintingGroupIds;
 
 	/** Minimum time to retain online account signatures (ms) for block validity checks. */
 	private long onlineAccountSignaturesMinLifetime;
@@ -544,8 +550,8 @@ public class BlockChain {
 		return this.onlineAccountSignaturesMaxLifetime;
 	}
 
-	public int getMintingGroupId() {
-		return this.mintingGroupId;
+	public List<IdsForHeight> getMintingGroupIds() {
+		return mintingGroupIds;
 	}
 
 	public CiyamAtSettings getCiyamAtSettings() {

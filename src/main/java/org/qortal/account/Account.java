@@ -14,6 +14,7 @@ import org.qortal.repository.NameRepository;
 import org.qortal.repository.Repository;
 import org.qortal.settings.Settings;
 import org.qortal.utils.Base58;
+import org.qortal.utils.Groups;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -227,7 +228,7 @@ public class Account {
 		}
 
 		int level = accountData.getLevel();
-		int groupIdToMint = BlockChain.getInstance().getMintingGroupId();
+		List<Integer> groupIdsToMint = Groups.getGroupIdsToMint( BlockChain.getInstance(), blockchainHeight );
 		int nameCheckHeight = BlockChain.getInstance().getOnlyMintWithNameHeight();
 		int groupCheckHeight = BlockChain.getInstance().getGroupMemberCheckHeight();
 		int removeNameCheckHeight = BlockChain.getInstance().getRemoveOnlyMintWithNameHeight();
@@ -261,9 +262,9 @@ public class Account {
 		if (blockchainHeight >= groupCheckHeight && blockchainHeight < removeNameCheckHeight) {
 			List<NameData> myName = nameRepository.getNamesByOwner(myAddress);
 			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && !myName.isEmpty() && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
+				return accountData.getBlocksMintedPenalty() == 0 && !myName.isEmpty() && (isGroupValidated || Groups.memberExistsInAnyGroup(groupRepository, groupIdsToMint, myAddress));
 			} else {
-				return level >= levelToMint && !myName.isEmpty() && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
+				return level >= levelToMint && !myName.isEmpty() && (isGroupValidated || Groups.memberExistsInAnyGroup(groupRepository, groupIdsToMint, myAddress));
 			}
 		}
 
@@ -272,9 +273,9 @@ public class Account {
 		// Account's address is a member of the minter group
 		if (blockchainHeight >= removeNameCheckHeight) {
 			if (Account.isFounder(accountData.getFlags())) {
-				return accountData.getBlocksMintedPenalty() == 0 && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
+				return accountData.getBlocksMintedPenalty() == 0 && (isGroupValidated || Groups.memberExistsInAnyGroup(groupRepository, groupIdsToMint, myAddress));
 			} else {
-				return level >= levelToMint && (isGroupValidated || groupRepository.memberExists(groupIdToMint, myAddress));
+				return level >= levelToMint && (isGroupValidated || Groups.memberExistsInAnyGroup(groupRepository, groupIdsToMint, myAddress));
 			}
 		}
 

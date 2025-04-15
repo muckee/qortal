@@ -2,9 +2,10 @@ package org.qortal.controller.arbitrary;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.qortal.api.resource.TransactionsResource.ConfirmationStatus;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.event.DataMonitorEvent;
+import org.qortal.event.EventBus;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -21,8 +22,12 @@ import java.nio.file.Paths;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.qortal.controller.arbitrary.ArbitraryDataStorageManager.DELETION_THRESHOLD;
 
@@ -77,6 +82,19 @@ public class ArbitraryDataCleanupManager extends Thread {
 		final int limit = 100;
 		int offset = 0;
 
+		List<ArbitraryTransactionData> allArbitraryTransactionsInDescendingOrder;
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			allArbitraryTransactionsInDescendingOrder
+					= repository.getArbitraryRepository()
+					.getLatestArbitraryTransactions();
+		} catch( Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			allArbitraryTransactionsInDescendingOrder = new ArrayList<>(0);
+		}
+
+		Set<ArbitraryTransactionData> processedTransactions = new HashSet<>();
+
 		try {
 			while (!isStopping) {
 				Thread.sleep(30000);
@@ -107,27 +125,31 @@ public class ArbitraryDataCleanupManager extends Thread {
 
 				// Any arbitrary transactions we want to fetch data for?
 				try (final Repository repository = RepositoryManager.getRepository()) {
-					List<byte[]> signatures = repository.getTransactionRepository().getSignaturesMatchingCriteria(null, null, null, ARBITRARY_TX_TYPE, null, null, null, ConfirmationStatus.BOTH, limit, offset, true);
-					// LOGGER.info("Found {} arbitrary transactions at offset: {}, limit: {}", signatures.size(), offset, limit);
+					List<ArbitraryTransactionData> transactions = allArbitraryTransactionsInDescendingOrder.stream().skip(offset).limit(limit).collect(Collectors.toList());
 					if (isStopping) {
 						return;
 					}
 
-					if (signatures == null || signatures.isEmpty()) {
+					if (transactions == null || transactions.isEmpty()) {
 						offset = 0;
-						continue;
+						allArbitraryTransactionsInDescendingOrder
+								= repository.getArbitraryRepository()
+								.getLatestArbitraryTransactions();
+						transactions = allArbitraryTransactionsInDescendingOrder.stream().limit(limit).collect(Collectors.toList());
+						processedTransactions.clear();
 					}
+
 					offset += limit;
 					now = NTP.getTime();
 
 					// Loop through the signatures in this batch
-					for (int i=0; i<signatures.size(); i++) {
+					for (int i=0; i<transactions.size(); i++) {
 						if (isStopping) {
 							return;
 						}
 
-						byte[] signature = signatures.get(i);
-						if (signature == null) {
+						ArbitraryTransactionData arbitraryTransactionData = transactions.get(i);
+						if (arbitraryTransactionData == null) {
 							continue;
 						}
 
@@ -136,9 +158,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 							Thread.sleep(5000);
 						}
 
-						// Fetch the transaction data
-						ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
-						if (arbitraryTransactionData == null || arbitraryTransactionData.getService() == null) {
+						if (arbitraryTransactionData.getService() == null) {
 							continue;
 						}
 
@@ -146,6 +166,8 @@ public class ArbitraryDataCleanupManager extends Thread {
 						if (arbitraryTransactionData.getDataType() == ArbitraryTransactionData.DataType.RAW_DATA) {
 							continue;
 						}
+
+						boolean mostRecentTransaction = processedTransactions.add(arbitraryTransactionData);
 
 						// Check if we have the complete file
 						boolean completeFileExists = ArbitraryTransactionUtils.completeFileExists(arbitraryTransactionData);
@@ -167,20 +189,54 @@ public class ArbitraryDataCleanupManager extends Thread {
 							LOGGER.info("Deleting transaction {} because we can't host its data",
 									Base58.encode(arbitraryTransactionData.getSignature()));
 							ArbitraryTransactionUtils.deleteCompleteFileAndChunks(arbitraryTransactionData);
+
+							EventBus.INSTANCE.notify(
+								new DataMonitorEvent(
+									System.currentTimeMillis(),
+									arbitraryTransactionData.getIdentifier(),
+									arbitraryTransactionData.getName(),
+									arbitraryTransactionData.getService().name(),
+									"can't store data, deleting",
+									arbitraryTransactionData.getTimestamp(),
+									arbitraryTransactionData.getTimestamp()
+								)
+							);
 							continue;
 						}
 
 						// Check to see if we have had a more recent PUT
-						boolean hasMoreRecentPutTransaction = ArbitraryTransactionUtils.hasMoreRecentPutTransaction(repository, arbitraryTransactionData);
-						if (hasMoreRecentPutTransaction) {
+						if (!mostRecentTransaction) {
 							// There is a more recent PUT transaction than the one we are currently processing.
 							// When a PUT is issued, it replaces any layers that would have been there before.
 							// Therefore any data relating to this older transaction is no longer needed.
 							LOGGER.info(String.format("Newer PUT found for %s %s since transaction %s. " +
 											"Deleting all files associated with the earlier transaction.", arbitraryTransactionData.getService(),
-									arbitraryTransactionData.getName(), Base58.encode(signature)));
+									arbitraryTransactionData.getName(), Base58.encode(arbitraryTransactionData.getSignature())));
 
 							ArbitraryTransactionUtils.deleteCompleteFileAndChunks(arbitraryTransactionData);
+
+							Optional<ArbitraryTransactionData> moreRecentPutTransaction
+								= processedTransactions.stream()
+									.filter(data -> data.equals(arbitraryTransactionData))
+									.findAny();
+
+							if( moreRecentPutTransaction.isPresent() ) {
+								EventBus.INSTANCE.notify(
+									new DataMonitorEvent(
+										System.currentTimeMillis(),
+										arbitraryTransactionData.getIdentifier(),
+										arbitraryTransactionData.getName(),
+										arbitraryTransactionData.getService().name(),
+										"deleting data due to replacement",
+										arbitraryTransactionData.getTimestamp(),
+										moreRecentPutTransaction.get().getTimestamp()
+									)
+								);
+							}
+							else {
+								LOGGER.warn("Something went wrong with the most recent put transaction determination!");
+							}
+
 							continue;
 						}
 
@@ -199,7 +255,21 @@ public class ArbitraryDataCleanupManager extends Thread {
 							LOGGER.debug(String.format("Transaction %s has complete file and all chunks",
 									Base58.encode(arbitraryTransactionData.getSignature())));
 
-							ArbitraryTransactionUtils.deleteCompleteFile(arbitraryTransactionData, now, STALE_FILE_TIMEOUT);
+							boolean wasDeleted = ArbitraryTransactionUtils.deleteCompleteFile(arbitraryTransactionData, now, STALE_FILE_TIMEOUT);
+
+							if( wasDeleted ) {
+								EventBus.INSTANCE.notify(
+									new DataMonitorEvent(
+										System.currentTimeMillis(),
+										arbitraryTransactionData.getIdentifier(),
+										arbitraryTransactionData.getName(),
+										arbitraryTransactionData.getService().name(),
+										"deleting file, retaining chunks",
+										arbitraryTransactionData.getTimestamp(),
+										arbitraryTransactionData.getTimestamp()
+									)
+								);
+							}
 							continue;
 						}
 
@@ -235,17 +305,6 @@ public class ArbitraryDataCleanupManager extends Thread {
 						Thread.sleep(60000);
 						// Now delete some data at random
 						this.storageLimitReached(repository);
-					}
-
-					// Delete random data associated with name if we're over our storage limit for this name
-					// Use the DELETION_THRESHOLD, for the same reasons as above
-					for (String followedName : ListUtils.followedNames()) {
-						if (isStopping) {
-							return;
-						}
-						if (!storageManager.isStorageSpaceAvailableForName(repository, followedName, DELETION_THRESHOLD)) {
-							this.storageLimitReachedForName(repository, followedName);
-						}
 					}
 
 				} catch (DataException e) {
@@ -326,25 +385,6 @@ public class ArbitraryDataCleanupManager extends Thread {
 		// FUTURE: consider reducing the expiry time of the reader cache
 	}
 
-	public void storageLimitReachedForName(Repository repository, String name) throws InterruptedException {
-		// We think that the storage limit has been reached for supplied name - but we should double check
-		if (ArbitraryDataStorageManager.getInstance().isStorageSpaceAvailableForName(repository, name, DELETION_THRESHOLD)) {
-			// We have space available for this name, so don't delete anything
-			return;
-		}
-
-		// Delete a batch of random chunks associated with this name
-		// This reduces the chance of too many nodes deleting the same chunk
-		// when they reach their storage limit
-		Path dataPath = Paths.get(Settings.getInstance().getDataPath());
-		for (int i=0; i<CHUNK_DELETION_BATCH_SIZE; i++) {
-			if (isStopping) {
-				return;
-			}
-			this.deleteRandomFile(repository, dataPath.toFile(), name);
-		}
-	}
-
 	/**
 	 * Iteratively walk through given directory and delete a single random file
 	 *
@@ -423,6 +463,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 				}
 
 				LOGGER.info("Deleting random file {} because we have reached max storage capacity...", randomItem.toString());
+				fireRandomItemDeletionNotification(randomItem, repository, "Deleting random file, because we have reached max storage capacity");
 				boolean success = randomItem.delete();
 				if (success) {
 					try {
@@ -435,6 +476,35 @@ public class ArbitraryDataCleanupManager extends Thread {
 			}
 		}
 		return false;
+	}
+
+	private void fireRandomItemDeletionNotification(File randomItem, Repository repository, String reason) {
+		try {
+			Path parentFileNamePath = randomItem.toPath().toAbsolutePath().getParent().getFileName();
+			if (parentFileNamePath != null) {
+				String signature58 = parentFileNamePath.toString();
+				byte[] signature = Base58.decode(signature58);
+				TransactionData transactionData = repository.getTransactionRepository().fromSignature(signature);
+				if (transactionData != null && transactionData.getType() == Transaction.TransactionType.ARBITRARY) {
+					ArbitraryTransactionData arbitraryTransactionData = (ArbitraryTransactionData) transactionData;
+
+					EventBus.INSTANCE.notify(
+						new DataMonitorEvent(
+							System.currentTimeMillis(),
+							arbitraryTransactionData.getIdentifier(),
+							arbitraryTransactionData.getName(),
+							arbitraryTransactionData.getService().name(),
+							reason,
+							arbitraryTransactionData.getTimestamp(),
+							arbitraryTransactionData.getTimestamp()
+						)
+					);
+				}
+			}
+
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+		}
 	}
 
 	private void cleanupTempDirectory(String folder, long now, long minAge) {

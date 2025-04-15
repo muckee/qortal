@@ -200,4 +200,26 @@ public class ArbitraryTransactionData extends TransactionData {
 		return this.payments;
 	}
 
+	@Override
+	public String toString() {
+		return "ArbitraryTransactionData{" +
+				"version=" + version +
+				", service=" + service +
+				", nonce=" + nonce +
+				", size=" + size +
+				", name='" + name + '\'' +
+				", identifier='" + identifier + '\'' +
+				", method=" + method +
+				", compression=" + compression +
+				", dataType=" + dataType +
+				", type=" + type +
+				", timestamp=" + timestamp +
+				", fee=" + fee +
+				", txGroupId=" + txGroupId +
+				", blockHeight=" + blockHeight +
+				", blockSequence=" + blockSequence +
+				", approvalStatus=" + approvalStatus +
+				", approvalHeight=" + approvalHeight +
+				'}';
+	}
 }

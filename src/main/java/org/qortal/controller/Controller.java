@@ -423,6 +423,12 @@ public class Controller extends Thread {
 				LOGGER.info("Db Cache Disabled");
 			}
 
+			LOGGER.info("Arbitrary Indexing Starting ...");
+			ArbitraryIndexUtils.startCaching(
+				Settings.getInstance().getArbitraryIndexingPriority(),
+				Settings.getInstance().getArbitraryIndexingFrequency()
+			);
+
 			if( Settings.getInstance().isBalanceRecorderEnabled() ) {
 				Optional<HSQLDBBalanceRecorder> recorder = HSQLDBBalanceRecorder.getInstance();
 
@@ -540,6 +546,16 @@ public class Controller extends Thread {
 		ArbitraryDataCleanupManager.getInstance().start();
 		ArbitraryDataStorageManager.getInstance().start();
 		ArbitraryDataRenderManager.getInstance().start();
+
+		// start rebuild arbitrary resource cache timer task
+		if( Settings.getInstance().isRebuildArbitraryResourceCacheTaskEnabled() ) {
+			new Timer().schedule(
+				new RebuildArbitraryResourceCacheTask(),
+				Settings.getInstance().getRebuildArbitraryResourceCacheTaskDelay() * RebuildArbitraryResourceCacheTask.MILLIS_IN_MINUTE,
+				Settings.getInstance().getRebuildArbitraryResourceCacheTaskPeriod() * RebuildArbitraryResourceCacheTask.MILLIS_IN_HOUR
+			);
+		}
+
 
 		LOGGER.info("Starting online accounts manager");
 		OnlineAccountsManager.getInstance().start();
