@@ -10,7 +10,6 @@
 		<skipTests>true</skipTests>
 
 		<altcoinj.version>7dc8c6f</altcoinj.version>
-		<altcoinj.version>7dc8c6f</altcoinj.version>
 		<bitcoinj.version>0.15.10</bitcoinj.version>
 		<bouncycastle.version>1.70</bouncycastle.version>
 		<build.timestamp>${maven.build.timestamp}</build.timestamp>
@@ -747,12 +746,12 @@
 		<!-- BouncyCastle for crypto, including TLS secure networking -->
 		<dependency>
 			<groupId>org.bouncycastle</groupId>
-			<artifactId>bcprov-jdk15on</artifactId>
+			<artifactId>bcprov-jdk15to18</artifactId>
 			<version>${bouncycastle.version}</version>
 		</dependency>
 		<dependency>
 			<groupId>org.bouncycastle</groupId>
-			<artifactId>bctls-jdk15on</artifactId>
+			<artifactId>bctls-jdk15to18</artifactId>
 			<version>${bouncycastle.version}</version>
 		</dependency>
 		<dependency>
