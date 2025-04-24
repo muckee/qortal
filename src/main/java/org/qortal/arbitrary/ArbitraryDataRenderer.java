@@ -168,7 +168,7 @@ public class ArbitraryDataRenderer {
                 byte[] data = Files.readAllBytes(filePath); // TODO: limit file size that can be read into memory
                 HTMLParser htmlParser = new HTMLParser(resourceId, inPath, prefix, includeResourceIdInPrefix, data, qdnContext, service, identifier, theme, usingCustomRouting);
                 htmlParser.addAdditionalHeaderTags();
-                response.addHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline' 'unsafe-eval'; media-src 'self' data: blob:; img-src 'self' data: blob:;");
+                response.addHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline' 'unsafe-eval'; font-src 'self' data:; media-src 'self' data: blob:; img-src 'self' data: blob:; connect-src 'self' wss:;");
                 response.setContentType(context.getMimeType(filename));
                 response.setContentLength(htmlParser.getData().length);
                 response.getOutputStream().write(htmlParser.getData());
@@ -199,7 +199,7 @@ public class ArbitraryDataRenderer {
     }
 
     private String getFilename(String directory, String userPath) {
-        if (userPath == null || userPath.endsWith("/") || userPath.equals("")) {
+        if (userPath == null || userPath.endsWith("/") || userPath.isEmpty()) {
             // Locate index file
             List<String> indexFiles = ArbitraryDataRenderer.indexFiles();
             for (String indexFile : indexFiles) {

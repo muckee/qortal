@@ -19,6 +19,8 @@ import org.qortal.crypto.Crypto;
 import org.qortal.data.account.AccountData;
 import org.qortal.data.block.BlockData;
 import org.qortal.data.block.BlockSummaryData;
+import org.qortal.data.block.DecodedOnlineAccountData;
+import org.qortal.data.network.OnlineAccountData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.repository.BlockArchiveReader;
 import org.qortal.repository.DataException;
@@ -27,6 +29,7 @@ import org.qortal.repository.RepositoryManager;
 import org.qortal.transform.TransformationException;
 import org.qortal.transform.block.BlockTransformer;
 import org.qortal.utils.Base58;
+import org.qortal.utils.Blocks;
 import org.qortal.utils.Triple;
 
 import javax.servlet.http.HttpServletRequest;
@@ -45,6 +48,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
 @Path("/blocks")
 @Tag(name = "Blocks")
@@ -86,7 +90,7 @@ public class BlocksResource {
 		    // Check the database first
 			BlockData blockData = repository.getBlockRepository().fromSignature(signature);
 			if (blockData != null) {
-				if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+				if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 					blockData.setOnlineAccountsSignatures(null);
 				}
 				return blockData;
@@ -95,7 +99,7 @@ public class BlocksResource {
             // Not found, so try the block archive
 			blockData = repository.getBlockArchiveRepository().fromSignature(signature);
 			if (blockData != null) {
-				if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+				if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 					blockData.setOnlineAccountsSignatures(null);
 				}
 				return blockData;
@@ -304,7 +308,7 @@ public class BlocksResource {
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			BlockData blockData = repository.getBlockRepository().getLastBlock();
 
-			if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+			if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 				blockData.setOnlineAccountsSignatures(null);
 			}
 
@@ -474,7 +478,7 @@ public class BlocksResource {
 			// Firstly check the database
 			BlockData blockData = repository.getBlockRepository().fromHeight(height);
 			if (blockData != null) {
-				if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+				if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 					blockData.setOnlineAccountsSignatures(null);
 				}
 				return blockData;
@@ -483,7 +487,7 @@ public class BlocksResource {
 			// Not found, so try the archive
 			blockData = repository.getBlockArchiveRepository().fromHeight(height);
 			if (blockData != null) {
-				if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+				if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 					blockData.setOnlineAccountsSignatures(null);
 				}
 				return blockData;
@@ -542,6 +546,7 @@ public class BlocksResource {
 				}
 			}
 
+			String minterAddress = Account.getRewardShareMintingAddress(repository, blockData.getMinterPublicKey());
 			int minterLevel = Account.getRewardShareEffectiveMintingLevel(repository, blockData.getMinterPublicKey());
 			if (minterLevel == 0)
 				// This may be unavailable when requesting a trimmed block
@@ -554,6 +559,7 @@ public class BlocksResource {
 
 			BlockMintingInfo blockMintingInfo = new BlockMintingInfo();
 			blockMintingInfo.minterPublicKey = blockData.getMinterPublicKey();
+			blockMintingInfo.minterAddress = minterAddress;
 			blockMintingInfo.minterLevel = minterLevel;
 			blockMintingInfo.onlineAccountsCount = blockData.getOnlineAccountsCount();
 			blockMintingInfo.maxDistance = new BigDecimal(block.MAX_DISTANCE);
@@ -596,7 +602,7 @@ public class BlocksResource {
 			if (height > 1) {
 				// Found match in Blocks table
 				blockData = repository.getBlockRepository().fromHeight(height);
-				if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+				if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 					blockData.setOnlineAccountsSignatures(null);
 				}
 				return blockData;
@@ -614,7 +620,7 @@ public class BlocksResource {
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.BLOCK_UNKNOWN);
 			}
 
-			if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+			if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 				blockData.setOnlineAccountsSignatures(null);
 			}
 
@@ -651,7 +657,7 @@ public class BlocksResource {
 										 @QueryParam("includeOnlineSignatures") Boolean includeOnlineSignatures) {
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			List<BlockData> blocks = new ArrayList<>();
-			boolean shouldReverse = (reverse != null && reverse == true);
+			boolean shouldReverse = (reverse != null && reverse);
 
 			int i = 0;
 			while (i < count) {
@@ -664,7 +670,7 @@ public class BlocksResource {
 						break;
 					}
 				}
-				if (includeOnlineSignatures == null || includeOnlineSignatures == false) {
+				if (includeOnlineSignatures == null || !includeOnlineSignatures) {
 					blockData.setOnlineAccountsSignatures(null);
 				}
 
@@ -888,4 +894,49 @@ public class BlocksResource {
 		}
 	}
 
+	@GET
+	@Path("/onlineaccounts/{height}")
+	@Operation(
+			summary = "Get online accounts for block",
+			description = "Returns the online accounts who submitted signatures for this block",
+			responses = {
+					@ApiResponse(
+							description = "online accounts",
+							content = @Content(
+									array = @ArraySchema(
+											schema = @Schema(
+													implementation = DecodedOnlineAccountData.class
+											)
+									)
+							)
+					)
+			}
+	)
+	@ApiErrors({
+			ApiError.BLOCK_UNKNOWN, ApiError.REPOSITORY_ISSUE
+	})
+	public Set<DecodedOnlineAccountData> getOnlineAccounts(@PathParam("height") int height) {
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			// get block from database
+			BlockData blockData = repository.getBlockRepository().fromHeight(height);
+
+			// if block data is not in the database, then try the archive
+			if (blockData == null) {
+				blockData = repository.getBlockArchiveRepository().fromHeight(height);
+
+				// if the block is not in the database or the archive, then the block is unknown
+				if( blockData == null ) {
+					throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.BLOCK_UNKNOWN);
+				}
+			}
+
+			Set<DecodedOnlineAccountData> onlineAccounts = Blocks.getDecodedOnlineAccountsForBlock(repository, blockData);
+
+			return onlineAccounts;
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE);
+		}
+	}
 }

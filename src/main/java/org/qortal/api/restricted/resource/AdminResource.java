@@ -32,13 +32,16 @@ import org.qortal.controller.Synchronizer.SynchronizationResult;
 import org.qortal.controller.repository.BlockArchiveRebuilder;
 import org.qortal.data.account.MintingAccountData;
 import org.qortal.data.account.RewardShareData;
+import org.qortal.data.system.DbConnectionInfo;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
+import org.qortal.repository.ReindexManager;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
+import org.qortal.data.system.SystemInfo;
 import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 
@@ -51,6 +54,7 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -458,7 +462,7 @@ public class AdminResource {
 
 			// Qortal: check reward-share's minting account is still allowed to mint
 			Account rewardShareMintingAccount = new Account(repository, rewardShareData.getMinter());
-			if (!rewardShareMintingAccount.canMint())
+			if (!rewardShareMintingAccount.canMint(false))
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.CANNOT_MINT);
 
 			MintingAccountData mintingAccountData = new MintingAccountData(mintingAccount.getPrivateKey(), mintingAccount.getPublicKey());
@@ -894,6 +898,50 @@ public class AdminResource {
 		}
 	}
 
+	@POST
+	@Path("/repository/reindex")
+	@Operation(
+			summary = "Reindex repository",
+			description = "Rebuilds all transactions and balances from archived blocks. Warning: takes around 1 week, and the core will not function normally during this time. If 'false' is returned, the database may be left in an inconsistent state, requiring another reindex or a bootstrap to correct it.",
+			responses = {
+					@ApiResponse(
+							description = "\"true\"",
+							content = @Content(mediaType = MediaType.TEXT_PLAIN, schema = @Schema(type = "string"))
+					)
+			}
+	)
+	@ApiErrors({ApiError.REPOSITORY_ISSUE, ApiError.BLOCKCHAIN_NEEDS_SYNC})
+	@SecurityRequirement(name = "apiKey")
+	public String reindex(@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
+		Security.checkApiCallAllowed(request);
+
+		if (Synchronizer.getInstance().isSynchronizing())
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.BLOCKCHAIN_NEEDS_SYNC);
+
+		try {
+			ReentrantLock blockchainLock = Controller.getInstance().getBlockchainLock();
+
+			blockchainLock.lockInterruptibly();
+
+			try {
+				ReindexManager reindexManager = new ReindexManager();
+				reindexManager.reindex();
+				return "true";
+
+			} catch (DataException e) {
+				LOGGER.info("DataException when reindexing: {}", e.getMessage());
+
+			} finally {
+				blockchainLock.unlock();
+			}
+		} catch (InterruptedException e) {
+			// We couldn't lock blockchain to perform reindex
+			return "false";
+		}
+
+		return "false";
+	}
+
 	@DELETE
 	@Path("/repository")
 	@Operation(
@@ -966,8 +1014,6 @@ public class AdminResource {
 		}
 	}
 
-
-
 	@POST
 	@Path("/apikey/generate")
 	@Operation(
@@ -1021,4 +1067,50 @@ public class AdminResource {
 		return "true";
 	}
 
+	@GET
+	@Path("/systeminfo")
+	@Operation(
+			summary = "System Information",
+			description = "System memory usage and available processors.",
+			responses = {
+					@ApiResponse(
+							description = "memory usage and available processors",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = SystemInfo.class))
+					)
+			}
+	)
+	@ApiErrors({ApiError.REPOSITORY_ISSUE})
+	public SystemInfo getSystemInformation() {
+
+		SystemInfo info
+			= new SystemInfo(
+				Runtime.getRuntime().freeMemory(),
+				Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory(),
+				Runtime.getRuntime().totalMemory(),
+				Runtime.getRuntime().maxMemory(),
+				Runtime.getRuntime().availableProcessors());
+
+		return info;
+	}
+
+	@GET
+	@Path("/dbstates")
+	@Operation(
+			summary = "Get DB States",
+			description = "Get DB States",
+			responses = {
+					@ApiResponse(
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, array = @ArraySchema(schema = @Schema(implementation = DbConnectionInfo.class)))
+					)
+			}
+	)
+	public List<DbConnectionInfo> getDbConnectionsStates() {
+
+		try {
+			return Controller.REPOSITORY_FACTORY.getDbConnectionsStates();
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			return new ArrayList<>(0);
+		}
+	}
 }

@@ -14,6 +14,7 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
+import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.settings.Settings;
 import org.qortal.transform.TransformationException;
 
@@ -126,6 +127,8 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 			return size() > TX_CACHE_SIZE;
 		}
 	});
+
+	private ChainableServerConnectionRecorder recorder = new ChainableServerConnectionRecorder(100);
 
 	// Constructors
 
@@ -443,12 +446,13 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 				// Update: it turns out that they were just using a different key - "address" instead of "addresses"
 				// The code below can remain in place, just in case a peer returns a missing address in the future
 				if (addresses == null || addresses.isEmpty()) {
+					final String message = String.format("No output addresses returned for transaction %s", txHash);
 					if (this.currentServer != null) {
 						this.uselessServers.add(this.currentServer);
-						this.closeServer(this.currentServer);
+						this.closeServer(this.currentServer, message, this.getClass().getSimpleName());
 					}
-					LOGGER.info("No output addresses returned for transaction {}", txHash);
-					throw new ForeignBlockchainException(String.format("No output addresses returned for transaction %s", txHash));
+					LOGGER.info(message);
+					throw new ForeignBlockchainException(message);
 				}
 
 				outputs.add(new BitcoinyTransaction.Output(scriptPubKey, value, addresses));
@@ -557,6 +561,42 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 	@Override
 	public ChainableServer getCurrentServer() { return this.currentServer; }
 
+	@Override
+	public boolean addServer(ChainableServer server) {
+		return this.servers.add(server);
+	}
+
+	@Override
+	public boolean removeServer(ChainableServer server) {
+		boolean removedServer = this.servers.remove(server);
+		boolean removedRemaining = this.remainingServers.remove(server);
+
+		return removedServer || removedRemaining;
+	}
+
+	@Override
+	public Optional<ChainableServerConnection> setCurrentServer(ChainableServer server, String requestedBy) throws ForeignBlockchainException {
+
+		closeServer( requestedBy, "Connecting to different server by request." );
+		Optional<ChainableServerConnection> connection = makeConnection(server, requestedBy);
+
+		if( !connection.isPresent() || !connection.get().isSuccess() ) {
+			haveConnection();
+		}
+
+		return connection;
+	}
+
+	@Override
+	public List<ChainableServerConnection> getServerConnections() {
+		return this.recorder.getConnections();
+	}
+
+	@Override
+	public ChainableServer getServer(String hostName, ChainableServer.ConnectionType type, int port) {
+		return new PirateLightClient.Server(hostName, type, port);
+	}
+
 	// Class-private utility methods
 
 
@@ -576,8 +616,9 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 				if (!this.remainingServers.isEmpty()) {
 					long averageResponseTime = this.currentServer.averageResponseTime();
 					if (averageResponseTime > MAX_AVG_RESPONSE_TIME) {
-						LOGGER.info("Slow average response time {}ms from {} - trying another server...", averageResponseTime, this.currentServer.getHostName());
-						this.closeServer();
+						String message = String.format("Slow average response time %dms from %s - trying another server...", averageResponseTime, this.currentServer.getHostName());
+						LOGGER.info(message);
+						this.closeServer(this.getClass().getSimpleName(), message);
 						continue;
 					}
 				}
@@ -601,18 +642,27 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 
 		while (!this.remainingServers.isEmpty()) {
 			ChainableServer server = this.remainingServers.remove(RANDOM.nextInt(this.remainingServers.size()));
-			LOGGER.trace(() -> String.format("Connecting to %s", server));
 
-			try {
-				this.channel = ManagedChannelBuilder.forAddress(server.getHostName(), server.getPort()).build();
+			Optional<ChainableServerConnection> chainableServerConnection = makeConnection(server, this.getClass().getSimpleName());
+			if( chainableServerConnection.isPresent() && chainableServerConnection.get().isSuccess() ) return true;
+		}
 
-				CompactTxStreamerGrpc.CompactTxStreamerBlockingStub stub = CompactTxStreamerGrpc.newBlockingStub(this.channel);
-				LightdInfo lightdInfo = stub.getLightdInfo(Empty.newBuilder().build());
+		return false;
+	}
 
-				if (lightdInfo == null || lightdInfo.getBlockHeight() <= 0)
-					continue;
+	private Optional<ChainableServerConnection> makeConnection(ChainableServer server, String requestedBy) {
+		LOGGER.info(() -> String.format("Connecting to %s", server));
 
-				// TODO: find a way to verify that the server is using the expected chain
+		try {
+			this.channel = ManagedChannelBuilder.forAddress(server.getHostName(), server.getPort()).build();
+
+			CompactTxStreamerGrpc.CompactTxStreamerBlockingStub stub = CompactTxStreamerGrpc.newBlockingStub(this.channel);
+			LightdInfo lightdInfo = stub.getLightdInfo(Empty.newBuilder().build());
+
+			if (lightdInfo == null || lightdInfo.getBlockHeight() <= 0)
+				return Optional.of( this.recorder.recordConnection(server, requestedBy,true, false, "lightd info issues") );
+
+			// TODO: find a way to verify that the server is using the expected chain
 
 //				if (featuresJson == null || Double.valueOf((String) featuresJson.get("protocol_min")) < MIN_PROTOCOL_VERSION)
 //					continue;
@@ -620,27 +670,30 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 //				if (this.expectedGenesisHash != null && !((String) featuresJson.get("genesis_hash")).equals(this.expectedGenesisHash))
 //					continue;
 
-				LOGGER.debug(() -> String.format("Connected to %s", server));
-				this.currentServer = server;
-				return true;
-			} catch (Exception e) {
-				// Didn't work, try another server...
-				closeServer();
-			}
+			LOGGER.info(() -> String.format("Connected to %s", server));
+			this.currentServer = server;
+			return Optional.of( this.recorder.recordConnection(server, requestedBy,true, true, EMPTY) );
+		} catch (Exception e) {
+			// Didn't work, try another server...
+			return Optional.of( this.recorder.recordConnection( server, requestedBy, true, false, CrossChainUtils.getNotes(e)));
 		}
-
-		return false;
 	}
-
 	/**
 	 * Closes connection to <tt>server</tt> if it is currently connected server.
+	 *
 	 * @param server
+	 * @param requestedBy
 	 */
-	private void closeServer(ChainableServer server) {
+	private Optional<ChainableServerConnection> closeServer(ChainableServer server, String notes, String requestedBy) {
+
+		final ChainableServerConnection connection;
+
 		synchronized (this.serverLock) {
 			if (this.currentServer == null || !this.currentServer.equals(server) || this.channel == null) {
-				return;
+				return Optional.empty();
 			}
+
+			connection = this.recorder.recordConnection(server, requestedBy, false, true, notes);
 
 			// Close the gRPC managed-channel if not shut down already.
 			if (!this.channel.isShutdown()) {
@@ -669,12 +722,14 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 			this.channel = null;
 			this.currentServer = null;
 		}
+
+		return Optional.of( connection );
 	}
 
 	/** Closes connection to currently connected server (if any). */
-	private void closeServer() {
+	private Optional<ChainableServerConnection> closeServer(String requestedBy, String notes) {
 		synchronized (this.serverLock) {
-			this.closeServer(this.currentServer);
+			return this.closeServer(this.currentServer, notes, requestedBy);
 		}
 	}
 

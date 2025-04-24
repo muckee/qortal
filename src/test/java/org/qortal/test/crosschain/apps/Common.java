@@ -92,7 +92,7 @@ public abstract class Common {
 		List<TransactionOutput> unspentOutputs = Collections.emptyList();
 
 		try {
-			unspentOutputs = bitcoiny.getUnspentOutputs(address58);
+			unspentOutputs = bitcoiny.getUnspentOutputs(address58, false);
 		} catch (ForeignBlockchainException e) {
 			System.err.println(String.format("Can't find unspent outputs for %s: %s", address58, e.getMessage()));
 			return unspentOutputs;

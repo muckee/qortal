@@ -71,6 +71,7 @@ public class BlockChain {
 		transactionV6Timestamp,
 		disableReferenceTimestamp,
 		increaseOnlineAccountsDifficultyTimestamp,
+		decreaseOnlineAccountsDifficultyTimestamp,
 		onlineAccountMinterLevelValidationHeight,
 		selfSponsorshipAlgoV1Height,
 		selfSponsorshipAlgoV2Height,
@@ -80,7 +81,18 @@ public class BlockChain {
 		arbitraryOptionalFeeTimestamp,
 		unconfirmableRewardSharesHeight,
 		disableTransferPrivsTimestamp,
-		enableTransferPrivsTimestamp
+		enableTransferPrivsTimestamp,
+		cancelSellNameValidationTimestamp,
+		disableRewardshareHeight,
+		enableRewardshareHeight,
+		onlyMintWithNameHeight,
+		removeOnlyMintWithNameHeight,
+		groupMemberCheckHeight,
+		fixBatchRewardHeight,
+		adminsReplaceFoundersHeight,
+		nullGroupMembershipHeight,
+		ignoreLevelForRewardShareHeight,
+		adminQueryFixHeight
 	}
 
 	// Custom transaction fees
@@ -201,6 +213,13 @@ public class BlockChain {
 	private int maxRewardSharesPerFounderMintingAccount;
 	private int founderEffectiveMintingLevel;
 
+	public static class IdsForHeight {
+		public int height;
+		public List<Integer> ids;
+	}
+
+	private List<IdsForHeight> mintingGroupIds;
+
 	/** Minimum time to retain online account signatures (ms) for block validity checks. */
 	private long onlineAccountSignaturesMinLifetime;
 
@@ -210,6 +229,10 @@ public class BlockChain {
 	/** Feature trigger timestamp for ONLINE_ACCOUNTS_MODULUS time interval increase. Can't use
 	 * featureTriggers because unit tests need to set this value via Reflection. */
 	private long onlineAccountsModulusV2Timestamp;
+
+	/** Feature trigger timestamp for ONLINE_ACCOUNTS_MODULUS time interval decrease. Can't use
+	 * featureTriggers because unit tests need to set this value via Reflection. */
+	private long onlineAccountsModulusV3Timestamp;
 
 	/** Snapshot timestamp for self sponsorship algo V1 */
 	private long selfSponsorshipAlgoV1SnapshotTimestamp;
@@ -397,6 +420,9 @@ public class BlockChain {
 		return this.onlineAccountsModulusV2Timestamp;
 	}
 
+	public long getOnlineAccountsModulusV3Timestamp() {
+		return this.onlineAccountsModulusV3Timestamp;
+	}
 
 	/* Block reward batching */
 	public long getBlockRewardBatchStartHeight() {
@@ -524,6 +550,10 @@ public class BlockChain {
 		return this.onlineAccountSignaturesMaxLifetime;
 	}
 
+	public List<IdsForHeight> getMintingGroupIds() {
+		return mintingGroupIds;
+	}
+
 	public CiyamAtSettings getCiyamAtSettings() {
 		return this.ciyamAtSettings;
 	}
@@ -570,6 +600,10 @@ public class BlockChain {
 		return this.featureTriggers.get(FeatureTrigger.increaseOnlineAccountsDifficultyTimestamp.name()).longValue();
 	}
 
+	public long getDecreaseOnlineAccountsDifficultyTimestamp() {
+		return this.featureTriggers.get(FeatureTrigger.decreaseOnlineAccountsDifficultyTimestamp.name()).longValue();
+	}
+
 	public int getSelfSponsorshipAlgoV1Height() {
 		return this.featureTriggers.get(FeatureTrigger.selfSponsorshipAlgoV1Height.name()).intValue();
 	}
@@ -608,6 +642,50 @@ public class BlockChain {
 
 	public long getEnableTransferPrivsTimestamp() {
 		return this.featureTriggers.get(FeatureTrigger.enableTransferPrivsTimestamp.name()).longValue();
+	}
+
+	public long getCancelSellNameValidationTimestamp() {
+		return this.featureTriggers.get(FeatureTrigger.cancelSellNameValidationTimestamp.name()).longValue();
+	}
+
+	public int getDisableRewardshareHeight() {
+		return this.featureTriggers.get(FeatureTrigger.disableRewardshareHeight.name()).intValue();
+	}
+
+	public int getEnableRewardshareHeight() {
+		return this.featureTriggers.get(FeatureTrigger.enableRewardshareHeight.name()).intValue();
+	}
+
+	public int getOnlyMintWithNameHeight() {
+		return this.featureTriggers.get(FeatureTrigger.onlyMintWithNameHeight.name()).intValue();
+	}
+
+	public int getRemoveOnlyMintWithNameHeight() {
+		return this.featureTriggers.get(FeatureTrigger.removeOnlyMintWithNameHeight.name()).intValue();
+	}
+
+	public int getGroupMemberCheckHeight() {
+		return this.featureTriggers.get(FeatureTrigger.groupMemberCheckHeight.name()).intValue();
+	}
+
+	public int getFixBatchRewardHeight() {
+		return this.featureTriggers.get(FeatureTrigger.fixBatchRewardHeight.name()).intValue();
+	}
+
+	public int getAdminsReplaceFoundersHeight() {
+		return this.featureTriggers.get(FeatureTrigger.adminsReplaceFoundersHeight.name()).intValue();
+	}
+
+	public int getNullGroupMembershipHeight() {
+		return this.featureTriggers.get(FeatureTrigger.nullGroupMembershipHeight.name()).intValue();
+	}
+
+	public int getIgnoreLevelForRewardShareHeight() {
+		return this.featureTriggers.get(FeatureTrigger.ignoreLevelForRewardShareHeight.name()).intValue();
+	}
+
+	public int getAdminQueryFixHeight() {
+		return this.featureTriggers.get(FeatureTrigger.adminQueryFixHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp
@@ -805,10 +883,12 @@ public class BlockChain {
 		boolean isLite = Settings.getInstance().isLite();
 		boolean canBootstrap = Settings.getInstance().getBootstrap();
 		boolean needsArchiveRebuild = false;
+		int checkHeight = 0;
 		BlockData chainTip;
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			chainTip = repository.getBlockRepository().getLastBlock();
+			checkHeight = repository.getBlockRepository().getBlockchainHeight();
 
 			// Ensure archive is (at least partially) intact, and force a bootstrap if it isn't
 			if (!isTopOnly && archiveEnabled && canBootstrap) {
@@ -820,6 +900,17 @@ public class BlockChain {
 					// Don't backup if there are no minting accounts, as this can cause problems
 					if (!repository.getAccountRepository().getMintingAccounts().isEmpty()) {
 						Controller.getInstance().exportRepositoryData();
+					}
+				}
+			}
+
+			if (!canBootstrap) {
+				if (checkHeight > 2) {
+					LOGGER.info("Retrieved block 2 from archive. Syncing from genesis block resumed!");
+				} else {
+					needsArchiveRebuild = (repository.getBlockArchiveRepository().fromHeight(2) == null);
+					if (needsArchiveRebuild) {
+						LOGGER.info("Couldn't retrieve block 2 from archive. Bootstrapping is disabled. Syncing from genesis block!");
 					}
 				}
 			}
@@ -856,11 +947,12 @@ public class BlockChain {
 
 		// Check first block is Genesis Block
 		if (!isGenesisBlockValid() || needsArchiveRebuild) {
-			try {
-				rebuildBlockchain();
-
-			} catch (InterruptedException e) {
-				throw new DataException(String.format("Interrupted when trying to rebuild blockchain: %s", e.getMessage()));
+			if (checkHeight < 3) {
+				try {
+					rebuildBlockchain();
+				} catch (InterruptedException e) {
+					throw new DataException(String.format("Interrupted when trying to rebuild blockchain: %s", e.getMessage()));
+				}
 			}
 		}
 
@@ -1001,5 +1093,4 @@ public class BlockChain {
 			blockchainLock.unlock();
 		}
 	}
-
 }

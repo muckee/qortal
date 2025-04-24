@@ -9,6 +9,7 @@ import org.bitcoinj.core.Coin;
 import org.qortal.account.PrivateKeyAccount;
 import org.qortal.account.PublicKeyAccount;
 import org.qortal.api.model.crosschain.TradeBotCreateRequest;
+import org.qortal.api.resource.CrossChainUtils;
 import org.qortal.asset.Asset;
 import org.qortal.crosschain.*;
 import org.qortal.crypto.Crypto;
@@ -32,11 +33,9 @@ import org.qortal.utils.NTP;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
-import static java.util.Arrays.stream;
-import static java.util.stream.Collectors.toMap;
+import org.qortal.controller.tradebot.TradeStates.State;
 
 /**
  * Performing cross-chain trading steps on behalf of user.
@@ -51,45 +50,6 @@ import static java.util.stream.Collectors.toMap;
 public class PirateChainACCTv3TradeBot implements AcctTradeBot {
 
 	private static final Logger LOGGER = LogManager.getLogger(PirateChainACCTv3TradeBot.class);
-
-	public enum State implements TradeBot.StateNameAndValueSupplier {
-		BOB_WAITING_FOR_AT_CONFIRM(10, false, false),
-		BOB_WAITING_FOR_MESSAGE(15, true, true),
-		BOB_WAITING_FOR_AT_REDEEM(25, true, true),
-		BOB_DONE(30, false, false),
-		BOB_REFUNDED(35, false, false),
-
-		ALICE_WAITING_FOR_AT_LOCK(85, true, true),
-		ALICE_DONE(95, false, false),
-		ALICE_REFUNDING_A(105, true, true),
-		ALICE_REFUNDED(110, false, false);
-
-		private static final Map<Integer, State> map = stream(State.values()).collect(toMap(state -> state.value, state -> state));
-
-		public final int value;
-		public final boolean requiresAtData;
-		public final boolean requiresTradeData;
-
-		State(int value, boolean requiresAtData, boolean requiresTradeData) {
-			this.value = value;
-			this.requiresAtData = requiresAtData;
-			this.requiresTradeData = requiresTradeData;
-		}
-
-		public static State valueOf(int value) {
-			return map.get(value);
-		}
-
-		@Override
-		public String getState() {
-			return this.name();
-		}
-
-		@Override
-		public int getStateValue() {
-			return this.value;
-		}
-	}
 
 	/** Maximum time Bob waits for his AT creation transaction to be confirmed into a block. (milliseconds) */
 	private static final long MAX_AT_CONFIRMATION_PERIOD = 24 * 60 * 60 * 1000L; // ms
@@ -317,7 +277,7 @@ public class PirateChainACCTv3TradeBot implements AcctTradeBot {
 		}
 
 		// Attempt to send MESSAGE to Bob's Qortal trade address
-		byte[] messageData = PirateChainACCTv3.buildOfferMessage(tradeBotData.getTradeForeignPublicKey(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
+		byte[] messageData = CrossChainUtils.buildOfferMessage(tradeBotData.getTradeForeignPublicKey(), tradeBotData.getHashOfSecret(), tradeBotData.getLockTimeA());
 		String messageRecipient = crossChainTradeData.qortalCreatorTradeAddress;
 
 		boolean isMessageAlreadySent = repository.getMessageRepository().exists(tradeBotData.getTradeNativePublicKey(), messageRecipient, messageData);

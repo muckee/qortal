@@ -157,7 +157,7 @@ public class CrossChainHtlcResource {
 			htlcStatus.bitcoinP2shAddress = p2shAddress;
 			htlcStatus.bitcoinP2shBalance = BigDecimal.valueOf(p2shBalance, 8);
 
-			List<TransactionOutput> fundingOutputs = bitcoiny.getUnspentOutputs(p2shAddress.toString());
+			List<TransactionOutput> fundingOutputs = bitcoiny.getUnspentOutputs(p2shAddress.toString(), false);
 
 			if (p2shBalance > 0L && !fundingOutputs.isEmpty()) {
 				htlcStatus.canRedeem = now >= medianBlockTime * 1000L;
@@ -401,7 +401,7 @@ public class CrossChainHtlcResource {
 				case FUNDED: {
 					Coin redeemAmount = Coin.valueOf(crossChainTradeData.expectedForeignAmount);
 					ECKey redeemKey = ECKey.fromPrivate(decodedTradePrivateKey);
-					List<TransactionOutput> fundingOutputs = bitcoiny.getUnspentOutputs(p2shAddressA);
+					List<TransactionOutput> fundingOutputs = bitcoiny.getUnspentOutputs(p2shAddressA, false);
 
 					Transaction p2shRedeemTransaction = BitcoinyHTLC.buildRedeemTransaction(bitcoiny.getNetworkParameters(), redeemAmount, redeemKey,
 							fundingOutputs, redeemScriptA, decodedSecret, foreignBlockchainReceivingAccountInfo);
@@ -664,7 +664,7 @@ public class CrossChainHtlcResource {
 							// ElectrumX coins
 
 							ECKey refundKey = ECKey.fromPrivate(tradeBotData.getTradePrivateKey());
-							List<TransactionOutput> fundingOutputs = bitcoiny.getUnspentOutputs(p2shAddressA);
+							List<TransactionOutput> fundingOutputs = bitcoiny.getUnspentOutputs(p2shAddressA, false);
 
 							// Validate the destination foreign blockchain address
 							Address receiving = Address.fromString(bitcoiny.getNetworkParameters(), receiveAddress);

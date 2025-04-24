@@ -43,7 +43,7 @@ public class RewardShareTransaction extends Transaction {
 	}
 
 	private RewardShareData getExistingRewardShare() throws DataException {
-		if (this.haveCheckedForExistingRewardShare == false) {
+		if (!this.haveCheckedForExistingRewardShare) {
 			this.haveCheckedForExistingRewardShare = true;
 
 			// Look up any existing reward-share (using transaction's reward-share public key)
@@ -98,6 +98,14 @@ public class RewardShareTransaction extends Transaction {
 
 	@Override
 	public ValidationResult isValid() throws DataException {
+		final int disableRs = BlockChain.getInstance().getDisableRewardshareHeight();
+		final int enableRs = BlockChain.getInstance().getEnableRewardshareHeight();
+		int blockchainHeight = this.repository.getBlockRepository().getBlockchainHeight();
+
+		// Check if reward share is disabled.
+		if (blockchainHeight >= disableRs && blockchainHeight < enableRs)
+			return ValidationResult.GENERAL_TEMPORARY_DISABLED;
+
 		// Check reward share given to recipient. Negative is potentially OK to end a current reward-share. Zero also fine.
 		if (this.rewardShareTransactionData.getSharePercent() > MAX_SHARE)
 			return ValidationResult.INVALID_REWARD_SHARE_PERCENT;
@@ -115,7 +123,7 @@ public class RewardShareTransaction extends Transaction {
 		final boolean isCancellingSharePercent = this.rewardShareTransactionData.getSharePercent() < 0;
 
 		// Creator themselves needs to be allowed to mint (unless cancelling)
-		if (!isCancellingSharePercent && !creator.canMint())
+		if (!isCancellingSharePercent && !creator.canMint(false))
 			return ValidationResult.NOT_MINTING_ACCOUNT;
 
 		// Qortal: special rules in play depending whether recipient is also minter

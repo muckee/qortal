@@ -2,6 +2,7 @@ package org.qortal.group;
 
 import org.qortal.account.Account;
 import org.qortal.account.PublicKeyAccount;
+import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.group.*;
@@ -150,7 +151,12 @@ public class Group {
 	// Adminship
 
 	private GroupAdminData getAdmin(String admin) throws DataException {
-		return groupRepository.getAdmin(this.groupData.getGroupId(), admin);
+		if( repository.getBlockRepository().getBlockchainHeight() < BlockChain.getInstance().getAdminQueryFixHeight()) {
+			return groupRepository.getAdminFaulty(this.groupData.getGroupId(), admin);
+		}
+		else {
+			return groupRepository.getAdmin(this.groupData.getGroupId(), admin);
+		}
 	}
 
 	private boolean adminExists(String admin) throws DataException {
@@ -668,8 +674,8 @@ public class Group {
 	public void uninvite(GroupInviteTransactionData groupInviteTransactionData) throws DataException {
 		String invitee = groupInviteTransactionData.getInvitee();
 
-		// If member exists then they were added when invite matched join request
-		if (this.memberExists(invitee)) {
+		// If member exists and the join request is present then they were added when invite matched join request
+		if (this.memberExists(invitee) && groupInviteTransactionData.getJoinReference() != null) {
 			// Rebuild join request using cached reference to transaction that created join request.
 			this.rebuildJoinRequest(invitee, groupInviteTransactionData.getJoinReference());
 

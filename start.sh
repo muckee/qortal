@@ -33,8 +33,13 @@ fi
 # Limits Java JVM stack size and maximum heap usage.
 # Comment out for bigger systems, e.g. non-routers
 # or when API documentation is enabled
-# Uncomment (remove '#' sign) line below if your system has less than 12GB of RAM for optimal RAM defaults
-JVM_MEMORY_ARGS="-Xss256m -XX:+UseSerialGC"
+# JAVA MEMORY SETTINGS BELOW - These settings are essentially optimized default settings.
+# Combined with the latest changes on the Qortal Core in version 4.6.6 and beyond,
+# should give a dramatic increase In performance due to optimized Garbage Collection.
+# These memory arguments should work on machines with as little as 6GB of RAM.
+# If you want to run on a machine with less than 6GB of RAM, it is suggested to increase the '50' below to '75'
+# The Qortal Core will utilize only as much RAM as it needs, but up-to the amount set in percentage below.
+JVM_MEMORY_ARGS="-XX:MaxRAMPercentage=50 -XX:+UseG1GC -Xss1024k"
 
 # Although java.net.preferIPv4Stack is supposed to be false
 # by default in Java 11, on some platforms (e.g. FreeBSD 12),

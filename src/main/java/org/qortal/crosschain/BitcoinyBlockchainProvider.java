@@ -3,12 +3,14 @@ package org.qortal.crosschain;
 import cash.z.wallet.sdk.rpc.CompactFormats.CompactBlock;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 public abstract class BitcoinyBlockchainProvider {
 
 	public static final boolean INCLUDE_UNCONFIRMED = true;
 	public static final boolean EXCLUDE_UNCONFIRMED = false;
+	public static final String EMPTY = "";
 
 	/** Sets the blockchain using this provider instance */
 	public abstract void setBlockchain(Bitcoiny blockchain);
@@ -67,4 +69,62 @@ public abstract class BitcoinyBlockchainProvider {
 	public abstract Set<ChainableServer> getUselessServers();
 
 	public abstract ChainableServer getCurrentServer();
+
+	/**
+	 * Add Server
+	 *
+	 * Add server to list of candidate servers.
+	 *
+	 * @param server the server
+	 *
+	 * @return true if added, otherwise false
+	 */
+	public abstract boolean addServer( ChainableServer server );
+
+	/**
+	 * Remove Server
+	 *
+	 * Remove server from list of candidate servers.
+	 *
+	 * @param server the server
+	 *
+	 * @return true if removed, otherwise false
+	 */
+	public abstract boolean removeServer( ChainableServer server );
+
+	/**
+	 * Set Current Server
+	 *
+	 * Set server to be used for this foreign blockchain.
+	 *
+	 * @param server the server
+	 * @param requestedBy who requested this setting
+	 *
+	 * @return the connection that was made
+	 *
+	 * @throws ForeignBlockchainException
+	 */
+	public abstract Optional<ChainableServerConnection> setCurrentServer(ChainableServer server, String requestedBy) throws ForeignBlockchainException;
+
+	/**
+	 * Get Server Connections
+	 *
+	 * Get the server connections made to this foreign blockchain,
+	 *
+	 * @return the server connections
+	 */
+	public abstract List<ChainableServerConnection> getServerConnections();
+
+	/**
+	 * Get Server
+	 *
+	 * Get a server for this foreign blockchain.
+	 *
+	 * @param hostName the host URL
+	 * @param type the type of connection (TCP, SSL)
+	 * @param port the port
+	 *
+	 * @return the server
+	 */
+	public abstract ChainableServer getServer(String hostName, ChainableServer.ConnectionType type, int port);
 }

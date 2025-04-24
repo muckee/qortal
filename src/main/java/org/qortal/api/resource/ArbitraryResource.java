@@ -33,9 +33,13 @@ import org.qortal.controller.arbitrary.ArbitraryDataStorageManager;
 import org.qortal.controller.arbitrary.ArbitraryMetadataManager;
 import org.qortal.data.account.AccountData;
 import org.qortal.data.arbitrary.ArbitraryCategoryInfo;
+import org.qortal.data.arbitrary.ArbitraryDataIndexDetail;
+import org.qortal.data.arbitrary.ArbitraryDataIndexScoreKey;
+import org.qortal.data.arbitrary.ArbitraryDataIndexScorecard;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
+import org.qortal.data.arbitrary.IndexCache;
 import org.qortal.data.naming.NameData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
@@ -69,8 +73,11 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 @Path("/arbitrary")
 @Tag(name = "Arbitrary")
@@ -119,7 +126,7 @@ public class ArbitraryResource {
 
 			// Ensure that "default" and "identifier" parameters cannot coexist
 			boolean defaultRes = Boolean.TRUE.equals(defaultResource);
-			if (defaultRes == true && identifier != null) {
+			if (defaultRes && identifier != null) {
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "identifier cannot be specified when requesting a default resource");
 			}
 
@@ -172,6 +179,7 @@ public class ArbitraryResource {
 			@Parameter(description = "Name (searches name field only)") @QueryParam("name") List<String> names,
 			@Parameter(description = "Title (searches title metadata field only)") @QueryParam("title") String title,
 			@Parameter(description = "Description (searches description metadata field only)") @QueryParam("description") String description,
+			@Parameter(description = "Keyword (searches description metadata field by keywords)") @QueryParam("keywords") List<String> keywords,
 			@Parameter(description = "Prefix only (if true, only the beginning of fields are matched)") @QueryParam("prefix") Boolean prefixOnly,
 			@Parameter(description = "Exact match names only (if true, partial name matches are excluded)") @QueryParam("exactmatchnames") Boolean exactMatchNamesOnly,
 			@Parameter(description = "Default resources (without identifiers) only") @QueryParam("default") Boolean defaultResource,
@@ -212,9 +220,52 @@ public class ArbitraryResource {
 			}
 
 			List<ArbitraryResourceData> resources = repository.getArbitraryRepository()
-					.searchArbitraryResources(service, query, identifier, names, title, description, usePrefixOnly,
+					.searchArbitraryResources(service, query, identifier, names, title, description, keywords, usePrefixOnly,
 							exactMatchNames, defaultRes, mode, minLevel, followedOnly, excludeBlocked, includeMetadata, includeStatus,
 							before, after, limit, offset, reverse);
+
+			if (resources == null) {
+				return new ArrayList<>();
+			}
+
+			return resources;
+
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
+
+	@GET
+	@Path("/resources/searchsimple")
+	@Operation(
+			summary = "Search arbitrary resources available on chain, optionally filtered by service.",
+			responses = {
+					@ApiResponse(
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = ArbitraryResourceData.class))
+					)
+			}
+	)
+	@ApiErrors({ApiError.REPOSITORY_ISSUE})
+	public List<ArbitraryResourceData> searchResourcesSimple(
+			@QueryParam("service") Service service,
+			@Parameter(description = "Identifier (searches identifier field only)") @QueryParam("identifier") String identifier,
+			@Parameter(description = "Name (searches name field only)") @QueryParam("name") List<String> names,
+			@Parameter(description = "Prefix only (if true, only the beginning of fields are matched)") @QueryParam("prefix") Boolean prefixOnly,
+			@Parameter(description = "Case insensitive (ignore leter case on search)") @QueryParam("caseInsensitive") Boolean caseInsensitive,
+			@Parameter(description = "Creation date before timestamp") @QueryParam("before") Long before,
+			@Parameter(description = "Creation date after timestamp") @QueryParam("after") Long after,
+			@Parameter(ref = "limit") @QueryParam("limit") Integer limit,
+			@Parameter(ref = "offset") @QueryParam("offset") Integer offset,
+			@Parameter(ref = "reverse") @QueryParam("reverse") Boolean reverse) {
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			boolean usePrefixOnly = Boolean.TRUE.equals(prefixOnly);
+			boolean ignoreCase = Boolean.TRUE.equals(caseInsensitive);
+
+			List<ArbitraryResourceData> resources = repository.getArbitraryRepository()
+					.searchArbitraryResourcesSimple(service, identifier, names, usePrefixOnly,
+							before, after, limit, offset, reverse, ignoreCase);
 
 			if (resources == null) {
 				return new ArrayList<>();
@@ -491,7 +542,7 @@ public class ArbitraryResource {
 			
 			List<ArbitraryTransactionData> transactionDataList;
 
-			if (query == null || query.equals("")) {
+			if (query == null || query.isEmpty()) {
 				transactionDataList = ArbitraryDataStorageManager.getInstance().listAllHostedTransactions(repository, limit, offset);
 			} else {
 				transactionDataList = ArbitraryDataStorageManager.getInstance().searchHostedTransactions(repository,query, limit, offset);
@@ -1142,6 +1193,90 @@ public class ArbitraryResource {
 		}
 	}
 
+	@GET
+	@Path("/indices")
+	@Operation(
+			summary = "Find matching arbitrary resource indices",
+			description = "",
+			responses = {
+					@ApiResponse(
+							description = "indices",
+							content = @Content(
+									array = @ArraySchema(
+											schema = @Schema(
+													implementation = ArbitraryDataIndexScorecard.class
+											)
+									)
+							)
+					)
+			}
+	)
+	public List<ArbitraryDataIndexScorecard> searchIndices(@QueryParam("terms") String[] terms) {
+
+		List<ArbitraryDataIndexDetail> indices = new ArrayList<>();
+
+		// get index details for each term
+		for( String term : terms ) {
+			List<ArbitraryDataIndexDetail> details = IndexCache.getInstance().getIndicesByTerm().get(term);
+
+			if( details != null ) {
+				indices.addAll(details);
+			}
+		}
+
+		// sum up the scores for each index with identical attributes
+		Map<ArbitraryDataIndexScoreKey, Double> scoreForKey
+			= indices.stream()
+				.collect(
+					Collectors.groupingBy(
+						index -> new ArbitraryDataIndexScoreKey(index.name, index.category, index.link),
+						Collectors.summingDouble(detail -> 1.0 / detail.rank)
+					)
+				);
+
+		// create scorecards for each index group and put them in descending order by score
+		List<ArbitraryDataIndexScorecard> scorecards
+			= scoreForKey.entrySet().stream().map(
+				entry
+				->
+				new ArbitraryDataIndexScorecard(
+					entry.getValue(),
+					entry.getKey().name,
+					entry.getKey().category,
+					entry.getKey().link)
+				)
+				.sorted(Comparator.comparingDouble(ArbitraryDataIndexScorecard::getScore).reversed())
+				.collect(Collectors.toList());
+
+		return scorecards;
+	}
+
+	@GET
+	@Path("/indices/{name}/{idPrefix}")
+	@Operation(
+			summary = "Find matching arbitrary resource indices for a registered name and identifier prefix",
+			description = "",
+			responses = {
+					@ApiResponse(
+							description = "indices",
+							content = @Content(
+									array = @ArraySchema(
+											schema = @Schema(
+													implementation = ArbitraryDataIndexDetail.class
+											)
+									)
+							)
+					)
+			}
+	)
+	public List<ArbitraryDataIndexDetail> searchIndicesByName(@PathParam("name") String name, @PathParam("idPrefix") String idPrefix) {
+
+		return
+			IndexCache.getInstance().getIndicesByIssuer()
+				.getOrDefault(name, new ArrayList<>(0)).stream()
+					.filter( indexDetail -> indexDetail.indexIdentifer.startsWith(idPrefix))
+					.collect(Collectors.toList());
+	}
 
 	// Shared methods
 
@@ -1258,7 +1393,7 @@ public class ArbitraryResource {
 			}
 
 			// Finish here if user has requested a preview
-			if (preview != null && preview == true) {
+			if (preview != null && preview) {
 				return this.preview(path, service);
 			}
 

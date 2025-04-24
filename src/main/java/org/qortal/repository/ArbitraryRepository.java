@@ -27,6 +27,10 @@ public interface ArbitraryRepository {
 
 	public List<ArbitraryTransactionData> getArbitraryTransactions(String name, Service service, String identifier, long since) throws DataException;
 
+	List<ArbitraryTransactionData> getLatestArbitraryTransactions() throws DataException;
+
+	List<ArbitraryTransactionData> getLatestArbitraryTransactionsByName(String name) throws DataException;
+
 	public ArbitraryTransactionData getInitialTransaction(String name, Service service, Method method, String identifier) throws DataException;
 
 	public ArbitraryTransactionData getLatestTransaction(String name, Service service, Method method, String identifier) throws DataException;
@@ -42,8 +46,19 @@ public interface ArbitraryRepository {
 
 	public List<ArbitraryResourceData> getArbitraryResources(Service service, String identifier, List<String> names, boolean defaultResource, Boolean followedOnly, Boolean excludeBlocked, Boolean includeMetadata, Boolean includeStatus, Integer limit, Integer offset, Boolean reverse) throws DataException;
 
-	public List<ArbitraryResourceData> searchArbitraryResources(Service service, String query, String identifier, List<String> names, String title, String description, boolean prefixOnly, List<String> namesFilter, boolean defaultResource, SearchMode mode, Integer minLevel, Boolean followedOnly, Boolean excludeBlocked, Boolean includeMetadata, Boolean includeStatus, Long before, Long after, Integer limit, Integer offset, Boolean reverse) throws DataException;
+	public List<ArbitraryResourceData> searchArbitraryResources(Service service, String query, String identifier, List<String> names, String title, String description, List<String> keywords, boolean prefixOnly, List<String> namesFilter, boolean defaultResource, SearchMode mode, Integer minLevel, Boolean followedOnly, Boolean excludeBlocked, Boolean includeMetadata, Boolean includeStatus, Long before, Long after, Integer limit, Integer offset, Boolean reverse) throws DataException;
 
+	List<ArbitraryResourceData> searchArbitraryResourcesSimple(
+			Service service,
+			String identifier,
+			List<String> names,
+			boolean prefixOnly,
+			Long before,
+			Long after,
+			Integer limit,
+			Integer offset,
+			Boolean reverse,
+			Boolean caseInsensitive) throws DataException;
 
 	// Arbitrary resources cache save/load
 

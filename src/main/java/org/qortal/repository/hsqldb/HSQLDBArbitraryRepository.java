@@ -7,6 +7,7 @@ import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.arbitrary.metadata.ArbitraryDataTransactionMetadata;
 import org.qortal.arbitrary.misc.Category;
 import org.qortal.arbitrary.misc.Service;
+import org.qortal.data.arbitrary.ArbitraryResourceCache;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
@@ -18,6 +19,7 @@ import org.qortal.data.transaction.BaseTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.repository.ArbitraryRepository;
 import org.qortal.repository.DataException;
+import org.qortal.settings.Settings;
 import org.qortal.transaction.ArbitraryTransaction;
 import org.qortal.transaction.Transaction.ApprovalStatus;
 import org.qortal.utils.Base58;
@@ -26,8 +28,10 @@ import org.qortal.utils.ListUtils;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 
@@ -220,6 +224,144 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 			return arbitraryTransactionData;
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch arbitrary transactions from repository", e);
+		}
+	}
+
+	@Override
+	public List<ArbitraryTransactionData> getLatestArbitraryTransactions() throws DataException {
+		String sql = "SELECT type, reference, signature, creator, created_when, fee, " +
+				"tx_group_id, block_height, approval_status, approval_height, " +
+				"version, nonce, service, size, is_data_raw, data, metadata_hash, " +
+				"name, identifier, update_method, secret, compression FROM ArbitraryTransactions " +
+				"JOIN Transactions USING (signature) " +
+				"WHERE name IS NOT NULL " +
+				"ORDER BY created_when DESC";
+		List<ArbitraryTransactionData> arbitraryTransactionData = new ArrayList<>();
+
+		try (ResultSet resultSet = this.repository.checkedExecute(sql)) {
+			if (resultSet == null)
+				return new ArrayList<>(0);
+
+			do {
+				byte[] reference = resultSet.getBytes(2);
+				byte[] signature = resultSet.getBytes(3);
+				byte[] creatorPublicKey = resultSet.getBytes(4);
+				long timestamp = resultSet.getLong(5);
+
+				Long fee = resultSet.getLong(6);
+				if (fee == 0 && resultSet.wasNull())
+					fee = null;
+
+				int txGroupId = resultSet.getInt(7);
+
+				Integer blockHeight = resultSet.getInt(8);
+				if (blockHeight == 0 && resultSet.wasNull())
+					blockHeight = null;
+
+				ApprovalStatus approvalStatus = ApprovalStatus.valueOf(resultSet.getInt(9));
+				Integer approvalHeight = resultSet.getInt(10);
+				if (approvalHeight == 0 && resultSet.wasNull())
+					approvalHeight = null;
+
+				BaseTransactionData baseTransactionData = new BaseTransactionData(timestamp, txGroupId, reference, creatorPublicKey, fee, approvalStatus, blockHeight, approvalHeight, signature);
+
+				int version = resultSet.getInt(11);
+				int nonce = resultSet.getInt(12);
+				int serviceInt = resultSet.getInt(13);
+				int size = resultSet.getInt(14);
+				boolean isDataRaw = resultSet.getBoolean(15); // NOT NULL, so no null to false
+				DataType dataType = isDataRaw ? DataType.RAW_DATA : DataType.DATA_HASH;
+				byte[] data = resultSet.getBytes(16);
+				byte[] metadataHash = resultSet.getBytes(17);
+				String nameResult = resultSet.getString(18);
+				String identifierResult = resultSet.getString(19);
+				Method method = Method.valueOf(resultSet.getInt(20));
+				byte[] secret = resultSet.getBytes(21);
+				Compression compression = Compression.valueOf(resultSet.getInt(22));
+				// FUTURE: get payments from signature if needed. Avoiding for now to reduce database calls.
+
+				ArbitraryTransactionData transactionData = new ArbitraryTransactionData(baseTransactionData,
+						version, serviceInt, nonce, size, nameResult, identifierResult, method, secret,
+						compression, data, dataType, metadataHash, null);
+
+				arbitraryTransactionData.add(transactionData);
+			} while (resultSet.next());
+
+			return arbitraryTransactionData;
+		} catch (SQLException e) {
+			throw new DataException("Unable to fetch arbitrary transactions from repository", e);
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			return new ArrayList<>(0);
+		}
+	}
+
+	@Override
+	public List<ArbitraryTransactionData> getLatestArbitraryTransactionsByName( String name ) throws DataException {
+		String sql = "SELECT type, reference, signature, creator, created_when, fee, " +
+				"tx_group_id, block_height, approval_status, approval_height, " +
+				"version, nonce, service, size, is_data_raw, data, metadata_hash, " +
+				"name, identifier, update_method, secret, compression FROM ArbitraryTransactions " +
+				"JOIN Transactions USING (signature) " +
+				"WHERE name = ? " +
+				"ORDER BY created_when DESC";
+		List<ArbitraryTransactionData> arbitraryTransactionData = new ArrayList<>();
+
+		try (ResultSet resultSet = this.repository.checkedExecute(sql, name)) {
+			if (resultSet == null)
+				return new ArrayList<>(0);
+
+			do {
+				byte[] reference = resultSet.getBytes(2);
+				byte[] signature = resultSet.getBytes(3);
+				byte[] creatorPublicKey = resultSet.getBytes(4);
+				long timestamp = resultSet.getLong(5);
+
+				Long fee = resultSet.getLong(6);
+				if (fee == 0 && resultSet.wasNull())
+					fee = null;
+
+				int txGroupId = resultSet.getInt(7);
+
+				Integer blockHeight = resultSet.getInt(8);
+				if (blockHeight == 0 && resultSet.wasNull())
+					blockHeight = null;
+
+				ApprovalStatus approvalStatus = ApprovalStatus.valueOf(resultSet.getInt(9));
+				Integer approvalHeight = resultSet.getInt(10);
+				if (approvalHeight == 0 && resultSet.wasNull())
+					approvalHeight = null;
+
+				BaseTransactionData baseTransactionData = new BaseTransactionData(timestamp, txGroupId, reference, creatorPublicKey, fee, approvalStatus, blockHeight, approvalHeight, signature);
+
+				int version = resultSet.getInt(11);
+				int nonce = resultSet.getInt(12);
+				int serviceInt = resultSet.getInt(13);
+				int size = resultSet.getInt(14);
+				boolean isDataRaw = resultSet.getBoolean(15); // NOT NULL, so no null to false
+				DataType dataType = isDataRaw ? DataType.RAW_DATA : DataType.DATA_HASH;
+				byte[] data = resultSet.getBytes(16);
+				byte[] metadataHash = resultSet.getBytes(17);
+				String nameResult = resultSet.getString(18);
+				String identifierResult = resultSet.getString(19);
+				Method method = Method.valueOf(resultSet.getInt(20));
+				byte[] secret = resultSet.getBytes(21);
+				Compression compression = Compression.valueOf(resultSet.getInt(22));
+				// FUTURE: get payments from signature if needed. Avoiding for now to reduce database calls.
+
+				ArbitraryTransactionData transactionData = new ArbitraryTransactionData(baseTransactionData,
+						version, serviceInt, nonce, size, nameResult, identifierResult, method, secret,
+						compression, data, dataType, metadataHash, null);
+
+				arbitraryTransactionData.add(transactionData);
+			} while (resultSet.next());
+
+			return arbitraryTransactionData;
+		} catch (SQLException e) {
+			throw new DataException("Unable to fetch arbitrary transactions from repository", e);
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+			return new ArrayList<>(0);
 		}
 	}
 
@@ -720,9 +862,54 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 	}
 
 	@Override
-	public List<ArbitraryResourceData> searchArbitraryResources(Service service, String query, String identifier, List<String> names, String title, String description, boolean prefixOnly,
+	public List<ArbitraryResourceData> searchArbitraryResources(Service service, String query, String identifier, List<String> names, String title, String description, List<String> keywords, boolean prefixOnly,
 																List<String> exactMatchNames, boolean defaultResource, SearchMode mode, Integer minLevel, Boolean followedOnly, Boolean excludeBlocked,
 																Boolean includeMetadata, Boolean includeStatus, Long before, Long after, Integer limit, Integer offset, Boolean reverse) throws DataException {
+
+		if(Settings.getInstance().isDbCacheEnabled()) {
+			List<ArbitraryResourceData> list
+				= HSQLDBCacheUtils.callCache(
+					ArbitraryResourceCache.getInstance(),
+					service, query, identifier, names, title, description, prefixOnly, exactMatchNames,
+					defaultResource, mode, minLevel, followedOnly, excludeBlocked, includeMetadata, includeStatus,
+					before, after, limit, offset, reverse);
+
+			if( !list.isEmpty() ) {
+				List<ArbitraryResourceData> results
+					= HSQLDBCacheUtils.filterList(
+						list,
+						ArbitraryResourceCache.getInstance().getLevelByName(),
+						Optional.ofNullable(mode),
+						Optional.ofNullable(service),
+						Optional.ofNullable(query),
+						Optional.ofNullable(identifier),
+						Optional.ofNullable(names),
+						Optional.ofNullable(title),
+						Optional.ofNullable(description),
+						prefixOnly,
+						Optional.ofNullable(exactMatchNames),
+						Optional.ofNullable(keywords),
+						defaultResource,
+						Optional.ofNullable(minLevel),
+						Optional.ofNullable(() -> ListUtils.followedNames()),
+						Optional.ofNullable(ListUtils::blockedNames),
+						Optional.ofNullable(includeMetadata),
+						Optional.ofNullable(includeStatus),
+						Optional.ofNullable(before),
+						Optional.ofNullable(after),
+						Optional.ofNullable(limit),
+						Optional.ofNullable(offset),
+						Optional.ofNullable(reverse)
+				);
+
+				return results;
+			}
+			else {
+				LOGGER.info("Db Enabled Cache has zero candidates.");
+			}
+		}
+
+
 		StringBuilder sql = new StringBuilder(512);
 		List<Object> bindParams = new ArrayList<>();
 
@@ -808,6 +995,26 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 			sql.append(" AND LCASE(description) LIKE ?");
 			bindParams.add(queryWildcard);
 		}
+
+		if (keywords != null && !keywords.isEmpty()) {
+			List<String> searchKeywords = new ArrayList<>(keywords); 
+		
+			List<String> conditions = new ArrayList<>();
+			List<String> bindValues = new ArrayList<>();
+		
+			for (int i = 0; i < searchKeywords.size(); i++) {
+				conditions.add("LOWER(description) LIKE ?"); 
+				bindValues.add("%" + searchKeywords.get(i).trim().toLowerCase() + "%"); 
+			}
+		
+			String finalCondition = String.join(" OR ", conditions);
+			sql.append(" AND (").append(finalCondition).append(")");
+		
+			bindParams.addAll(bindValues); 
+		}
+		
+		
+		
 
 		// Handle name searches
 		if (names != null && !names.isEmpty()) {
@@ -954,6 +1161,128 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		}
 	}
 
+	@Override
+	public List<ArbitraryResourceData> searchArbitraryResourcesSimple(
+			Service service,
+			String identifier,
+			List<String> names,
+			boolean prefixOnly,
+			Long before,
+			Long after,
+			Integer limit,
+			Integer offset,
+			Boolean reverse,
+			Boolean caseInsensitive) throws DataException {
+		StringBuilder sql = new StringBuilder(512);
+		List<Object> bindParams = new ArrayList<>();
+
+		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when ");
+		sql.append("FROM ArbitraryResourcesCache ");
+		sql.append("WHERE name IS NOT NULL");
+
+		if (service != null) {
+			sql.append(" AND service = ?");
+			bindParams.add(service.value);
+		}
+
+		// Handle identifier matches
+		if (identifier != null) {
+			if(caseInsensitive || prefixOnly) {
+				// Search anywhere in the identifier, unless "prefixOnly" has been requested
+				String queryWildcard = getQueryWildcard(identifier, prefixOnly, caseInsensitive);
+				sql.append(caseInsensitive ? " AND LCASE(identifier) LIKE ?" : " AND identifier LIKE ?");
+				bindParams.add(queryWildcard);
+			}
+			else {
+				sql.append(" AND identifier = ?");
+				bindParams.add(identifier);
+			}
+		}
+
+		// Handle name searches
+		if (names != null && !names.isEmpty()) {
+			sql.append(" AND (");
+
+			if( caseInsensitive || prefixOnly ) {
+				for (int i = 0; i < names.size(); ++i) {
+					// Search anywhere in the name, unless "prefixOnly" has been requested
+					String queryWildcard = getQueryWildcard(names.get(i), prefixOnly, caseInsensitive);
+					if (i > 0) sql.append(" OR ");
+					sql.append(caseInsensitive ? "LCASE(name) LIKE ?" : "name LIKE ?");
+					bindParams.add(queryWildcard);
+				}
+			}
+			else {
+				for (int i = 0; i < names.size(); ++i) {
+					if (i > 0) sql.append(" OR ");
+					sql.append("name = ?");
+					bindParams.add(names.get(i));
+				}
+			}
+
+			sql.append(")");
+		}
+
+		// Timestamp range
+		if (before != null) {
+			sql.append(" AND created_when < ?");
+			bindParams.add(before);
+		}
+		if (after != null) {
+			sql.append(" AND created_when > ?");
+			bindParams.add(after);
+		}
+
+		sql.append(" ORDER BY created_when");
+
+		if (reverse != null && reverse) {
+			sql.append(" DESC");
+		}
+
+		HSQLDBRepository.limitOffsetSql(sql, limit, offset);
+
+		List<ArbitraryResourceData> arbitraryResources = new ArrayList<>();
+
+		try (ResultSet resultSet = this.repository.checkedExecute(sql.toString(), bindParams.toArray())) {
+			if (resultSet == null)
+				return arbitraryResources;
+
+			do {
+				String nameResult = resultSet.getString(1);
+				Service serviceResult = Service.valueOf(resultSet.getInt(2));
+				String identifierResult = resultSet.getString(3);
+				Integer sizeResult = resultSet.getInt(4);
+				Integer status = resultSet.getInt(5);
+				Long created = resultSet.getLong(6);
+				Long updated = resultSet.getLong(7);
+
+				if (Objects.equals(identifierResult, "default")) {
+					// Map "default" back to null. This is optional but probably less confusing than returning "default".
+					identifierResult = null;
+				}
+
+				ArbitraryResourceData arbitraryResourceData = new ArbitraryResourceData();
+				arbitraryResourceData.name = nameResult;
+				arbitraryResourceData.service = serviceResult;
+				arbitraryResourceData.identifier = identifierResult;
+				arbitraryResourceData.size = sizeResult;
+				arbitraryResourceData.created = created;
+				arbitraryResourceData.updated = (updated == 0) ? null : updated;
+
+				arbitraryResources.add(arbitraryResourceData);
+			} while (resultSet.next());
+
+			return arbitraryResources;
+		} catch (SQLException e) {
+			throw new DataException("Unable to fetch simple arbitrary resources from repository", e);
+		}
+	}
+
+	private static String getQueryWildcard(String value, boolean prefixOnly, boolean caseInsensitive) {
+		String valueToUse = caseInsensitive ? value.toLowerCase() : value;
+		return prefixOnly ? String.format("%s%%", valueToUse) : valueToUse;
+	}
+
 
 	// Arbitrary resources cache save/load
 
@@ -1024,7 +1353,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		String tag5 = null;
 
 		if (tags != null) {
-			if (tags.size() > 0) tag1 = tags.get(0);
+			if (!tags.isEmpty()) tag1 = tags.get(0);
 			if (tags.size() > 1) tag2 = tags.get(1);
 			if (tags.size() > 2) tag3 = tags.get(2);
 			if (tags.size() > 3) tag4 = tags.get(3);

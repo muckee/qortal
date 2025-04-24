@@ -1,9 +1,11 @@
 package org.qortal.repository.hsqldb;
 
 import com.google.common.primitives.Longs;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
+import org.qortal.crypto.Crypto;
 import org.qortal.data.at.ATData;
 import org.qortal.data.at.ATStateData;
 import org.qortal.repository.ATRepository;
@@ -15,6 +17,8 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+
+import org.qortal.data.account.AccountData;
 
 public class HSQLDBATRepository implements ATRepository {
 
@@ -400,9 +404,9 @@ public class HSQLDBATRepository implements ATRepository {
 	}
 
 	@Override
-	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, Boolean isFinished,
-			Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
-			Integer limit, Integer offset, Boolean reverse) throws DataException {
+	public List<ATStateData> getMatchingFinalATStates(byte[] codeHash, byte[] buyerPublicKey, byte[] sellerPublicKey, Boolean isFinished,
+			  Integer dataByteOffset, Long expectedValue, Integer minimumFinalHeight,
+			  Integer limit, Integer offset, Boolean reverse) throws DataException {
 		StringBuilder sql = new StringBuilder(1024);
 		List<Object> bindParams = new ArrayList<>();
 
@@ -421,10 +425,14 @@ public class HSQLDBATRepository implements ATRepository {
 
 		// Order by AT_address and height to use compound primary key as index
 		// Both must be the same direction (DESC) also
-		sql.append("ORDER BY ATStates.AT_address DESC, ATStates.height DESC "
-					+ "LIMIT 1 "
-				+ ") AS FinalATStates "
-				+ "WHERE code_hash = ? ");
+		sql.append("ORDER BY ATStates.height DESC LIMIT 1) AS FinalATStates ");
+
+		// Optional JOIN with ATTRANSACTIONS for buyerAddress
+		if (buyerPublicKey != null && buyerPublicKey.length > 0) {
+			sql.append("JOIN ATTRANSACTIONS tx ON tx.at_address = ATs.AT_address ");
+		}
+	
+		sql.append("WHERE ATs.code_hash = ? ");
 		bindParams.add(codeHash);
 
 		if (isFinished != null) {
@@ -441,6 +449,20 @@ public class HSQLDBATRepository implements ATRepository {
 			// SQL binary data offsets start at 1
 			bindParams.add(dataByteOffset + 1);
 			bindParams.add(rawExpectedValue);
+		}
+
+		if (buyerPublicKey != null && buyerPublicKey.length > 0 ) {
+			// the buyer must be the recipient of the transaction and not the creator of the AT
+			sql.append("AND tx.recipient = ? AND ATs.creator != ? ");
+
+			bindParams.add(Crypto.toAddress(buyerPublicKey));
+			bindParams.add(buyerPublicKey);
+		}
+
+
+		if (sellerPublicKey != null && sellerPublicKey.length > 0) {
+			sql.append("AND ATs.creator = ? ");
+			bindParams.add(sellerPublicKey);
 		}
 
 		sql.append(" ORDER BY FinalATStates.height ");
@@ -483,7 +505,7 @@ public class HSQLDBATRepository implements ATRepository {
 			Integer dataByteOffset, Long expectedValue,
 			int minimumCount, int maximumCount, long minimumPeriod) throws DataException {
 		// We need most recent entry first so we can use its timestamp to slice further results
-		List<ATStateData> mostRecentStates = this.getMatchingFinalATStates(codeHash, isFinished,
+		List<ATStateData> mostRecentStates = this.getMatchingFinalATStates(codeHash, null, null, isFinished,
 				dataByteOffset, expectedValue, null,
 				1, 0, true);
 

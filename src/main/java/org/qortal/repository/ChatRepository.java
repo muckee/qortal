@@ -22,6 +22,6 @@ public interface ChatRepository {
 
 	public ChatMessage toChatMessage(ChatTransactionData chatTransactionData, Encoding encoding) throws DataException;
 
-	public ActiveChats getActiveChats(String address, Encoding encoding) throws DataException;
+	public ActiveChats getActiveChats(String address, Encoding encoding, Boolean hasChatReference) throws DataException;
 
 }

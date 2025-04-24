@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.transaction.ArbitraryTransactionData;
+import org.qortal.event.DataMonitorEvent;
+import org.qortal.event.EventBus;
 import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -17,6 +19,8 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
 
+import static java.lang.Thread.NORM_PRIORITY;
+
 public class ArbitraryDataFileRequestThread implements Runnable {
 
     private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataFileRequestThread.class);
@@ -28,6 +32,7 @@ public class ArbitraryDataFileRequestThread implements Runnable {
     @Override
     public void run() {
         Thread.currentThread().setName("Arbitrary Data File Request Thread");
+        Thread.currentThread().setPriority(NORM_PRIORITY);
 
         try {
             while (!Controller.isStopping()) {

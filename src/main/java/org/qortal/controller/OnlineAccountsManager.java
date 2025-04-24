@@ -13,6 +13,7 @@ import org.qortal.crypto.MemoryPoW;
 import org.qortal.crypto.Qortal25519Extras;
 import org.qortal.data.account.MintingAccountData;
 import org.qortal.data.account.RewardShareData;
+import org.qortal.data.group.GroupMemberData;
 import org.qortal.data.network.OnlineAccountData;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
@@ -24,6 +25,7 @@ import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.utils.Base58;
+import org.qortal.utils.Groups;
 import org.qortal.utils.NTP;
 import org.qortal.utils.NamedThreadFactory;
 
@@ -44,6 +46,7 @@ public class OnlineAccountsManager {
      */
     private static final long ONLINE_TIMESTAMP_MODULUS_V1 = 5 * 60 * 1000L;
     private static final long ONLINE_TIMESTAMP_MODULUS_V2 = 30 * 60 * 1000L;
+    private static final long ONLINE_TIMESTAMP_MODULUS_V3 = 10 * 60 * 1000L;
 
     /**
      * How many 'current' timestamp-sets of online accounts we cache.
@@ -67,12 +70,13 @@ public class OnlineAccountsManager {
     private static final long ONLINE_ACCOUNTS_COMPUTE_INITIAL_SLEEP_INTERVAL = 30 * 1000L; // ms
 
     // MemoryPoW - mainnet
-    public static final int POW_BUFFER_SIZE = 1 * 1024 * 1024; // bytes
+    public static final int POW_BUFFER_SIZE = 1024 * 1024; // bytes
     public static final int POW_DIFFICULTY_V1 = 18; // leading zero bits
     public static final int POW_DIFFICULTY_V2 = 19; // leading zero bits
+    public static final int POW_DIFFICULTY_V3 = 6; // leading zero bits
 
     // MemoryPoW - testnet
-    public static final int POW_BUFFER_SIZE_TESTNET = 1 * 1024 * 1024; // bytes
+    public static final int POW_BUFFER_SIZE_TESTNET = 1024 * 1024; // bytes
     public static final int POW_DIFFICULTY_TESTNET = 5; // leading zero bits
 
     // IMPORTANT: if we ever need to dynamically modify the buffer size using a feature trigger, the
@@ -80,7 +84,7 @@ public class OnlineAccountsManager {
     // one for the transition period.
     private static long[] POW_VERIFY_WORK_BUFFER = new long[getPoWBufferSize() / 8];
 
-    private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(4, new NamedThreadFactory("OnlineAccounts"));
+    private final ScheduledExecutorService executor = Executors.newScheduledThreadPool(4, new NamedThreadFactory("OnlineAccounts", Thread.NORM_PRIORITY));
     private volatile boolean isStopping = false;
 
     private final Set<OnlineAccountData> onlineAccountsImportQueue = ConcurrentHashMap.newKeySet();
@@ -106,11 +110,15 @@ public class OnlineAccountsManager {
 
     public static long getOnlineTimestampModulus() {
         Long now = NTP.getTime();
-        if (now != null && now >= BlockChain.getInstance().getOnlineAccountsModulusV2Timestamp()) {
+        if (now != null && now >= BlockChain.getInstance().getOnlineAccountsModulusV2Timestamp() && now < BlockChain.getInstance().getOnlineAccountsModulusV3Timestamp()) {
             return ONLINE_TIMESTAMP_MODULUS_V2;
+        }
+        if (now != null && now >= BlockChain.getInstance().getOnlineAccountsModulusV3Timestamp()) {
+            return ONLINE_TIMESTAMP_MODULUS_V3;
         }
         return ONLINE_TIMESTAMP_MODULUS_V1;
     }
+
     public static Long getCurrentOnlineAccountTimestamp() {
         Long now = NTP.getTime();
         if (now == null)
@@ -135,8 +143,11 @@ public class OnlineAccountsManager {
         if (Settings.getInstance().isTestNet())
             return POW_DIFFICULTY_TESTNET;
 
-        if (timestamp >= BlockChain.getInstance().getIncreaseOnlineAccountsDifficultyTimestamp())
+        if (timestamp >= BlockChain.getInstance().getIncreaseOnlineAccountsDifficultyTimestamp() && timestamp < BlockChain.getInstance().getDecreaseOnlineAccountsDifficultyTimestamp())
             return POW_DIFFICULTY_V2;
+
+        if (timestamp >= BlockChain.getInstance().getDecreaseOnlineAccountsDifficultyTimestamp())
+            return POW_DIFFICULTY_V3;
 
         return POW_DIFFICULTY_V1;
     }
@@ -215,6 +226,15 @@ public class OnlineAccountsManager {
         Set<OnlineAccountData> onlineAccountsToAdd = new HashSet<>();
         Set<OnlineAccountData> onlineAccountsToRemove = new HashSet<>();
         try (final Repository repository = RepositoryManager.getRepository()) {
+
+            int blockHeight = repository.getBlockRepository().getBlockchainHeight();
+
+            List<String> mintingGroupMemberAddresses
+                = Groups.getAllMembers(
+                    repository.getGroupRepository(),
+                    Groups.getGroupIdsToMint(BlockChain.getInstance(), blockHeight)
+            );
+
             for (OnlineAccountData onlineAccountData : this.onlineAccountsImportQueue) {
                 if (isStopping)
                     return;
@@ -227,7 +247,7 @@ public class OnlineAccountsManager {
                     continue;
                 }
 
-                boolean isValid = this.isValidCurrentAccount(repository, onlineAccountData);
+                boolean isValid = this.isValidCurrentAccount(repository, mintingGroupMemberAddresses, onlineAccountData);
                 if (isValid)
                     onlineAccountsToAdd.add(onlineAccountData);
 
@@ -306,7 +326,7 @@ public class OnlineAccountsManager {
         return inplaceArray;
     }
 
-    private static boolean isValidCurrentAccount(Repository repository, OnlineAccountData onlineAccountData) throws DataException {
+    private static boolean isValidCurrentAccount(Repository repository, List<String> mintingGroupMemberAddresses, OnlineAccountData onlineAccountData) throws DataException {
         final Long now = NTP.getTime();
         if (now == null)
             return false;
@@ -341,9 +361,14 @@ public class OnlineAccountsManager {
             LOGGER.trace(() -> String.format("Rejecting unknown online reward-share public key %s", Base58.encode(rewardSharePublicKey)));
             return false;
         }
+        // reject account address that are not in the MINTER Group
+        else if( !mintingGroupMemberAddresses.contains(rewardShareData.getMinter())) {
+            LOGGER.trace(() -> String.format("Rejecting online reward-share that is not in MINTER Group, account %s", rewardShareData.getMinter()));
+            return false;
+        }
 
         Account mintingAccount = new Account(repository, rewardShareData.getMinter());
-        if (!mintingAccount.canMint()) {
+        if (!mintingAccount.canMint(true)) {  // group validation is a few lines above
             // Minting-account component of reward-share can no longer mint - disregard
             LOGGER.trace(() -> String.format("Rejecting online reward-share with non-minting account %s", mintingAccount.getAddress()));
             return false;
@@ -530,7 +555,7 @@ public class OnlineAccountsManager {
                     }
 
                     Account mintingAccount = new Account(repository, rewardShareData.getMinter());
-                    if (!mintingAccount.canMint()) {
+                    if (!mintingAccount.canMint(true)) {
                         // Minting-account component of reward-share can no longer mint - disregard
                         iterator.remove();
                         continue;
@@ -538,7 +563,6 @@ public class OnlineAccountsManager {
 
                     if (++i > 1 + 1) {
                         iterator.remove();
-                        continue;
                     }
                 }
             } catch (DataException e) {

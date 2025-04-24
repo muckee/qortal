@@ -114,6 +114,8 @@ public class Settings {
 
 	/** Whether we check, fetch and install auto-updates */
 	private boolean autoUpdateEnabled = true;
+	/** Whether we check, restart node without connected peers */
+	private boolean autoRestartEnabled = false;
 	/** How long between repository backups (ms), or 0 if disabled. */
 	private long repositoryBackupInterval = 0; // ms
 	/** Whether to show a notification when we backup repository. */
@@ -197,32 +199,32 @@ public class Settings {
 	/** Target number of outbound connections to peers we should make. */
 	private int minOutboundPeers = 32;
 	/** Maximum number of peer connections we allow. */
-	private int maxPeers = 60;
+	private int maxPeers = 64;
 	/** Number of slots to reserve for short-lived QDN data transfers */
 	private int maxDataPeers = 5;
 	/** Maximum number of threads for network engine. */
-	private int maxNetworkThreadPoolSize = 620;
+	private int maxNetworkThreadPoolSize = 512;
 	/** Maximum number of threads for network proof-of-work compute, used during handshaking. */
-	private int networkPoWComputePoolSize = 2;
+	private int networkPoWComputePoolSize = 4;
 	/** Maximum number of retry attempts if a peer fails to respond with the requested data */
-	private int maxRetries = 2;
+	private int maxRetries = 3;
 
 	/** The number of seconds of no activity before recovery mode begins */
 	public long recoveryModeTimeout = 9999999999999L;
 
 	/** Minimum peer version number required in order to sync with them */
-	private String minPeerVersion = "4.5.0";
+	private String minPeerVersion = "4.6.5";
 	/** Whether to allow connections with peers below minPeerVersion
 	 * If true, we won't sync with them but they can still sync with us, and will show in the peers list
 	 * If false, sync will be blocked both ways, and they will not appear in the peers list */
 	private boolean allowConnectionsWithOlderPeerVersions = true;
 
 	/** Minimum time (in seconds) that we should attempt to remain connected to a peer for */
-	private int minPeerConnectionTime = 60 * 60; // seconds
+	private int minPeerConnectionTime = 2 * 60 * 60; // seconds
 	/** Maximum time (in seconds) that we should attempt to remain connected to a peer for */
-	private int maxPeerConnectionTime = 4 * 60 * 60; // seconds
+	private int maxPeerConnectionTime = 6 * 60 * 60; // seconds
 	/** Maximum time (in seconds) that a peer should remain connected when requesting QDN data */
-	private int maxDataPeerConnectionTime = 2 * 60; // seconds
+	private int maxDataPeerConnectionTime = 30 * 60; // seconds
 
 	/** Whether to sync multiple blocks at once in normal operation */
 	private boolean fastSyncEnabled = true;
@@ -272,13 +274,17 @@ public class Settings {
 	private String[] bootstrapHosts = new String[] {
 		"http://bootstrap.qortal.org",
 		"http://bootstrap2.qortal.org",
-		"http://bootstrap3.qortal.org"
+		"http://bootstrap3.qortal.org",
+		"http://bootstrap4.qortal.org"
 	};
 
 	// Auto-update sources
 	private String[] autoUpdateRepos = new String[] {
 		"https://github.com/Qortal/qortal/raw/%s/qortal.update",
-		"https://raw.githubusercontent.com@151.101.16.133/Qortal/qortal/%s/qortal.update"
+		"https://raw.githubusercontent.com@151.101.16.133/Qortal/qortal/%s/qortal.update",
+	    "https://qortal.link/Auto-Update/%s/qortal.update",
+	    "https://qortal.name/Auto-Update/%s/qortal.update",
+	    "https://update.qortal.org/Auto-Update/%s/qortal.update"
 	};
 
 	// Lists
@@ -323,10 +329,13 @@ public class Settings {
 	/* Foreign chains */
 
 	/** The number of consecutive empty addresses required before treating a wallet's transaction set as complete */
-	private int gapLimit = 24;
+	private int gapLimit = 3;
 
 	/** How many wallet keys to generate when using bitcoinj as the blockchain interface (e.g. when sending coins) */
 	private int bitcoinjLookaheadSize = 50;
+
+	/** How many units of data to be kept in a blockchain cache before the cache should be reduced or cleared. */
+	private int blockchainCacheLimit = 1000;
 
 	// Data storage (QDN)
 
@@ -374,6 +383,167 @@ public class Settings {
 	 * Exclude from settings.json to disable this warning. */
 	private Integer threadCountPerMessageTypeWarningThreshold = null;
 
+	/**
+	 * DB Cache Enabled?
+	 */
+	private boolean dbCacheEnabled = true;
+
+	/**
+	 * DB Cache Thread Priority
+	 *
+	 * If DB Cache is disabled, then this is ignored. If value is lower then 1, than 1 is used. If value is higher
+	 * than 10,, then 10 is used.
+	 */
+	private int dbCacheThreadPriority = 1;
+
+	/**
+	 * DB Cache Frequency
+	 *
+	 * The number of seconds in between DB cache updates. If DB Cache is disabled, then this is ignored.
+	 */
+	private int dbCacheFrequency = 120;
+
+	/**
+	 * Network Thread Priority
+	 *
+	 * The Network Thread Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the threads used for network peer connections. This is the
+	 * main thread connecting to a peer in the network.
+	 */
+    private int networkThreadPriority = 7;
+
+	/**
+	 * The Handshake Thread Priority
+	 *
+	 * The thread priority (1 i slowest, 10 is highest) of the threads used for peer handshake messaging. This is a
+	 * secondary thread to exchange status messaging to a peer in the network.
+	 */
+	private int handshakeThreadPriority = 7;
+
+	/**
+	 * Pruning Thread Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the threads used for database pruning and trimming.
+	 */
+	private int pruningThreadPriority = 2;
+
+	/**
+	 * Sychronizer Thread Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the threads used for synchronizing with the others peers.
+	 */
+	private int synchronizerThreadPriority = 10;
+
+	/**
+	 * Archiving Pause
+	 *
+	 * In milliseconds
+	 *
+	 * The pause in between archiving blocks to allow other processes to execute.
+	 */
+	private long archivingPause = 3000;
+
+	/**
+	 * Enable Balance Recorder?
+	 *
+	 * True for balance recording, otherwise false.
+	 */
+	private boolean balanceRecorderEnabled = false;
+
+	/**
+	 * Balance Recorder Priority
+	 *
+	 * The thread priority (1 is lowest, 10 is highest) of the balance recorder thread, if enabled.
+	 */
+	private int balanceRecorderPriority = 1;
+
+	/**
+	 * Balance Recorder Frequency
+	 *
+	 * How often the balances will be recorded, if enabled, measured in minutes.
+	 */
+	private int balanceRecorderFrequency = 20;
+
+	/**
+	 * Balance Recorder Capacity
+	 *
+	 * The number of balance recorder ranges will be held in memory.
+	 */
+	private int balanceRecorderCapacity = 1000;
+
+	/**
+	 * Minimum Balance Recording
+	 *
+	 * The minimum recored balance change in Qortoshis (1/100000000 QORT)
+	 */
+    private long minimumBalanceRecording = 100000000;
+
+	/**
+	 * Top Balance Logging Limit
+	 *
+	 * When logging the number limit of top balance changes to show in the logs for any given block range.
+	 */
+	private long topBalanceLoggingLimit = 100;
+
+	/**
+	 * Balance Recorder Rollback Allowance
+	 *
+	 * If the balance recorder is enabled, it must protect its prior balances by this number of blocks in case of
+	 * a blockchain rollback and reorganization.
+	 */
+	private int balanceRecorderRollbackAllowance = 100;
+
+	/**
+	 * Is Reward Recording Only
+	 *
+	 * Set true to only retain the recordings that cover reward distributions, otherwise set false.
+	 */
+    private boolean rewardRecordingOnly = true;
+
+	/**
+	 * Is The Connection Monitored?
+	 *
+	 * Is the database connection pooled monitored?
+	 */
+    private boolean connectionPoolMonitorEnabled = false;
+
+	/**
+	 * Buiild Arbitrary Resources Batch Size
+	 *
+	 * The number resources to batch per iteration when rebuilding.
+	 */
+	private int buildArbitraryResourcesBatchSize = 200;
+
+	/**
+	 * Arbitrary Indexing Priority
+	 *
+	 * The thread priority when indexing arbirary resources.
+	 */
+    private int arbitraryIndexingPriority = 5;
+
+	/**
+	 * Arbitrary Indexing Frequency (In Minutes)
+	 *
+	 * The frequency at which the arbitrary indices are cached.
+	 */
+	private int arbitraryIndexingFrequency = 10;
+
+    private boolean rebuildArbitraryResourceCacheTaskEnabled = false;
+
+	/**
+	 * Rebuild Arbitrary Resource Cache Task Delay (In Minutes)
+	 *
+	 * Waiting period before the first rebuild task is started.
+	 */
+	private int rebuildArbitraryResourceCacheTaskDelay = 300;
+
+	/**
+	 * Rebuild Arbitrary Resource Cache Task Period (In Hours)
+	 *
+	 * The frequency the arbitrary resource cache is rebuilt.
+	 */
+	private int rebuildArbitraryResourceCacheTaskPeriod = 24;
 
 	// Domain mapping
 	public static class ThreadLimit {
@@ -909,6 +1079,10 @@ public class Settings {
 		return this.autoUpdateEnabled;
 	}
 
+	public boolean isAutoRestartEnabled() {
+		return this.autoRestartEnabled;
+	}
+
 	public String[] getAutoUpdateRepos() {
 		return this.autoUpdateRepos;
 	}
@@ -1049,6 +1223,9 @@ public class Settings {
 		return bitcoinjLookaheadSize;
 	}
 
+	public int getBlockchainCacheLimit() {
+		return blockchainCacheLimit;
+	}
 
 	public boolean isQdnEnabled() {
 		return this.qdnEnabled;
@@ -1124,5 +1301,97 @@ public class Settings {
 
 	public Integer getThreadCountPerMessageTypeWarningThreshold() {
 		return this.threadCountPerMessageTypeWarningThreshold;
+	}
+
+	public boolean isDbCacheEnabled() {
+		return dbCacheEnabled;
+	}
+
+	public int getDbCacheThreadPriority() {
+		return dbCacheThreadPriority;
+	}
+
+	public int getDbCacheFrequency() {
+		return dbCacheFrequency;
+	}
+
+	public int getNetworkThreadPriority() {
+		return networkThreadPriority;
+	}
+
+	public int getHandshakeThreadPriority() {
+		return handshakeThreadPriority;
+	}
+
+	public int getPruningThreadPriority() {
+		return pruningThreadPriority;
+	}
+
+	public int getSynchronizerThreadPriority() {
+		return synchronizerThreadPriority;
+	}
+
+	public long getArchivingPause() {
+		return archivingPause;
+	}
+
+	public int getBalanceRecorderPriority() {
+		return balanceRecorderPriority;
+	}
+
+	public int getBalanceRecorderFrequency() {
+		return balanceRecorderFrequency;
+	}
+
+	public int getBalanceRecorderCapacity() {
+		return balanceRecorderCapacity;
+	}
+
+	public boolean isBalanceRecorderEnabled() {
+		return balanceRecorderEnabled;
+	}
+
+	public long getMinimumBalanceRecording() {
+		return minimumBalanceRecording;
+	}
+
+	public long getTopBalanceLoggingLimit() {
+		return topBalanceLoggingLimit;
+	}
+
+	public int getBalanceRecorderRollbackAllowance() {
+		return balanceRecorderRollbackAllowance;
+	}
+
+	public boolean isRewardRecordingOnly() {
+		return rewardRecordingOnly;
+	}
+
+	public boolean isConnectionPoolMonitorEnabled() {
+		return connectionPoolMonitorEnabled;
+	}
+
+	public int getBuildArbitraryResourcesBatchSize() {
+		return buildArbitraryResourcesBatchSize;
+	}
+
+	public int getArbitraryIndexingPriority() {
+		return arbitraryIndexingPriority;
+	}
+
+	public int getArbitraryIndexingFrequency() {
+		return arbitraryIndexingFrequency;
+	}
+
+	public boolean isRebuildArbitraryResourceCacheTaskEnabled() {
+		return rebuildArbitraryResourceCacheTaskEnabled;
+	}
+
+	public int getRebuildArbitraryResourceCacheTaskDelay() {
+		return rebuildArbitraryResourceCacheTaskDelay;
+	}
+
+	public int getRebuildArbitraryResourceCacheTaskPeriod() {
+		return rebuildArbitraryResourceCacheTaskPeriod;
 	}
 }
