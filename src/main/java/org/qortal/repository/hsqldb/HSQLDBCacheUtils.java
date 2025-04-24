@@ -167,6 +167,7 @@ public class HSQLDBCacheUtils {
             Optional<String> description,
             boolean prefixOnly,
             Optional<List<String>> exactMatchNames,
+            Optional<List<String>> keywords,
             boolean defaultResource,
             Optional<Integer> minLevel,
             Optional<Supplier<List<String>>> includeOnly,
@@ -181,6 +182,14 @@ public class HSQLDBCacheUtils {
 
         // retain only candidates with names
         Stream<ArbitraryResourceData> stream = candidates.stream().filter(candidate -> candidate.name != null );
+
+        if(after.isPresent()) {
+            stream = stream.filter( candidate -> candidate.created > after.get().longValue() );
+        }
+
+        if(before.isPresent()) {
+            stream = stream.filter( candidate -> candidate.created < before.get().longValue() );
+        }
 
         if(exclude.isPresent())
             stream = stream.filter( candidate -> !exclude.get().get().contains( candidate.name ));
@@ -206,6 +215,36 @@ public class HSQLDBCacheUtils {
         stream = filterTerm(identifier, data -> data.identifier, prefixOnly, stream);
         stream = filterTerm(title, data -> data.metadata != null ? data.metadata.getTitle() : null, prefixOnly, stream);
         stream = filterTerm(description, data -> data.metadata != null ? data.metadata.getDescription() : null, prefixOnly, stream);
+
+        // New: Filter by keywords if provided
+        if (keywords.isPresent() && !keywords.get().isEmpty()) {
+            List<String> searchKeywords = keywords.get().stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toList());
+
+            stream = stream.filter(candidate -> {
+                
+                if (candidate.metadata != null && candidate.metadata.getDescription() != null) {
+                    String descriptionLower = candidate.metadata.getDescription().toLowerCase();
+                    return searchKeywords.stream().anyMatch(descriptionLower::contains);
+                }
+                return false;
+            });
+        }
+
+        if (keywords.isPresent() && !keywords.get().isEmpty()) {
+            List<String> searchKeywords = keywords.get().stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toList());
+
+            stream = stream.filter(candidate -> {
+                if (candidate.metadata != null && candidate.metadata.getDescription() != null) {
+            String descriptionLower = candidate.metadata.getDescription().toLowerCase();
+            return searchKeywords.stream().anyMatch(descriptionLower::contains);
+                }
+                return false;
+            });
+        }
 
         // if exact names is set, retain resources with exact names
         if( exactMatchNames.isPresent() && !exactMatchNames.get().isEmpty()) {
@@ -262,15 +301,58 @@ public class HSQLDBCacheUtils {
         // truncate to limit
         if( limit.isPresent() && limit.get() > 0 ) stream = stream.limit(limit.get());
 
-        // include metadata
-        if( includeMetadata.isEmpty() || !includeMetadata.get() )
-            stream = stream.peek( candidate -> candidate.metadata = null );
+        List<ArbitraryResourceData> listCopy1 = stream.collect(Collectors.toList());
 
-        // include status
-        if( includeStatus.isEmpty() || !includeStatus.get() )
-            stream = stream.peek( candidate -> candidate.status = null);
+        List<ArbitraryResourceData> listCopy2 = new ArrayList<>(listCopy1.size());
 
-        return stream.collect(Collectors.toList());
+        // remove metadata from the first copy
+        if( includeMetadata.isEmpty() || !includeMetadata.get() ) {
+            for( ArbitraryResourceData data : listCopy1 ) {
+                ArbitraryResourceData copy = new ArbitraryResourceData();
+                copy.name = data.name;
+                copy.service = data.service;
+                copy.identifier = data.identifier;
+                copy.status = data.status;
+                copy.metadata = null;
+
+                copy.size = data.size;
+                copy.created = data.created;
+                copy.updated = data.updated;
+
+                listCopy2.add(copy);
+            }
+        }
+        // put the list copy 1 into the second copy
+        else {
+            listCopy2.addAll(listCopy1);
+        }
+
+        // remove status from final copy
+        if( includeStatus.isEmpty() || !includeStatus.get() ) {
+
+            List<ArbitraryResourceData> finalCopy = new ArrayList<>(listCopy2.size());
+
+            for( ArbitraryResourceData data : listCopy2 ) {
+                ArbitraryResourceData copy = new ArbitraryResourceData();
+                copy.name = data.name;
+                copy.service = data.service;
+                copy.identifier = data.identifier;
+                copy.status = null;
+                copy.metadata = data.metadata;
+
+                copy.size = data.size;
+                copy.created = data.created;
+                copy.updated = data.updated;
+
+                finalCopy.add(copy);
+            }
+
+            return finalCopy;
+        }
+        // keep status included by returning the second copy
+        else {
+            return listCopy2;
+        }
     }
 
     /**

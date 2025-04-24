@@ -73,14 +73,14 @@ public class ArbitraryDataStoragePolicyTests extends Common {
             // We should store and pre-fetch data for this transaction
             assertEquals(StoragePolicy.FOLLOWED_OR_VIEWED, Settings.getInstance().getStoragePolicy());
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
 
             // Now unfollow the name
             assertTrue(ResourceListManager.getInstance().removeFromList("followedNames", name, false));
 
             // We should store but not pre-fetch data for this transaction
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
         }
     }
 
@@ -108,14 +108,14 @@ public class ArbitraryDataStoragePolicyTests extends Common {
             // We should store and pre-fetch data for this transaction
             assertEquals(StoragePolicy.FOLLOWED, Settings.getInstance().getStoragePolicy());
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
 
             // Now unfollow the name
             assertTrue(ResourceListManager.getInstance().removeFromList("followedNames", name, false));
 
             // We shouldn't store or pre-fetch data for this transaction
             assertFalse(storageManager.canStoreData(arbitraryTransactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
         }
     }
 
@@ -143,14 +143,14 @@ public class ArbitraryDataStoragePolicyTests extends Common {
             // We should store but not pre-fetch data for this transaction
             assertEquals(StoragePolicy.VIEWED, Settings.getInstance().getStoragePolicy());
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
 
             // Now unfollow the name
             assertTrue(ResourceListManager.getInstance().removeFromList("followedNames", name, false));
 
             // We should store but not pre-fetch data for this transaction
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
         }
     }
 
@@ -178,14 +178,14 @@ public class ArbitraryDataStoragePolicyTests extends Common {
             // We should store and pre-fetch data for this transaction
             assertEquals(StoragePolicy.ALL, Settings.getInstance().getStoragePolicy());
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
 
             // Now unfollow the name
             assertTrue(ResourceListManager.getInstance().removeFromList("followedNames", name, false));
 
             // We should store and pre-fetch data for this transaction
             assertTrue(storageManager.canStoreData(arbitraryTransactionData));
-            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertTrue(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
         }
     }
 
@@ -213,14 +213,14 @@ public class ArbitraryDataStoragePolicyTests extends Common {
             // We shouldn't store or pre-fetch data for this transaction
             assertEquals(StoragePolicy.NONE, Settings.getInstance().getStoragePolicy());
             assertFalse(storageManager.canStoreData(arbitraryTransactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
 
             // Now unfollow the name
             assertTrue(ResourceListManager.getInstance().removeFromList("followedNames", name, false));
 
             // We shouldn't store or pre-fetch data for this transaction
             assertFalse(storageManager.canStoreData(arbitraryTransactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, arbitraryTransactionData).isPass());
         }
     }
 
@@ -236,7 +236,7 @@ public class ArbitraryDataStoragePolicyTests extends Common {
 
             // We should store but not pre-fetch data for this transaction
             assertTrue(storageManager.canStoreData(transactionData));
-            assertFalse(storageManager.shouldPreFetchData(repository, transactionData));
+            assertFalse(storageManager.shouldPreFetchData(repository, transactionData).isPass());
         }
     }
 

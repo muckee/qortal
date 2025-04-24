@@ -155,31 +155,24 @@ public class ArbitraryDataStorageManager extends Thread {
      * @param arbitraryTransactionData - the transaction
      * @return boolean - whether to prefetch or not
      */
-    public boolean shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
+    public ArbitraryDataExamination shouldPreFetchData(Repository repository, ArbitraryTransactionData arbitraryTransactionData) {
         String name = arbitraryTransactionData.getName();
 
         // Only fetch data associated with hashes, as we already have RAW_DATA
         if (arbitraryTransactionData.getDataType() != ArbitraryTransactionData.DataType.DATA_HASH) {
-            return false;
+            return new ArbitraryDataExamination(false, "Only fetch data associated with hashes");
         }
 
         // Don't fetch anything more if we're (nearly) out of space
         // Make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
         // avoid a fetch/delete loop
         if (!this.isStorageSpaceAvailable(STORAGE_FULL_THRESHOLD)) {
-            return false;
-        }
-
-        // Don't fetch anything if we're (nearly) out of space for this name
-        // Again, make sure to keep STORAGE_FULL_THRESHOLD considerably less than 1, to
-        // avoid a fetch/delete loop
-        if (!this.isStorageSpaceAvailableForName(repository, arbitraryTransactionData.getName(), STORAGE_FULL_THRESHOLD)) {
-            return false;
+            return new ArbitraryDataExamination(false,"Don't fetch anything more if we're (nearly) out of space");
         }
 
         // Don't store data unless it's an allowed type (public/private)
         if (!this.isDataTypeAllowed(arbitraryTransactionData)) {
-            return false;
+            return new ArbitraryDataExamination(false, "Don't store data unless it's an allowed type (public/private)");
         }
 
         // Handle transactions without names differently
@@ -189,21 +182,21 @@ public class ArbitraryDataStorageManager extends Thread {
 
         // Never fetch data from blocked names, even if they are followed
         if (ListUtils.isNameBlocked(name)) {
-            return false;
+            return new ArbitraryDataExamination(false, "blocked name");
         }
 
         switch (Settings.getInstance().getStoragePolicy()) {
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
-                return ListUtils.isFollowingName(name);
+                return new ArbitraryDataExamination(ListUtils.isFollowingName(name), Settings.getInstance().getStoragePolicy().name());
                 
             case ALL:
-                return true;
+                return new ArbitraryDataExamination(true, Settings.getInstance().getStoragePolicy().name());
 
             case NONE:
             case VIEWED:
             default:
-                return false;
+                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
         }
     }
 
@@ -214,17 +207,17 @@ public class ArbitraryDataStorageManager extends Thread {
      *
      * @return boolean - whether the storage policy allows for unnamed data
      */
-    private boolean shouldPreFetchDataWithoutName() {
+    private ArbitraryDataExamination shouldPreFetchDataWithoutName() {
         switch (Settings.getInstance().getStoragePolicy()) {
             case ALL:
-                return true;
+                return new ArbitraryDataExamination(true, "Fetching all data");
 
             case NONE:
             case VIEWED:
             case FOLLOWED:
             case FOLLOWED_OR_VIEWED:
             default:
-                return false;
+                return new ArbitraryDataExamination(false, Settings.getInstance().getStoragePolicy().name());
         }
     }
 
@@ -481,51 +474,6 @@ public class ArbitraryDataStorageManager extends Thread {
         if (this.totalDirectorySize >= maxStorageCapacity) {
             return false;
         }
-        return true;
-    }
-
-    public boolean isStorageSpaceAvailableForName(Repository repository, String name, double threshold) {
-        if (!this.isStorageSpaceAvailable(threshold)) {
-            // No storage space available at all, so no need to check this name
-            return false;
-        }
-
-        if (Settings.getInstance().getStoragePolicy() == StoragePolicy.ALL) {
-            // Using storage policy ALL, so don't limit anything per name
-            return true;
-        }
-
-        if (name == null) {
-            // This transaction doesn't have a name, so fall back to total space limitations
-            return true;
-        }
-
-        int followedNamesCount = ListUtils.followedNamesCount();
-        if (followedNamesCount == 0) {
-            // Not following any names, so we have space
-            return true;
-        }
-
-        long totalSizeForName = 0;
-        long maxStoragePerName = this.storageCapacityPerName(threshold);
-
-        // Fetch all hosted transactions
-        List<ArbitraryTransactionData> hostedTransactions = this.listAllHostedTransactions(repository, null, null);
-        for (ArbitraryTransactionData transactionData : hostedTransactions) {
-            String transactionName = transactionData.getName();
-            if (!Objects.equals(name, transactionName)) {
-                // Transaction relates to a different name
-                continue;
-            }
-
-            totalSizeForName += transactionData.getSize();
-        }
-
-        // Have we reached the limit for this name?
-        if (totalSizeForName > maxStoragePerName) {
-            return false;
-        }
-
         return true;
     }
 

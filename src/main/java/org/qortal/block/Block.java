@@ -39,6 +39,7 @@ import org.qortal.transform.block.BlockTransformer;
 import org.qortal.transform.transaction.TransactionTransformer;
 import org.qortal.utils.Amounts;
 import org.qortal.utils.Base58;
+import org.qortal.utils.Groups;
 import org.qortal.utils.NTP;
 
 import java.io.ByteArrayOutputStream;
@@ -150,7 +151,7 @@ public class Block {
 
 		final BlockChain blockChain = BlockChain.getInstance();
 
-		ExpandedAccount(Repository repository, RewardShareData rewardShareData) throws DataException {
+		ExpandedAccount(Repository repository, RewardShareData rewardShareData, int blockHeight) throws DataException {
 			this.rewardShareData = rewardShareData;
 			this.sharePercent = this.rewardShareData.getSharePercent();
 
@@ -159,7 +160,12 @@ public class Block {
 			this.isMinterFounder = Account.isFounder(mintingAccountData.getFlags());
 
 			this.isRecipientAlsoMinter = this.rewardShareData.getRecipient().equals(this.mintingAccount.getAddress());
-			this.isMinterMember = repository.getGroupRepository().memberExists(BlockChain.getInstance().getMintingGroupId(), this.mintingAccount.getAddress());
+			this.isMinterMember
+				= Groups.memberExistsInAnyGroup(
+					repository.getGroupRepository(),
+					Groups.getGroupIdsToMint(BlockChain.getInstance(), blockHeight),
+					this.mintingAccount.getAddress()
+			);
 
 			if (this.isRecipientAlsoMinter) {
 				// Self-share: minter is also recipient
@@ -435,9 +441,9 @@ public class Block {
 			if (height >= BlockChain.getInstance().getGroupMemberCheckHeight()) {
 				onlineAccounts.removeIf(a -> {
 					try {
-						int groupId = BlockChain.getInstance().getMintingGroupId();
+						List<Integer> groupIdsToMint = Groups.getGroupIdsToMint(BlockChain.getInstance(), height);
 						String address = Account.getRewardShareMintingAddress(repository, a.getPublicKey());
-						boolean isMinterGroupMember = repository.getGroupRepository().memberExists(groupId, address);
+						boolean isMinterGroupMember = Groups.memberExistsInAnyGroup(repository.getGroupRepository(), groupIdsToMint, address);
 						return !isMinterGroupMember;
 					} catch (DataException e) {
 						// Something went wrong, so remove the account
@@ -753,7 +759,7 @@ public class Block {
 		List<ExpandedAccount> expandedAccounts = new ArrayList<>();
 
 		for (RewardShareData rewardShare : this.cachedOnlineRewardShares) {
-			expandedAccounts.add(new ExpandedAccount(repository, rewardShare));
+			expandedAccounts.add(new ExpandedAccount(repository, rewardShare, this.blockData.getHeight()));
 		}
 
 		this.cachedExpandedAccounts = expandedAccounts;
@@ -2485,11 +2491,10 @@ public class Block {
 			try (final Repository repository = RepositoryManager.getRepository()) {
 				GroupRepository groupRepository = repository.getGroupRepository();
 
+				List<Integer> mintingGroupIds = Groups.getGroupIdsToMint(BlockChain.getInstance(), this.blockData.getHeight());
+
 				// all minter admins
-				List<String> minterAdmins
-					= groupRepository.getGroupAdmins(BlockChain.getInstance().getMintingGroupId()).stream()
-						.map(GroupAdminData::getAdmin)
-						.collect(Collectors.toList());
+				List<String> minterAdmins = Groups.getAllAdmins(groupRepository, mintingGroupIds);
 
 				// all minter admins that are online
 				List<ExpandedAccount> onlineMinterAdminAccounts

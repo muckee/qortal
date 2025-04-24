@@ -386,7 +386,7 @@ public class Settings {
 	/**
 	 * DB Cache Enabled?
 	 */
-	private boolean dbCacheEnabled = false;
+	private boolean dbCacheEnabled = true;
 
 	/**
 	 * DB Cache Thread Priority
@@ -508,7 +508,44 @@ public class Settings {
 	 */
     private boolean connectionPoolMonitorEnabled = false;
 
-    // Domain mapping
+	/**
+	 * Buiild Arbitrary Resources Batch Size
+	 *
+	 * The number resources to batch per iteration when rebuilding.
+	 */
+	private int buildArbitraryResourcesBatchSize = 200;
+
+	/**
+	 * Arbitrary Indexing Priority
+	 *
+	 * The thread priority when indexing arbirary resources.
+	 */
+    private int arbitraryIndexingPriority = 5;
+
+	/**
+	 * Arbitrary Indexing Frequency (In Minutes)
+	 *
+	 * The frequency at which the arbitrary indices are cached.
+	 */
+	private int arbitraryIndexingFrequency = 10;
+
+    private boolean rebuildArbitraryResourceCacheTaskEnabled = false;
+
+	/**
+	 * Rebuild Arbitrary Resource Cache Task Delay (In Minutes)
+	 *
+	 * Waiting period before the first rebuild task is started.
+	 */
+	private int rebuildArbitraryResourceCacheTaskDelay = 300;
+
+	/**
+	 * Rebuild Arbitrary Resource Cache Task Period (In Hours)
+	 *
+	 * The frequency the arbitrary resource cache is rebuilt.
+	 */
+	private int rebuildArbitraryResourceCacheTaskPeriod = 24;
+
+	// Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
 		private Integer limit;
@@ -1332,5 +1369,29 @@ public class Settings {
 
 	public boolean isConnectionPoolMonitorEnabled() {
 		return connectionPoolMonitorEnabled;
+	}
+
+	public int getBuildArbitraryResourcesBatchSize() {
+		return buildArbitraryResourcesBatchSize;
+	}
+
+	public int getArbitraryIndexingPriority() {
+		return arbitraryIndexingPriority;
+	}
+
+	public int getArbitraryIndexingFrequency() {
+		return arbitraryIndexingFrequency;
+	}
+
+	public boolean isRebuildArbitraryResourceCacheTaskEnabled() {
+		return rebuildArbitraryResourceCacheTaskEnabled;
+	}
+
+	public int getRebuildArbitraryResourceCacheTaskDelay() {
+		return rebuildArbitraryResourceCacheTaskDelay;
+	}
+
+	public int getRebuildArbitraryResourceCacheTaskPeriod() {
+		return rebuildArbitraryResourceCacheTaskPeriod;
 	}
 }

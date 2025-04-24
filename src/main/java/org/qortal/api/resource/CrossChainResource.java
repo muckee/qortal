@@ -10,11 +10,13 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.glassfish.jersey.media.multipart.ContentDisposition;
 import org.qortal.api.ApiError;
 import org.qortal.api.ApiErrors;
 import org.qortal.api.ApiExceptionFactory;
 import org.qortal.api.Security;
 import org.qortal.api.model.CrossChainCancelRequest;
+import org.qortal.api.model.CrossChainTradeLedgerEntry;
 import org.qortal.api.model.CrossChainTradeSummary;
 import org.qortal.controller.tradebot.TradeBot;
 import org.qortal.crosschain.ACCT;
@@ -44,10 +46,14 @@ import org.qortal.utils.Base58;
 import org.qortal.utils.ByteArray;
 import org.qortal.utils.NTP;
 
+import javax.servlet.ServletContext;
 import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MediaType;
+import java.io.IOException;
 import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -60,6 +66,13 @@ public class CrossChainResource {
 
 	@Context
 	HttpServletRequest request;
+
+	@Context
+	HttpServletResponse response;
+
+	@Context
+	ServletContext context;
+
 
 	@GET
 	@Path("/tradeoffers")
@@ -258,11 +271,11 @@ public class CrossChainResource {
 				example = "1597310000000"
 			) @QueryParam("minimumTimestamp") Long minimumTimestamp,
 			@Parameter(
-				description = "Optionally filter by buyer Qortal address"
-			) @QueryParam("buyerAddress") String buyerAddress,
+				description = "Optionally filter by buyer Qortal public key"
+			) @QueryParam("buyerPublicKey") String buyerPublicKey58,
 			@Parameter(
-				description = "Optionally filter by seller Qortal address"
-			) @QueryParam("sellerAddress") String sellerAddress,
+				description = "Optionally filter by seller Qortal public key"
+			) @QueryParam("sellerPublicKey") String sellerPublicKey58,
 			@Parameter( ref = "limit") @QueryParam("limit") Integer limit,
 			@Parameter( ref = "offset" ) @QueryParam("offset") Integer offset,
 			@Parameter( ref = "reverse" ) @QueryParam("reverse") Boolean reverse) {
@@ -273,6 +286,10 @@ public class CrossChainResource {
 		// minimumTimestamp (if given) needs to be positive
 		if (minimumTimestamp != null && minimumTimestamp <= 0)
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
+
+		// Decode public keys
+		byte[] buyerPublicKey = decodePublicKey(buyerPublicKey58);
+		byte[] sellerPublicKey = decodePublicKey(sellerPublicKey58);
 
 		final Boolean isFinished = Boolean.TRUE;
 
@@ -304,7 +321,7 @@ public class CrossChainResource {
 				byte[] codeHash = acctInfo.getKey().value;
 				ACCT acct = acctInfo.getValue().get();
 
-				List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash, buyerAddress, sellerAddress,
+				List<ATStateData> atStates = repository.getATRepository().getMatchingFinalATStates(codeHash, buyerPublicKey, sellerPublicKey,
 						isFinished, acct.getModeByteOffset(), (long) AcctMode.REDEEMED.value, minimumFinalHeight,
 						limit, offset, reverse);
 
@@ -340,6 +357,120 @@ public class CrossChainResource {
 			return crossChainTrades;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
+
+	/**
+	 * Decode Public Key
+	 *
+	 * @param publicKey58 the public key in a string
+	 *
+	 * @return the public key in bytes
+	 */
+	private byte[] decodePublicKey(String publicKey58) {
+
+		if( publicKey58 == null ) return null;
+		if( publicKey58.isEmpty() ) return new byte[0];
+
+		byte[] publicKey;
+		try {
+			publicKey = Base58.decode(publicKey58);
+		} catch (NumberFormatException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_PUBLIC_KEY, e);
+		}
+
+		// Correct size for public key?
+		if (publicKey.length != Transformer.PUBLIC_KEY_LENGTH)
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_PUBLIC_KEY);
+
+		return publicKey;
+	}
+
+	@GET
+	@Path("/ledger/{publicKey}")
+	@Operation(
+			summary = "Accounting entries for all trades.",
+			description = "Returns accounting entries for all completed cross-chain trades",
+			responses = {
+					@ApiResponse(
+							content = @Content(
+									schema = @Schema(
+											type = "string",
+											format = "byte"
+									)
+							)
+					)
+			}
+	)
+	@ApiErrors({ApiError.INVALID_CRITERIA, ApiError.REPOSITORY_ISSUE})
+	public HttpServletResponse getLedgerEntries(
+			@PathParam("publicKey") String publicKey58,
+			@Parameter(
+					description = "Only return trades that completed on/after this timestamp (milliseconds since epoch)",
+					example = "1597310000000"
+			) @QueryParam("minimumTimestamp") Long minimumTimestamp) {
+
+		byte[] publicKey = decodePublicKey(publicKey58);
+
+		// minimumTimestamp (if given) needs to be positive
+		if (minimumTimestamp != null && minimumTimestamp <= 0)
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_CRITERIA);
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			Integer minimumFinalHeight = null;
+
+			if (minimumTimestamp != null) {
+				minimumFinalHeight = repository.getBlockRepository().getHeightFromTimestamp(minimumTimestamp);
+				// If not found in the block repository it will return either 0 or 1
+				if (minimumFinalHeight == 0 || minimumFinalHeight == 1) {
+					// Try the archive
+					minimumFinalHeight = repository.getBlockArchiveRepository().getHeightFromTimestamp(minimumTimestamp);
+				}
+
+				if (minimumFinalHeight == 0)
+					// We don't have any blocks since minimumTimestamp, let alone trades, so nothing to return
+					return response;
+
+				// height returned from repository is for block BEFORE timestamp
+				// but we want trades AFTER timestamp so bump height accordingly
+				minimumFinalHeight++;
+			}
+
+			List<CrossChainTradeLedgerEntry> crossChainTradeLedgerEntries = new ArrayList<>();
+
+			Map<ByteArray, Supplier<ACCT>> acctsByCodeHash = SupportedBlockchain.getAcctMap();
+
+			// collect ledger entries for each ACCT
+			for (Map.Entry<ByteArray, Supplier<ACCT>> acctInfo : acctsByCodeHash.entrySet()) {
+				byte[] codeHash = acctInfo.getKey().value;
+				ACCT acct = acctInfo.getValue().get();
+
+				// collect buys and sells
+				CrossChainUtils.collectLedgerEntries(publicKey, repository, minimumFinalHeight, crossChainTradeLedgerEntries, codeHash, acct, true);
+				CrossChainUtils.collectLedgerEntries(publicKey, repository, minimumFinalHeight, crossChainTradeLedgerEntries, codeHash, acct, false);
+			}
+
+			crossChainTradeLedgerEntries.sort((a, b) -> Longs.compare(a.getTradeTimestamp(), b.getTradeTimestamp()));
+
+			response.setStatus(HttpServletResponse.SC_OK);
+			response.setContentType("text/csv");
+			response.setHeader(
+				HttpHeaders.CONTENT_DISPOSITION,
+				ContentDisposition
+					.type("attachment")
+					.fileName(CrossChainUtils.createLedgerFileName(Crypto.toAddress(publicKey)))
+					.build()
+					.toString()
+			);
+
+			CrossChainUtils.writeToLedger( response.getWriter(), crossChainTradeLedgerEntries);
+
+			return response;
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		} catch (IOException e) {
+			response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+			return response;
 		}
 	}
 
