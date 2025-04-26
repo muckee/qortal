@@ -14,7 +14,7 @@ public class GetForeignFeesMessage extends Message {
 	private final List<ForeignFeeDecodedData> foreignFeeDecodedData;
 
 	public GetForeignFeesMessage(List<ForeignFeeDecodedData> foreignFeeDecodedData) {
-		super(MessageType.GET_ONLINE_ACCOUNTS_V3);
+		super(MessageType.GET_FOREIGN_FEES);
 
 		this.foreignFeeDecodedData = foreignFeeDecodedData;
 

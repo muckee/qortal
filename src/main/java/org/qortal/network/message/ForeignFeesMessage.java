@@ -25,7 +25,7 @@ public class ForeignFeesMessage extends Message {
 	}
 
 	private ForeignFeesMessage(int id, List<ForeignFeeDecodedData> foreignFees) {
-		super(id, MessageType.ONLINE_ACCOUNTS_V3);
+		super(id, MessageType.FOREIGN_FEES);
 
 		this.foreignFees = foreignFees;
 	}
