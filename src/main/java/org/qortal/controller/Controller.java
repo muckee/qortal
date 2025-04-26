@@ -560,6 +560,9 @@ public class Controller extends Thread {
 		LOGGER.info("Starting online accounts manager");
 		OnlineAccountsManager.getInstance().start();
 
+		LOGGER.info("Starting foreign fees manager");
+		ForeignFeesManager.getInstance().start();
+
 		LOGGER.info("Starting transaction importer");
 		TransactionImporter.getInstance().start();
 
@@ -1130,6 +1133,9 @@ public class Controller extends Thread {
 				LOGGER.info("Shutting down online accounts manager");
 				OnlineAccountsManager.getInstance().shutdown();
 
+				LOGGER.info("Shutting down foreign fees manager");
+				ForeignFeesManager.getInstance().shutdown();
+
 				LOGGER.info("Shutting down transaction importer");
 				TransactionImporter.getInstance().shutdown();
 
@@ -1472,6 +1478,14 @@ public class Controller extends Thread {
 
 			case ONLINE_ACCOUNTS_V3:
 				OnlineAccountsManager.getInstance().onNetworkOnlineAccountsV3Message(peer, message);
+				break;
+
+			case GET_FOREIGN_FEES:
+				ForeignFeesManager.getInstance().onNetworkGetForeignFeesMessage(peer, message);
+				break;
+
+			case FOREIGN_FEES:
+				ForeignFeesManager.getInstance().onNetworkForeignFeesMessage(peer, message);
 				break;
 
 			case GET_ARBITRARY_DATA:

@@ -197,6 +197,7 @@ public class ApiService {
 			context.addServlet(DataMonitorSocket.class, "/websockets/datamonitor");
 			context.addServlet(ActiveChatsWebSocket.class, "/websockets/chat/active/*");
 			context.addServlet(ChatMessagesWebSocket.class, "/websockets/chat/messages");
+			context.addServlet(UnsignedFeesSocket.class, "/websockets/crosschain/unsignedfees");
 			context.addServlet(TradeOffersWebSocket.class, "/websockets/crosschain/tradeoffers");
 			context.addServlet(TradeBotWebSocket.class, "/websockets/crosschain/tradebot");
 			context.addServlet(TradePresenceWebSocket.class, "/websockets/crosschain/tradepresence");
