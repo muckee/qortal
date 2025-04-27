@@ -258,7 +258,7 @@ public class ForeignFeesManager implements Listener {
             this.needToBackupRequiredForeignFees.compareAndSet(false, true);
 
             if( processLocalForeignFeesForCoin(((RequiredFeeUpdateEvent) event).getBitcoiny()) ) {
-                EventBus.INSTANCE.notify(new FeeWaitingEvent());
+                EventBus.INSTANCE.notify(new FeeWaitingEvent(true));
             }
         }
         //
@@ -283,7 +283,7 @@ public class ForeignFeesManager implements Listener {
                             this.offersByAddress.computeIfAbsent( offer.qortalCreator, x -> new ArrayList<>()).add(offer);
 
                             if( processTradeOfferInWaiting(now, data) ) {
-                                EventBus.INSTANCE.notify(new FeeWaitingEvent());
+                                EventBus.INSTANCE.notify(new FeeWaitingEvent(true));
                             }
                         }
                         else {
@@ -450,6 +450,10 @@ public class ForeignFeesManager implements Listener {
 
                 // now that this fee has been processed, remove it from the process queue
                 foreignFeesToRemove.add(foreignFeeToImport);
+            }
+
+            if( this.unsignedByAT.isEmpty() ) {
+                EventBus.INSTANCE.notify(new FeeWaitingEvent(false));
             }
         } catch (Exception e) {
             LOGGER.error("Repository issue while verifying foreign fees", e);
@@ -698,7 +702,7 @@ public class ForeignFeesManager implements Listener {
         }
 
         if( feeSignaturesNeeded ) {
-            EventBus.INSTANCE.notify(new FeeWaitingEvent());
+            EventBus.INSTANCE.notify(new FeeWaitingEvent(true));
         }
     }
 
@@ -860,7 +864,9 @@ public class ForeignFeesManager implements Listener {
                 fee
         );
 
+        LOGGER.info("updating unsigned");
         this.unsignedByAT.put(atAddress, feeData);
+        LOGGER.info("updated unsigned = " + this.unsignedByAT);
     }
 
     // Network handlers

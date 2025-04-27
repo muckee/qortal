@@ -432,7 +432,11 @@ public class CrossChainResource {
 	@ApiErrors({ApiError.INVALID_CRITERIA, ApiError.REPOSITORY_ISSUE})
 	public List<ForeignFeeEncodedData> getUnsignedFees(@PathParam("address") String address) {
 
-		return ForeignFeesManager.getInstance().getUnsignedFeesForAddress(address);
+		List<ForeignFeeEncodedData> unsignedFeesForAddress = ForeignFeesManager.getInstance().getUnsignedFeesForAddress(address);
+
+		LOGGER.info("address = " + address);
+		LOGGER.info("returning unsigned = " + unsignedFeesForAddress);
+		return unsignedFeesForAddress;
 	}
 
 	@GET

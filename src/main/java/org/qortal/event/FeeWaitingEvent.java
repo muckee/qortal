@@ -5,22 +5,19 @@ import javax.xml.bind.annotation.XmlAccessorType;
 
 @XmlAccessorType(XmlAccessType.FIELD)
 public class FeeWaitingEvent implements Event{
-    private long timestamp;
-    private String address;
+
+    private boolean positive;
 
     public FeeWaitingEvent() {
     }
 
-    public FeeWaitingEvent(long timestamp, String address) {
-        this.timestamp = timestamp;
-        this.address = address;
+    public FeeWaitingEvent(boolean positive) {
+
+        this.positive = positive;
+
     }
 
-    public long getTimestamp() {
-        return timestamp;
-    }
-
-    public String getAddress() {
-        return address;
+    public boolean isPositive() {
+        return positive;
     }
 }
