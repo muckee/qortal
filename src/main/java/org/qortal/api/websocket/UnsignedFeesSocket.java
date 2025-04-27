@@ -40,8 +40,8 @@ public class UnsignedFeesSocket extends ApiWebSocket implements Listener {
 			return;
 
 		for (Session session : getSessions()) {
-			boolean positive = ((FeeWaitingEvent) event).isPositive();
-			sendUnsignedFeeEvent(session, new UnsignedFeeEvent(positive));
+			FeeWaitingEvent feeWaitingEvent = (FeeWaitingEvent) event;
+			sendUnsignedFeeEvent(session, new UnsignedFeeEvent(feeWaitingEvent.isPositive(), feeWaitingEvent.getAddress()));
 		}
 	}
 

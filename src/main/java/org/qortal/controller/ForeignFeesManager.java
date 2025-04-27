@@ -257,8 +257,8 @@ public class ForeignFeesManager implements Listener {
 
             this.needToBackupRequiredForeignFees.compareAndSet(false, true);
 
-            if( processLocalForeignFeesForCoin(((RequiredFeeUpdateEvent) event).getBitcoiny()) ) {
-                EventBus.INSTANCE.notify(new FeeWaitingEvent(true));
+            for( String address : processLocalForeignFeesForCoin(((RequiredFeeUpdateEvent) event).getBitcoiny()) ) {
+                EventBus.INSTANCE.notify(new FeeWaitingEvent(true, address));
             }
         }
         //
@@ -283,7 +283,7 @@ public class ForeignFeesManager implements Listener {
                             this.offersByAddress.computeIfAbsent( offer.qortalCreator, x -> new ArrayList<>()).add(offer);
 
                             if( processTradeOfferInWaiting(now, data) ) {
-                                EventBus.INSTANCE.notify(new FeeWaitingEvent(true));
+                                EventBus.INSTANCE.notify(new FeeWaitingEvent(true, data.getCreatorAddress()));
                             }
                         }
                         else {
@@ -434,6 +434,22 @@ public class ForeignFeesManager implements Listener {
                         this.signedByAT.put(atAddress, Optional.of(foreignFeeToImport));
                         this.needToBackupSignedForeignFees.compareAndSet(false, true);
                         this.unsignedByAT.remove(atAddress);
+
+                        String tradeOfferCreatorAddress = Crypto.toAddress(publicKey);
+                        boolean allSignedForCreatorAddress
+                            = this.offersByAddress
+                                .get(tradeOfferCreatorAddress).stream()
+                                .map(data -> data.qortalAtAddress)
+                                .filter(qortalAtAddress -> this.unsignedByAT.contains(qortalAtAddress))
+                                .findAny()
+                                .isEmpty();
+
+                        LOGGER.info("tradeOfferCreatorAddress = " + tradeOfferCreatorAddress);
+                        LOGGER.info("allSignedForCreatorAddress = " + allSignedForCreatorAddress);
+
+                        if(allSignedForCreatorAddress) {
+                            EventBus.INSTANCE.notify(new FeeWaitingEvent(false, tradeOfferCreatorAddress));
+                        }
                     }
                     // otherwise this fee will get discarded
                     else {
@@ -450,10 +466,6 @@ public class ForeignFeesManager implements Listener {
 
                 // now that this fee has been processed, remove it from the process queue
                 foreignFeesToRemove.add(foreignFeeToImport);
-            }
-
-            if( this.unsignedByAT.isEmpty() ) {
-                EventBus.INSTANCE.notify(new FeeWaitingEvent(false));
             }
         } catch (Exception e) {
             LOGGER.error("Repository issue while verifying foreign fees", e);
@@ -686,7 +698,7 @@ public class ForeignFeesManager implements Listener {
      */
     private void processLocalForeignFeesForAll() {
 
-        boolean feeSignaturesNeeded = false;
+        Set<String> addressesThatNeedSignatures = new HashSet<>();
 
         List<String> names
             = Arrays.stream(SupportedBlockchain.values())
@@ -697,12 +709,12 @@ public class ForeignFeesManager implements Listener {
             ForeignBlockchain blockchain = SupportedBlockchain.getAcctByName(name).getBlockchain();
 
             if( blockchain instanceof Bitcoiny ) {
-                feeSignaturesNeeded = processLocalForeignFeesForCoin((Bitcoiny) blockchain) || feeSignaturesNeeded;
+                addressesThatNeedSignatures.addAll( processLocalForeignFeesForCoin((Bitcoiny) blockchain) );
             }
         }
 
-        if( feeSignaturesNeeded ) {
-            EventBus.INSTANCE.notify(new FeeWaitingEvent(true));
+        for( String addressThatNeedsSignature : addressesThatNeedSignatures ) {
+            EventBus.INSTANCE.notify(new FeeWaitingEvent(true, addressThatNeedsSignature));
         }
     }
 
@@ -713,17 +725,17 @@ public class ForeignFeesManager implements Listener {
      *
      * @param bitcoiny the coin
      *
-     * @return if any fee signatures are needed after this process
+     * @return addresses that need fee signatures
      */
-    private boolean processLocalForeignFeesForCoin(final Bitcoiny bitcoiny) {
+    private Set<String> processLocalForeignFeesForCoin(final Bitcoiny bitcoiny) {
 
-        boolean feeSignaturesNeeded = false;
+        Set<String> addressesThatNeedSignatures = new HashSet<>();
 
         LOGGER.info("processing local foreign fees ...");
 
         Optional<Long> nowDetermined = determineNow();
         if (nowDetermined.isEmpty()){
-            return false;
+            return new HashSet<>(0);
         }
 
         long now = nowDetermined.get();
@@ -745,13 +757,15 @@ public class ForeignFeesManager implements Listener {
 
                 // process trade offer first,
                 // then reset the fee signatures needed status next relative to prior status
-                feeSignaturesNeeded = processTradeOfferInWaiting(now, tradeOfferWaiting) || feeSignaturesNeeded;
+                if(processTradeOfferInWaiting(now, tradeOfferWaiting) ) {
+                    addressesThatNeedSignatures.add(tradeOfferWaiting.getCreatorAddress());
+                }
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
         }
 
-        return feeSignaturesNeeded;
+        return addressesThatNeedSignatures;
     }
 
     /**

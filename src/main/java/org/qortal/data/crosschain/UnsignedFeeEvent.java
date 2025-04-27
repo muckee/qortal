@@ -8,14 +8,22 @@ public class UnsignedFeeEvent {
 
     private boolean positive;
 
+    private String address;
+
     public UnsignedFeeEvent() {
     }
 
-    public UnsignedFeeEvent(boolean positive) {
+    public UnsignedFeeEvent(boolean positive, String address) {
+
         this.positive = positive;
+        this.address = address;
     }
 
     public boolean isPositive() {
         return positive;
+    }
+
+    public String getAddress() {
+        return address;
     }
 }
