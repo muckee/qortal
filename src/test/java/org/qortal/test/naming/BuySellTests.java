@@ -4,6 +4,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.qortal.account.PrivateKeyAccount;
+import org.qortal.block.BlockChain;
 import org.qortal.data.naming.NameData;
 import org.qortal.data.transaction.BuyNameTransactionData;
 import org.qortal.data.transaction.CancelSellNameTransactionData;
@@ -17,6 +18,7 @@ import org.qortal.test.common.Common;
 import org.qortal.test.common.TransactionUtils;
 import org.qortal.test.common.transaction.TestTransaction;
 import org.qortal.transaction.RegisterNameTransaction;
+import org.qortal.transaction.Transaction;
 import org.qortal.utils.Amounts;
 
 import java.util.Random;
@@ -82,6 +84,46 @@ public class BuySellTests extends Common {
 
 		// Check name does exist
 		assertTrue(repository.getNameRepository().nameExists(name));
+	}
+
+	@Test
+	public void testRegisterNameMultiple() throws DataException {
+		// register name 1
+		RegisterNameTransactionData transactionData1 = new RegisterNameTransactionData(TestTransaction.generateBase(alice), name, "{}");
+		transactionData1.setFee(new RegisterNameTransaction(null, null).getUnitFee(transactionData1.getTimestamp()));
+		TransactionUtils.signAndMint(repository, transactionData1, alice);
+
+		String name1 = transactionData1.getName();
+
+		// check name does exist
+		assertTrue(repository.getNameRepository().nameExists(name1));
+
+		// register another name, second registered name should fail before the feature trigger
+		final String name2 = "another name";
+		RegisterNameTransactionData transactionData2 = new RegisterNameTransactionData(TestTransaction.generateBase(alice), name2, "{}");
+		Transaction.ValidationResult resultBeforeFeatureTrigger = TransactionUtils.signAndImport(repository, transactionData2, alice);
+
+		// check that that multiple names is forbidden
+		assertTrue(Transaction.ValidationResult.MULTIPLE_NAMES_FORBIDDEN.equals(resultBeforeFeatureTrigger));
+
+		// mint passed the feature trigger block
+		BlockUtils.mintBlocks(repository, BlockChain.getInstance().getMultipleNamesPerAccountHeight());
+
+		// register again, now that we are passed the feature trigger
+		RegisterNameTransactionData transactionData3 = new RegisterNameTransactionData(TestTransaction.generateBase(alice), name2, "{}");
+		Transaction.ValidationResult resultAfterFeatureTrigger = TransactionUtils.signAndImport(repository, transactionData3, alice);
+
+		// check that multiple names is ok
+		assertTrue(Transaction.ValidationResult.OK.equals(resultAfterFeatureTrigger));
+
+		// mint block, confirm transaction
+		BlockUtils.mintBlock(repository);
+
+		// check name does exist
+		assertTrue(repository.getNameRepository().nameExists(name2));
+
+		// check that there are 2 names for one account
+		assertEquals(2, repository.getNameRepository().getNamesByOwner(alice.getAddress(), 0, 0, false).size() );
 	}
 
 	@Test
