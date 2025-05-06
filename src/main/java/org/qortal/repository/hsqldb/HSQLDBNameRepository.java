@@ -267,7 +267,7 @@ public class HSQLDBNameRepository implements NameRepository {
 		StringBuilder sql = new StringBuilder(512);
 
 		sql.append("SELECT name, reduced_name, data, registered_when, updated_when, "
-				+ "is_for_sale, sale_price, reference, creation_group_id FROM Names WHERE owner = ? ORDER BY name");
+				+ "is_for_sale, sale_price, reference, creation_group_id FROM Names WHERE owner = ? ORDER BY registered_when");
 
 		if (reverse != null && reverse)
 			sql.append(" DESC");

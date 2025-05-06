@@ -21,6 +21,7 @@ import org.qortal.transaction.RegisterNameTransaction;
 import org.qortal.transaction.Transaction;
 import org.qortal.utils.Amounts;
 
+import java.util.List;
 import java.util.Random;
 
 import static org.junit.Assert.*;
@@ -123,7 +124,13 @@ public class BuySellTests extends Common {
 		assertTrue(repository.getNameRepository().nameExists(name2));
 
 		// check that there are 2 names for one account
-		assertEquals(2, repository.getNameRepository().getNamesByOwner(alice.getAddress(), 0, 0, false).size() );
+		List<NameData> namesByOwner = repository.getNameRepository().getNamesByOwner(alice.getAddress(), 0, 0, false);
+
+		assertEquals(2, namesByOwner.size() );
+
+		// check that the order is correct
+		assertEquals(name1, namesByOwner.get(0).getName());
+
 	}
 
 	@Test
