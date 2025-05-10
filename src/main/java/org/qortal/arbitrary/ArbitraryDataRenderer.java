@@ -37,6 +37,7 @@ public class ArbitraryDataRenderer {
     private final Service service;
     private final String identifier;
     private String theme = "light";
+    private String lang = "en"; 
     private String inPath;
     private final String secret58;
     private final String prefix;
@@ -166,7 +167,7 @@ public class ArbitraryDataRenderer {
             if (HTMLParser.isHtmlFile(filename)) {
                 // HTML file - needs to be parsed
                 byte[] data = Files.readAllBytes(filePath); // TODO: limit file size that can be read into memory
-                HTMLParser htmlParser = new HTMLParser(resourceId, inPath, prefix, includeResourceIdInPrefix, data, qdnContext, service, identifier, theme, usingCustomRouting);
+                HTMLParser htmlParser = new HTMLParser(resourceId, inPath, prefix, includeResourceIdInPrefix, data, qdnContext, service, identifier, theme, usingCustomRouting, lang);
                 htmlParser.addAdditionalHeaderTags();
                 response.addHeader("Content-Security-Policy", "default-src 'self' 'unsafe-inline' 'unsafe-eval'; font-src 'self' data:; media-src 'self' data: blob:; img-src 'self' data: blob:; connect-src 'self' wss:;");
                 response.setContentType(context.getMimeType(filename));
@@ -256,5 +257,8 @@ public class ArbitraryDataRenderer {
     public void setTheme(String theme) {
         this.theme = theme;
     }
+    public void setLang(String lang) {
+        this.lang = lang;
+    }    
 
 }
