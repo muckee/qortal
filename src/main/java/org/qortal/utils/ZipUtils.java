@@ -48,9 +48,7 @@ public class ZipUtils {
         FileOutputStream fileOutputStream = new FileOutputStream(destFilePath);
         
         // 🔧 Use best speed compression level
-        ZipOutputStream zipOutputStream = new ZipOutputStream(fileOutputStream);
-        zipOutputStream.setLevel(java.util.zip.Deflater.BEST_SPEED);
-        
+        ZipOutputStream zipOutputStream = new ZipOutputStream(fileOutputStream);        
         ZipUtils.zip(sourceFile, enclosingFolderName, zipOutputStream, isSingleFile);
         
         zipOutputStream.close();
