@@ -85,6 +85,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.zip.GZIPOutputStream;
 
 import org.apache.tika.Tika;
 import org.apache.tika.mime.MimeTypeException;
@@ -701,7 +702,7 @@ public class ArbitraryResource {
 					)
 			}
 	)
-	public HttpServletResponse get(@PathParam("service") Service service,
+	public void get(@PathParam("service") Service service,
 								   @PathParam("name") String name,
 								   @QueryParam("filepath") String filepath,
 								   @QueryParam("encoding") String encoding,
@@ -714,7 +715,7 @@ public class ArbitraryResource {
 			Security.checkApiCallAllowed(request);
 		}
 
-		return this.download(service, name, null, filepath, encoding, rebuild, async, attempts);
+		 this.download(service, name, null, filepath, encoding, rebuild, async, attempts);
 	}
 
 	@GET
@@ -734,7 +735,7 @@ public class ArbitraryResource {
 					)
 			}
 	)
-	public HttpServletResponse get(@PathParam("service") Service service,
+	public void get(@PathParam("service") Service service,
 								   @PathParam("name") String name,
 								   @PathParam("identifier") String identifier,
 								   @QueryParam("filepath") String filepath,
@@ -748,7 +749,7 @@ public class ArbitraryResource {
 			Security.checkApiCallAllowed(request, null);
 		}
 
-		return this.download(service, name, identifier, filepath, encoding, rebuild, async, attempts);
+		this.download(service, name, identifier, filepath, encoding, rebuild, async, attempts);
 	}
 
 
@@ -1664,115 +1665,7 @@ public String finalizeUpload(
 		}
 	}
 
-	// private HttpServletResponse download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts) {
-
-	// 	try {
-	// 		ArbitraryDataReader arbitraryDataReader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
-
-	// 		int attempts = 0;
-	// 		if (maxAttempts == null) {
-	// 			maxAttempts = 5;
-	// 		}
-
-	// 		// Loop until we have data
-	// 		if (async) {
-	// 			// Asynchronous
-	// 			arbitraryDataReader.loadAsynchronously(false, 1);
-	// 		}
-	// 		else {
-	// 			// Synchronous
-	// 			while (!Controller.isStopping()) {
-	// 				attempts++;
-	// 				if (!arbitraryDataReader.isBuilding()) {
-	// 					try {
-	// 						arbitraryDataReader.loadSynchronously(rebuild);
-	// 						break;
-	// 					} catch (MissingDataException e) {
-	// 						if (attempts > maxAttempts) {
-	// 							// Give up after 5 attempts
-	// 							throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "Data unavailable. Please try again later.");
-	// 						}
-	// 					}
-	// 				}
-	// 				Thread.sleep(3000L);
-	// 			}
-	// 		}
-
-	// 		java.nio.file.Path outputPath = arbitraryDataReader.getFilePath();
-	// 		if (outputPath == null) {
-	// 			// Assume the resource doesn't exist
-	// 			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, "File not found");
-	// 		}
-
-	// 		if (filepath == null || filepath.isEmpty()) {
-	// 			// No file path supplied - so check if this is a single file resource
-	// 			String[] files = ArrayUtils.removeElement(outputPath.toFile().list(), ".qortal");
-	// 			if (files != null && files.length == 1) {
-	// 				// This is a single file resource
-	// 				filepath = files[0];
-	// 			}
-	// 			else {
-	// 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA,
-	// 						"filepath is required for resources containing more than one file");
-	// 			}
-	// 		}
-
-	// 		java.nio.file.Path path = Paths.get(outputPath.toString(), filepath);
-	// 		if (!Files.exists(path)) {
-	// 			String message = String.format("No file exists at filepath: %s", filepath);
-	// 			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, message);
-	// 		}
-
-	// 		byte[] data;
-	// 		int fileSize = (int)path.toFile().length();
-	// 		int length = fileSize;
-
-	// 		// Parse "Range" header
-	// 		Integer rangeStart = null;
-	// 		Integer rangeEnd = null;
-	// 		String range = request.getHeader("Range");
-	// 		if (range != null) {
-	// 			range = range.replace("bytes=", "");
-	// 			String[] parts = range.split("-");
-	// 			rangeStart = (parts != null && parts.length > 0) ? Integer.parseInt(parts[0]) : null;
-	// 			rangeEnd = (parts != null && parts.length > 1) ? Integer.parseInt(parts[1]) : fileSize;
-	// 		}
-
-	// 		if (rangeStart != null && rangeEnd != null) {
-	// 			// We have a range, so update the requested length
-	// 			length = rangeEnd - rangeStart;
-	// 		}
-
-	// 		if (length < fileSize && encoding == null) {
-	// 			// Partial content requested, and not encoding the data
-	// 			response.setStatus(206);
-	// 			response.addHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd-1, fileSize));
-	// 			data = FilesystemUtils.readFromFile(path.toString(), rangeStart, length);
-	// 		}
-	// 		else {
-	// 			// Full content requested (or encoded data)
-	// 			response.setStatus(200);
-	// 			data = Files.readAllBytes(path); // TODO: limit file size that can be read into memory
-	// 		}
-
-	// 		// Encode the data if requested
-	// 		if (encoding != null && Objects.equals(encoding.toLowerCase(), "base64")) {
-	// 			data = Base64.encode(data);
-	// 		}
-
-	// 		response.addHeader("Accept-Ranges", "bytes");
-	// 		response.setContentType(context.getMimeType(path.toString()));
-	// 		response.setContentLength(data.length);
-	// 		response.getOutputStream().write(data);
-
-	// 		return response;
-	// 	} catch (Exception e) {
-	// 		LOGGER.debug(String.format("Unable to load %s %s: %s", service, name, e.getMessage()));
-	// 		throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
-	// 	}
-	// }
-
-	private HttpServletResponse download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts) {
+	private void download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts) {
 		try {
 			ArbitraryDataReader arbitraryDataReader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
 	
@@ -1843,7 +1736,6 @@ public String finalizeUpload(
 			long contentLength = rangeEnd - rangeStart + 1;
 	
 			// Set headers
-			response.setContentType(mimeType);
 			response.setHeader("Accept-Ranges", "bytes");
 	
 			if (isPartial) {
@@ -1854,13 +1746,25 @@ public String finalizeUpload(
 			}
 	
 			OutputStream rawOut = response.getOutputStream();
-	
+			OutputStream base64Out = null;
+			OutputStream gzipOut = null;
 			if (encoding != null && "base64".equalsIgnoreCase(encoding)) {
-				// Stream Base64-encoded output
-				java.util.Base64.Encoder encoder = java.util.Base64.getEncoder();
-				rawOut = encoder.wrap(rawOut);
+				response.setContentType("text/plain");
+
+				String acceptEncoding = request.getHeader("Accept-Encoding");
+				boolean wantsGzip = acceptEncoding != null && acceptEncoding.contains("gzip");
+			
+				if (wantsGzip) {
+					response.setHeader("Content-Encoding", "gzip");
+					gzipOut = new GZIPOutputStream(rawOut);
+					base64Out = java.util.Base64.getEncoder().wrap(gzipOut);
+				} else {
+					base64Out = java.util.Base64.getEncoder().wrap(rawOut);
+				}
+			
+				rawOut = base64Out;
 			} else {
-				// Set Content-Length only when not Base64
+				response.setContentType(mimeType != null ? mimeType : "application/octet-stream");
 				response.setContentLength((int) contentLength);
 			}
 	
@@ -1879,9 +1783,19 @@ public String finalizeUpload(
 					bytesRemaining -= bytesRead;
 				}
 			}
-	
-			return response;
-	
+// Stream finished
+if (base64Out != null) {
+    base64Out.close(); // Also flushes and closes the wrapped gzipOut
+} else if (gzipOut != null) {
+    gzipOut.close(); // Only close gzipOut if it wasn't wrapped by base64Out
+} else {
+    rawOut.flush(); // Flush only the base output stream if nothing was wrapped
+}
+if (!response.isCommitted()) {
+    response.setStatus(HttpServletResponse.SC_OK);
+    response.getWriter().write(" ");
+}
+
 		} catch (IOException | InterruptedException | NumberFormatException | ApiException | DataException e) {
 			LOGGER.debug(String.format("Unable to load %s %s: %s", service, name, e.getMessage()));
 			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
