@@ -1765,7 +1765,7 @@ public String finalizeUpload(
 			if (path == null) {
 				// See if we have a string instead
 				if (string != null) {
-					if (filename == null) {
+					if (filename == null || filename.isBlank()) {
 						// Use current time as filename
 						filename = String.format("qortal-%d", NTP.getTime());
 					}
@@ -1780,7 +1780,7 @@ public String finalizeUpload(
 				}
 				// ... or base64 encoded raw data
 				else if (base64 != null) {
-					if (filename == null) {
+					if (filename == null || filename.isBlank()) {
 						// Use current time as filename
 						filename = String.format("qortal-%d", NTP.getTime());
 					}
