@@ -94,6 +94,7 @@ import org.apache.tika.mime.MimeTypes;
 import javax.ws.rs.core.Response;
 
 import org.glassfish.jersey.media.multipart.FormDataParam;
+import static org.qortal.api.ApiError.REPOSITORY_ISSUE;
 
 @Path("/arbitrary")
 @Tag(name = "Arbitrary")
@@ -914,14 +915,18 @@ public class ArbitraryResource {
 					.entity("Missing or invalid totalSize parameter").build();
 		}
 	
-		File baseTmp = new File(System.getProperty("java.io.tmpdir"));
-		long usableSpace = baseTmp.getUsableSpace();
-		long requiredSpace = totalSize * 2; // chunked + merged file estimate
-	
-		if (usableSpace < requiredSpace) {
-			return Response.status(507).entity("Insufficient disk space").build(); // 507 = Insufficient Storage
+		File uploadDir = new File("uploads-temp");
+		if (!uploadDir.exists()) {
+			uploadDir.mkdirs(); // ensure the folder exists
 		}
-	
+
+		long usableSpace = uploadDir.getUsableSpace();
+		long requiredSpace = totalSize * 2; // estimate for chunks + merge
+
+		if (usableSpace < requiredSpace) {
+			return Response.status(507).entity("Insufficient disk space").build();
+		}
+
 		return Response.ok("Sufficient disk space").build();
 	}
 
@@ -959,14 +964,20 @@ public Response uploadChunkNoIdentifier(@HeaderParam(Security.API_KEY_HEADER) St
     Security.checkApiCallAllowed(request);
 
     try {
-        java.nio.file.Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "qortal-uploads", serviceString, name);
-        Files.createDirectories(tempDir);
+		String safeService = Paths.get(serviceString).getFileName().toString();
+        String safeName = Paths.get(name).getFileName().toString();
+
+		java.nio.file.Path tempDir = Paths.get("uploads-temp", safeService, safeName);
+		Files.createDirectories(tempDir);
+		
+        
 
         java.nio.file.Path chunkFile = tempDir.resolve("chunk_" + index);
         Files.copy(chunkStream, chunkFile, StandardCopyOption.REPLACE_EXISTING);
 
         return Response.ok("Chunk " + index + " received").build();
     } catch (IOException e) {
+		LOGGER.error("Failed to write chunk {} for service '{}' and name '{}'", index, serviceString, name, e);
         return Response.serverError().entity("Failed to write chunk: " + e.getMessage()).build();
     }
 }
@@ -1000,16 +1011,23 @@ public String finalizeUploadNoIdentifier(
     Security.checkApiCallAllowed(request);
     java.nio.file.Path tempFile = null;
     java.nio.file.Path tempDir = null;
-    java.nio.file.Path chunkDir = Paths.get(System.getProperty("java.io.tmpdir"), "qortal-uploads", serviceString, name);
+	java.nio.file.Path chunkDir = null;
+    String safeService = Paths.get(serviceString).getFileName().toString();
+	String safeName = Paths.get(name).getFileName().toString();
+
+
 
     try {
+		chunkDir = Paths.get("uploads-temp", safeService, safeName);
+
         if (!Files.exists(chunkDir) || !Files.isDirectory(chunkDir)) {
             throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "No chunks found for upload");
         }
 
         String safeFilename = (filename == null || filename.isBlank()) ? "qortal-" + NTP.getTime() : filename;
         tempDir = Files.createTempDirectory("qortal-");
-        tempFile = tempDir.resolve(safeFilename);
+        String sanitizedFilename = Paths.get(safeFilename).getFileName().toString();
+		tempFile = tempDir.resolve(sanitizedFilename);
 
         try (OutputStream out = Files.newOutputStream(tempFile, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
             byte[] buffer = new byte[65536];
@@ -1061,6 +1079,13 @@ public String finalizeUploadNoIdentifier(
             }
         }
 
+		Boolean isZipBoolean = false;
+
+		if (isZip != null && isZip) {
+			isZipBoolean = true;
+		}
+        
+
         // ✅ Call upload with `null` as identifier
         return this.upload(
             Service.valueOf(serviceString),
@@ -1069,7 +1094,7 @@ public String finalizeUploadNoIdentifier(
             tempFile.toString(),
             null,
             null,
-            isZip,
+            isZipBoolean,
             fee,
             uploadFilename,
             title,
@@ -1080,6 +1105,8 @@ public String finalizeUploadNoIdentifier(
         );
 
     } catch (IOException e) {
+		LOGGER.error("Failed to merge chunks for service='{}', name='{}'", serviceString, name, e);
+
         throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.REPOSITORY_ISSUE, "Failed to merge chunks: " + e.getMessage());
     } finally {
         if (tempDir != null) {
@@ -1141,7 +1168,12 @@ public Response uploadChunk(@HeaderParam(Security.API_KEY_HEADER) String apiKey,
     Security.checkApiCallAllowed(request);
 
     try {
-        java.nio.file.Path tempDir = Paths.get(System.getProperty("java.io.tmpdir"), "qortal-uploads", serviceString, name, identifier);
+        String safeService = Paths.get(serviceString).getFileName().toString();
+        String safeName = Paths.get(name).getFileName().toString();
+        String safeIdentifier = Paths.get(identifier).getFileName().toString();
+
+        java.nio.file.Path tempDir = Paths.get("uploads-temp", safeService, safeName, safeIdentifier);
+
         Files.createDirectories(tempDir);
 
         java.nio.file.Path chunkFile = tempDir.resolve("chunk_" + index);
@@ -1149,6 +1181,7 @@ public Response uploadChunk(@HeaderParam(Security.API_KEY_HEADER) String apiKey,
 
         return Response.ok("Chunk " + index + " received").build();
     } catch (IOException e) {
+		LOGGER.error("Failed to write chunk {} for service='{}', name='{}', identifier='{}'", index, serviceString, name, identifier, e);
         return Response.serverError().entity("Failed to write chunk: " + e.getMessage()).build();
     }
 }
@@ -1183,9 +1216,19 @@ public String finalizeUpload(
     Security.checkApiCallAllowed(request);
     java.nio.file.Path tempFile = null;
     java.nio.file.Path tempDir = null;
-    java.nio.file.Path chunkDir = Paths.get(System.getProperty("java.io.tmpdir"), "qortal-uploads", serviceString, name, identifier);
+	java.nio.file.Path chunkDir = null;
+
+	
+	
+	
 
     try {
+		String safeService = Paths.get(serviceString).getFileName().toString();
+	String safeName = Paths.get(name).getFileName().toString();
+	String safeIdentifier = Paths.get(identifier).getFileName().toString();
+	java.nio.file.Path baseUploadsDir = Paths.get("uploads-temp"); // relative to Qortal working dir
+	chunkDir = baseUploadsDir.resolve(safeService).resolve(safeName).resolve(safeIdentifier);
+		
         if (!Files.exists(chunkDir) || !Files.isDirectory(chunkDir)) {
             throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "No chunks found for upload");
         }
@@ -1197,7 +1240,9 @@ public String finalizeUpload(
 		} 
 
         tempDir = Files.createTempDirectory("qortal-");
-        tempFile = tempDir.resolve(safeFilename);
+        String sanitizedFilename = Paths.get(safeFilename).getFileName().toString();
+		tempFile = tempDir.resolve(sanitizedFilename);
+
 
         // Step 2: Merge chunks
   
@@ -1253,6 +1298,12 @@ public String finalizeUpload(
             }
         }
 
+
+		Boolean isZipBoolean = false;
+
+		if (isZip != null && isZip) {
+			isZipBoolean = true;
+		}
         
 
         return this.upload(
@@ -1262,7 +1313,7 @@ public String finalizeUpload(
             tempFile.toString(),
             null,
             null,
-            isZip,
+            isZipBoolean,
             fee,
             uploadFilename,
             title,
@@ -1273,6 +1324,8 @@ public String finalizeUpload(
         );
 
     } catch (IOException e) {
+		LOGGER.error("Unexpected error in finalizeUpload for service='{}', name='{}', name='{}'", serviceString, name, identifier, e);
+
         throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.REPOSITORY_ISSUE, "Failed to merge chunks: " + e.getMessage());
     } finally {
         if (tempDir != null) {
