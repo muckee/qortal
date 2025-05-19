@@ -709,14 +709,14 @@ public class ArbitraryResource {
 								   @QueryParam("encoding") String encoding,
 								   @QueryParam("rebuild") boolean rebuild,
 								   @QueryParam("async") boolean async,
-								   @QueryParam("attempts") Integer attempts) {
+								   @QueryParam("attempts") Integer attempts, @QueryParam("attachment") boolean attachment, @QueryParam("attachmentFilename") String attachmentFilename) {
 
 		// Authentication can be bypassed in the settings, for those running public QDN nodes
 		if (!Settings.getInstance().isQDNAuthBypassEnabled()) {
 			Security.checkApiCallAllowed(request);
 		}
 
-		 this.download(service, name, null, filepath, encoding, rebuild, async, attempts);
+		 this.download(service, name, null, filepath, encoding, rebuild, async, attempts, attachment, attachmentFilename);
 	}
 
 	@GET
@@ -743,14 +743,14 @@ public class ArbitraryResource {
 								   @QueryParam("encoding") String encoding,
 								   @QueryParam("rebuild") boolean rebuild,
 								   @QueryParam("async") boolean async,
-								   @QueryParam("attempts") Integer attempts) {
+								   @QueryParam("attempts") Integer attempts, @QueryParam("attachment") boolean attachment, @QueryParam("attachmentFilename") String attachmentFilename) {
 
 		// Authentication can be bypassed in the settings, for those running public QDN nodes
 		if (!Settings.getInstance().isQDNAuthBypassEnabled()) {
 			Security.checkApiCallAllowed(request, null);
 		}
 
-		this.download(service, name, identifier, filepath, encoding, rebuild, async, attempts);
+		this.download(service, name, identifier, filepath, encoding, rebuild, async, attempts, attachment, attachmentFilename);
 	}
 
 
@@ -1900,8 +1900,9 @@ public String finalizeUpload(
 		}
 	}
 
-	private void download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts) {
+	private void download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts, boolean attachment, String attachmentFilename) {
 		try {
+			
 			ArbitraryDataReader arbitraryDataReader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
 	
 			int attempts = 0;
@@ -1948,6 +1949,33 @@ public String finalizeUpload(
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "No file exists at filepath: " + filepath);
 			}
 	
+			if (attachment) {
+				String rawFilename;
+
+				if (attachmentFilename != null && !attachmentFilename.isEmpty()) {
+					// 1. Sanitize first
+					String safeAttachmentFilename = attachmentFilename.replaceAll("[\\\\/:*?\"<>|]", "_");
+				
+					// 2. Check for a valid extension (3–5 alphanumeric chars)
+					if (!safeAttachmentFilename.matches(".*\\.[a-zA-Z0-9]{2,5}$")) {
+						safeAttachmentFilename += ".bin";
+					}
+				
+					rawFilename = safeAttachmentFilename;
+				} else {
+					// Fallback if no filename is provided
+					String baseFilename = (identifier != null && !identifier.isEmpty())
+						? name + "-" + identifier
+						: name;
+					rawFilename = baseFilename.replaceAll("[\\\\/:*?\"<>|]", "_") + ".bin";
+				}
+				
+				// Optional: trim length
+				rawFilename = rawFilename.length() > 100 ? rawFilename.substring(0, 100) : rawFilename;
+				
+				// 3. Set Content-Disposition header
+				response.setHeader("Content-Disposition", "attachment; filename=\"" + rawFilename + "\"");
+			}
 			long fileSize = Files.size(path);
 			String mimeType = context.getMimeType(path.toString());
 			String range = request.getHeader("Range");
