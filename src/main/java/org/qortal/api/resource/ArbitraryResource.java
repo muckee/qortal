@@ -1910,10 +1910,12 @@ public String finalizeUpload(
 				maxAttempts = 5;
 			}
 	
-			// Load the file
+			// Loop until we have data
 			if (async) {
+				// Asynchronous
 				arbitraryDataReader.loadAsynchronously(false, 1);
 			} else {
+				// Synchronous
 				while (!Controller.isStopping()) {
 					attempts++;
 					if (!arbitraryDataReader.isBuilding()) {
@@ -1932,12 +1934,15 @@ public String finalizeUpload(
 	
 			java.nio.file.Path outputPath = arbitraryDataReader.getFilePath();
 			if (outputPath == null) {
+				// Assume the resource doesn't exist
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, "File not found");
 			}
 	
 			if (filepath == null || filepath.isEmpty()) {
+				// No file path supplied - so check if this is a single file resource
 				String[] files = ArrayUtils.removeElement(outputPath.toFile().list(), ".qortal");
 				if (files != null && files.length == 1) {
+					// This is a single file resource
 					filepath = files[0];
 				} else {
 					throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_CRITERIA, "filepath is required for resources containing more than one file");
