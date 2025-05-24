@@ -1,5 +1,8 @@
 package org.qortal.repository.hsqldb;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.qortal.block.BlockChain;
 import org.qortal.data.chat.ActiveChats;
 import org.qortal.data.chat.ActiveChats.DirectChat;
 import org.qortal.data.chat.ActiveChats.GroupChat;
@@ -17,6 +20,8 @@ import java.util.List;
 import static org.qortal.data.chat.ChatMessage.Encoding;
 
 public class HSQLDBChatRepository implements ChatRepository {
+
+	private static final Logger LOGGER = LogManager.getLogger(HSQLDBChatRepository.class);
 
 	protected HSQLDBRepository repository;
 
@@ -142,10 +147,23 @@ public class HSQLDBChatRepository implements ChatRepository {
 
 	@Override
 	public ChatMessage toChatMessage(ChatTransactionData chatTransactionData, Encoding encoding) throws DataException {
+
+		String tableName;
+
+		// if the PrimaryTable is available, then use it
+		if( this.repository.getBlockRepository().getBlockchainHeight() > BlockChain.getInstance().getMultipleNamesPerAccountHeight()) {
+			LOGGER.info("using PrimaryNames for chat transactions");
+			tableName = "PrimaryNames";
+		}
+		else {
+			LOGGER.info("using Names for chat transactions");
+			tableName = "Names";
+		}
+
 		String sql = "SELECT SenderNames.name, RecipientNames.name "
 				+ "FROM ChatTransactions "
-				+ "LEFT OUTER JOIN Names AS SenderNames ON SenderNames.owner = sender "
-				+ "LEFT OUTER JOIN Names AS RecipientNames ON RecipientNames.owner = recipient "
+				+ "LEFT OUTER JOIN " + tableName + " AS SenderNames ON SenderNames.owner = sender "
+				+ "LEFT OUTER JOIN " + tableName + " AS RecipientNames ON RecipientNames.owner = recipient "
 				+ "WHERE signature = ?";
 
 		try (ResultSet resultSet = this.repository.checkedExecute(sql, chatTransactionData.getSignature())) {

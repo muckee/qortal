@@ -4,6 +4,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.qortal.account.PrivateKeyAccount;
+import org.qortal.api.resource.TransactionsResource;
 import org.qortal.block.BlockChain;
 import org.qortal.data.naming.NameData;
 import org.qortal.data.transaction.BuyNameTransactionData;
@@ -22,6 +23,7 @@ import org.qortal.transaction.Transaction;
 import org.qortal.utils.Amounts;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 import static org.junit.Assert.*;
@@ -135,12 +137,25 @@ public class BuySellTests extends Common {
 
 	@Test
 	public void testSellName() throws DataException {
+		// mint passed the feature trigger block
+		BlockUtils.mintBlocks(repository, BlockChain.getInstance().getMultipleNamesPerAccountHeight());
+
 		// Register-name
 		testRegisterName();
+
+		// assert primary name for alice
+		Optional<String> alicePrimaryName1 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName1.isPresent());
+		assertTrue(alicePrimaryName1.get().equals(name));
 
 		// Sell-name
 		SellNameTransactionData transactionData = new SellNameTransactionData(TestTransaction.generateBase(alice), name, price);
 		TransactionUtils.signAndMint(repository, transactionData, alice);
+
+		// assert primary name for alice
+		Optional<String> alicePrimaryName2 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName2.isPresent());
+		assertTrue(alicePrimaryName2.get().equals(name));
 
 		NameData nameData;
 
@@ -148,6 +163,14 @@ public class BuySellTests extends Common {
 		nameData = repository.getNameRepository().fromName(name);
 		assertTrue(nameData.isForSale());
 		assertEquals("price incorrect", price, nameData.getSalePrice());
+
+		// assert alice cannot register another name while primary name is for sale
+		final String name2 = "another name";
+		RegisterNameTransactionData registerSecondNameData = new RegisterNameTransactionData(TestTransaction.generateBase(alice), name2, "{}");
+		Transaction.ValidationResult registrationResult = TransactionUtils.signAndImport(repository, registerSecondNameData, alice);
+
+		// check that registering is not supported while primary name is for sale
+		assertTrue(Transaction.ValidationResult.NOT_SUPPORTED.equals(registrationResult));
 
 		// Orphan sell-name
 		BlockUtils.orphanLastBlock(repository);
@@ -167,6 +190,10 @@ public class BuySellTests extends Common {
 
 		// Orphan sell-name and register-name
 		BlockUtils.orphanBlocks(repository, 2);
+
+		// assert primary name for alice
+		Optional<String> alicePrimaryName3 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName3.isEmpty());
 
 		// Check name no longer exists
 		assertFalse(repository.getNameRepository().nameExists(name));
@@ -261,14 +288,35 @@ public class BuySellTests extends Common {
 
 	@Test
 	public void testBuyName() throws DataException {
+		// move passed primary initiation
+		BlockUtils.mintBlocks(repository, BlockChain.getInstance().getMultipleNamesPerAccountHeight());
+
 		// Register-name and sell-name
 		testSellName();
 
 		String seller = alice.getAddress();
 
+		// assert alice has the name as primary
+		Optional<String> alicePrimaryName1 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName1.isPresent());
+		assertEquals(name, alicePrimaryName1.get());
+
+		// assert bob does not have a primary name
+		Optional<String> bobPrimaryName1 = bob.getPrimaryName();
+		assertTrue(bobPrimaryName1.isEmpty());
+
 		// Buy-name
 		BuyNameTransactionData transactionData = new BuyNameTransactionData(TestTransaction.generateBase(bob), name, price, seller);
 		TransactionUtils.signAndMint(repository, transactionData, bob);
+
+		// assert alice does not have a primary name anymore
+		Optional<String> alicePrimaryName2 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName2.isEmpty());
+
+		// assert bob does have the name as primary
+		Optional<String> bobPrimaryName2 = bob.getPrimaryName();
+		assertTrue(bobPrimaryName2.isPresent());
+		assertEquals(name, bobPrimaryName2.get());
 
 		NameData nameData;
 
@@ -279,6 +327,15 @@ public class BuySellTests extends Common {
 
 		// Orphan buy-name
 		BlockUtils.orphanLastBlock(repository);
+
+		// assert alice has the name as primary
+		Optional<String> alicePrimaryNameOrphaned = alice.getPrimaryName();
+		assertTrue(alicePrimaryNameOrphaned.isPresent());
+		assertEquals(name, alicePrimaryNameOrphaned.get());
+
+		// assert bob does not have a primary name
+		Optional<String> bobPrimaryNameOrphaned = bob.getPrimaryName();
+		assertTrue(bobPrimaryNameOrphaned.isEmpty());
 
 		// Check name is for sale (not sold)
 		nameData = repository.getNameRepository().fromName(name);
@@ -314,6 +371,9 @@ public class BuySellTests extends Common {
 		assertFalse(nameData.isForSale());
 		// Not concerned about price
 		assertEquals(bob.getAddress(), nameData.getOwner());
+
+		assertEquals(alice.getPrimaryName(), alice.determinePrimaryName(TransactionsResource.ConfirmationStatus.CONFIRMED));
+		assertEquals(bob.getPrimaryName(), bob.determinePrimaryName(TransactionsResource.ConfirmationStatus.CONFIRMED));
 	}
 
 	@Test
@@ -373,6 +433,9 @@ public class BuySellTests extends Common {
 		assertTrue(nameData.isForSale());
 		assertEquals("price incorrect", newPrice, nameData.getSalePrice());
 		assertEquals(bob.getAddress(), nameData.getOwner());
+
+		assertEquals(alice.getPrimaryName(), alice.determinePrimaryName(TransactionsResource.ConfirmationStatus.CONFIRMED));
+		assertEquals(bob.getPrimaryName(), bob.determinePrimaryName(TransactionsResource.ConfirmationStatus.CONFIRMED));
 	}
 
 }
