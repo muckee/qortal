@@ -896,7 +896,7 @@ public class ArbitraryResource {
 
 
 	@GET
-	@Path("/check-tmp-space")
+	@Path("/check/tmp")
 	@Produces(MediaType.TEXT_PLAIN)
 	@Operation(
 		summary = "Check if the disk has enough disk space for an upcoming upload",
@@ -921,7 +921,7 @@ public class ArbitraryResource {
 		}
 
 		long usableSpace = uploadDir.getUsableSpace();
-		long requiredSpace = totalSize * 2; // estimate for chunks + merge
+		long requiredSpace = (long)(((double)totalSize) * 2.2); // estimate for chunks + merge
 
 		if (usableSpace < requiredSpace) {
 			return Response.status(507).entity("Insufficient disk space").build();
@@ -1981,61 +1981,79 @@ public String finalizeUpload(
 				// 3. Set Content-Disposition header
 				response.setHeader("Content-Disposition", "attachment; filename=\"" + rawFilename + "\"");
 			}
-			long fileSize = Files.size(path);
-			String mimeType = context.getMimeType(path.toString());
-			String range = request.getHeader("Range");
-	
-			long rangeStart = 0;
-			long rangeEnd = fileSize - 1;
-			boolean isPartial = false;
-	
-			if (range != null && encoding == null) {
-				range = range.replace("bytes=", "");
-				String[] parts = range.split("-");
-				if (parts.length > 0 && !parts[0].isEmpty()) {
-					rangeStart = Long.parseLong(parts[0]);
-				}
-				if (parts.length > 1 && !parts[1].isEmpty()) {
-					rangeEnd = Long.parseLong(parts[1]);
-				}
-				isPartial = true;
-			}
-	
-			long contentLength = rangeEnd - rangeStart + 1;
-	
-			// Set headers
-			response.setHeader("Accept-Ranges", "bytes");
-	
-			if (isPartial) {
-				response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
-				response.setHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, fileSize));
-			} else {
-				response.setStatus(HttpServletResponse.SC_OK);
-			}
-	
-			OutputStream rawOut = response.getOutputStream();
-			OutputStream base64Out = null;
-			OutputStream gzipOut = null;
-			if (encoding != null && "base64".equalsIgnoreCase(encoding)) {
-				response.setContentType("text/plain");
+			// Determine the total size of the requested file
+				long fileSize = Files.size(path);
+				String mimeType = context.getMimeType(path.toString());
 
-				String acceptEncoding = request.getHeader("Accept-Encoding");
-				boolean wantsGzip = acceptEncoding != null && acceptEncoding.contains("gzip");
-			
-				if (wantsGzip) {
-					response.setHeader("Content-Encoding", "gzip");
-					gzipOut = new GZIPOutputStream(rawOut);
-					base64Out = java.util.Base64.getEncoder().wrap(gzipOut);
-				} else {
-					base64Out = java.util.Base64.getEncoder().wrap(rawOut);
+				// Attempt to read the "Range" header from the request to support partial content delivery (e.g., for video streaming or resumable downloads)
+				String range = request.getHeader("Range");
+
+				long rangeStart = 0;
+				long rangeEnd = fileSize - 1;
+				boolean isPartial = false;
+
+				// If a Range header is present and no base64 encoding is requested, parse the range values
+				if (range != null && encoding == null) {
+					range = range.replace("bytes=", ""); // Remove the "bytes=" prefix
+					String[] parts = range.split("-"); // Split the range into start and end
+
+					// Parse range start
+					if (parts.length > 0 && !parts[0].isEmpty()) {
+						rangeStart = Long.parseLong(parts[0]);
+					}
+
+					// Parse range end, if present
+					if (parts.length > 1 && !parts[1].isEmpty()) {
+						rangeEnd = Long.parseLong(parts[1]);
+					}
+
+					isPartial = true; // Indicate that this is a partial content request
 				}
-			
-				rawOut = base64Out;
-			} else {
-				response.setContentType(mimeType != null ? mimeType : "application/octet-stream");
-				response.setContentLength((int) contentLength);
-			}
-	
+
+				// Calculate how many bytes should be sent in the response
+				long contentLength = rangeEnd - rangeStart + 1;
+
+				// Inform the client that byte ranges are supported
+				response.setHeader("Accept-Ranges", "bytes");
+
+				if (isPartial) {
+					// If partial content was requested, return 206 Partial Content with appropriate headers
+					response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
+					response.setHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, fileSize));
+				} else {
+					// Otherwise, return the entire file with status 200 OK
+					response.setStatus(HttpServletResponse.SC_OK);
+				}
+
+				// Initialize output streams for writing the file to the response
+				OutputStream rawOut = response.getOutputStream();
+				OutputStream base64Out = null;
+				OutputStream gzipOut = null;
+
+				if (encoding != null && "base64".equalsIgnoreCase(encoding)) {
+					// If base64 encoding is requested, override content type
+					response.setContentType("text/plain");
+
+					// Check if the client accepts gzip encoding
+					String acceptEncoding = request.getHeader("Accept-Encoding");
+					boolean wantsGzip = acceptEncoding != null && acceptEncoding.contains("gzip");
+
+					if (wantsGzip) {
+						// Wrap output in GZIP and Base64 streams if gzip is accepted
+						response.setHeader("Content-Encoding", "gzip");
+						gzipOut = new GZIPOutputStream(rawOut);
+						base64Out = java.util.Base64.getEncoder().wrap(gzipOut);
+					} else {
+						// Wrap output in Base64 only
+						base64Out = java.util.Base64.getEncoder().wrap(rawOut);
+					}
+
+					rawOut = base64Out; // Use the wrapped stream for writing
+				} else {
+					// For raw binary output, set the content type and length
+					response.setContentType(mimeType != null ? mimeType : "application/octet-stream");
+					response.setContentLength((int) contentLength);
+				}
 			// Stream file content
 			try (InputStream inputStream = Files.newInputStream(path)) {
 				if (rangeStart > 0) {
@@ -2064,9 +2082,13 @@ if (!response.isCommitted()) {
     response.getWriter().write(" ");
 }
 
-		} catch (IOException | InterruptedException | NumberFormatException | ApiException | DataException e) {
-			LOGGER.debug(String.format("Unable to load %s %s: %s", service, name, e.getMessage()));
+		} catch (IOException | InterruptedException  | ApiException | DataException e) {
+			LOGGER.error(String.format("Unable to load %s %s: %s", service, name, e.getMessage()), e);
 			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
+		}
+		catch ( NumberFormatException e) {
+			LOGGER.error(String.format("Unable to load %s %s: %s", service, name, e.getMessage()), e);
+			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_DATA, e.getMessage());
 		}
 	}
 	
