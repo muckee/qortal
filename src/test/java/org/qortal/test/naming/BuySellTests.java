@@ -133,6 +133,11 @@ public class BuySellTests extends Common {
 		// check that the order is correct
 		assertEquals(name1, namesByOwner.get(0).getName());
 
+		SellNameTransactionData sellPrimaryNameData = new SellNameTransactionData(TestTransaction.generateBase(alice), name, price);
+		Transaction.ValidationResult sellPrimaryNameResult = TransactionUtils.signAndImport(repository, sellPrimaryNameData, alice);
+
+		// check that selling primary name is not supported while owning multiple addresses
+		assertTrue(Transaction.ValidationResult.NOT_SUPPORTED.equals(sellPrimaryNameResult));
 	}
 
 	@Test
@@ -438,4 +443,60 @@ public class BuySellTests extends Common {
 		assertEquals(bob.getPrimaryName(), bob.determinePrimaryName(TransactionsResource.ConfirmationStatus.CONFIRMED));
 	}
 
+	@Test
+	public void testBuyInvalidationDuringPrimaryNameSale() throws DataException {
+		// mint passed the feature trigger block
+		BlockUtils.mintBlocks(repository, BlockChain.getInstance().getMultipleNamesPerAccountHeight());
+
+		// Register-name
+		testRegisterName();
+
+		// assert primary name for alice
+		Optional<String> alicePrimaryName1 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName1.isPresent());
+		assertTrue(alicePrimaryName1.get().equals(name));
+
+		// Sell-name
+		SellNameTransactionData transactionData = new SellNameTransactionData(TestTransaction.generateBase(alice), name, price);
+		TransactionUtils.signAndMint(repository, transactionData, alice);
+
+		// assert primary name for alice
+		Optional<String> alicePrimaryName2 = alice.getPrimaryName();
+		assertTrue(alicePrimaryName2.isPresent());
+		assertTrue(alicePrimaryName2.get().equals(name));
+
+		NameData nameData;
+
+		// Check name is for sale
+		nameData = repository.getNameRepository().fromName(name);
+		assertTrue(nameData.isForSale());
+		assertEquals("price incorrect", price, nameData.getSalePrice());
+
+		// assert alice cannot register another name while primary name is for sale
+		final String name2 = "another name";
+		RegisterNameTransactionData registerSecondNameData = new RegisterNameTransactionData(TestTransaction.generateBase(alice), name2, "{}");
+		Transaction.ValidationResult registrationResult = TransactionUtils.signAndImport(repository, registerSecondNameData, alice);
+
+		// check that registering is not supported while primary name is for sale
+		assertTrue(Transaction.ValidationResult.NOT_SUPPORTED.equals(registrationResult));
+
+		String bobName = "bob";
+		RegisterNameTransactionData bobRegisterData = new RegisterNameTransactionData(TestTransaction.generateBase(bob), bobName, "{}");
+		transactionData.setFee(new RegisterNameTransaction(null, null).getUnitFee(bobRegisterData.getTimestamp()));
+		TransactionUtils.signAndMint(repository, bobRegisterData, bob);
+
+		Optional<String> bobPrimaryName = bob.getPrimaryName();
+
+		assertTrue(bobPrimaryName.isPresent());
+		assertEquals(bobName, bobPrimaryName.get());
+
+		SellNameTransactionData bobSellData = new SellNameTransactionData(TestTransaction.generateBase(bob), bobName, price);
+		TransactionUtils.signAndMint(repository, bobSellData, bob);
+
+		BuyNameTransactionData aliceBuyData = new BuyNameTransactionData(TestTransaction.generateBase(alice), bobName, price, bob.getAddress());
+		Transaction.ValidationResult aliceBuyResult = TransactionUtils.signAndImport(repository, aliceBuyData, alice);
+
+		// check that buying is not supported while primary name is for sale
+		assertTrue(Transaction.ValidationResult.NOT_SUPPORTED.equals(aliceBuyResult));
+	}
 }

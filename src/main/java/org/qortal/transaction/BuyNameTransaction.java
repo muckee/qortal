@@ -49,6 +49,15 @@ public class BuyNameTransaction extends Transaction {
 
 	@Override
 	public ValidationResult isValid() throws DataException {
+		Optional<String> buyerPrimaryName = this.getBuyer().getPrimaryName();
+		if( buyerPrimaryName.isPresent()  ) {
+
+			NameData nameData = repository.getNameRepository().fromName(buyerPrimaryName.get());
+			if (nameData.isForSale()) {
+				return ValidationResult.NOT_SUPPORTED;
+			}
+		}
+
 		String name = this.buyNameTransactionData.getName();
 
 		// Check seller address is valid
