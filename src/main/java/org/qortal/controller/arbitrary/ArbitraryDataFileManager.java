@@ -212,8 +212,7 @@ public class ArbitraryDataFileManager extends Thread {
             arbitraryDataFileRequests.remove(hash58);
             LOGGER.trace(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
 
-            // We may need to remove the file list request, if we have all the files for this transaction
-            this.handleFileListRequests(signature);
+           
 
             if (response == null) {
                 LOGGER.debug("Received null response from peer {}", peer);
@@ -258,6 +257,9 @@ public class ArbitraryDataFileManager extends Thread {
             }
         }
 
+        // We may need to remove the file list request, if we have all the files for this transaction
+        this.handleFileListRequests(signature);
+
         return arbitraryDataFile;
     }
 
@@ -270,10 +272,12 @@ public class ArbitraryDataFileManager extends Thread {
                 return;
             }
 
-            boolean allChunksExist = ArbitraryTransactionUtils.allChunksExist(arbitraryTransactionData);
+            boolean completeFileExists = ArbitraryTransactionUtils.completeFileExists(arbitraryTransactionData);
 
-            if (allChunksExist) {
-                // Update requests map to reflect that we've received all chunks
+            if (completeFileExists) {
+                String signature58 = Base58.encode(arbitraryTransactionData.getSignature());
+                LOGGER.info("All chunks or complete file exist for transaction {}", signature58);
+            
                 ArbitraryDataFileListManager.getInstance().deleteFileListRequestsForSignature(signature);
             }
 

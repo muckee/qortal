@@ -1902,7 +1902,6 @@ public String finalizeUpload(
 
 	private void download(Service service, String name, String identifier, String filepath, String encoding, boolean rebuild, boolean async, Integer maxAttempts, boolean attachment, String attachmentFilename) {
 		try {
-			
 			ArbitraryDataReader arbitraryDataReader = new ArbitraryDataReader(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
 	
 			int attempts = 0;
@@ -1928,7 +1927,6 @@ public String finalizeUpload(
 							}
 						}
 					}
-					Thread.sleep(3000L);
 				}
 			}
 	
@@ -1956,16 +1954,16 @@ public String finalizeUpload(
 	
 			if (attachment) {
 				String rawFilename;
-
+	
 				if (attachmentFilename != null && !attachmentFilename.isEmpty()) {
 					// 1. Sanitize first
 					String safeAttachmentFilename = attachmentFilename.replaceAll("[\\\\/:*?\"<>|]", "_");
-				
+	
 					// 2. Check for a valid extension (3–5 alphanumeric chars)
 					if (!safeAttachmentFilename.matches(".*\\.[a-zA-Z0-9]{2,5}$")) {
 						safeAttachmentFilename += ".bin";
 					}
-				
+	
 					rawFilename = safeAttachmentFilename;
 				} else {
 					// Fallback if no filename is provided
@@ -1974,70 +1972,74 @@ public String finalizeUpload(
 						: name;
 					rawFilename = baseFilename.replaceAll("[\\\\/:*?\"<>|]", "_") + ".bin";
 				}
-				
+	
 				// Optional: trim length
 				rawFilename = rawFilename.length() > 100 ? rawFilename.substring(0, 100) : rawFilename;
-				
+	
 				// 3. Set Content-Disposition header
 				response.setHeader("Content-Disposition", "attachment; filename=\"" + rawFilename + "\"");
 			}
+	
 			// Determine the total size of the requested file
-				long fileSize = Files.size(path);
-				String mimeType = context.getMimeType(path.toString());
-
-				// Attempt to read the "Range" header from the request to support partial content delivery (e.g., for video streaming or resumable downloads)
-				String range = request.getHeader("Range");
-
-				long rangeStart = 0;
-				long rangeEnd = fileSize - 1;
-				boolean isPartial = false;
-
-				// If a Range header is present and no base64 encoding is requested, parse the range values
-				if (range != null && encoding == null) {
-					range = range.replace("bytes=", ""); // Remove the "bytes=" prefix
-					String[] parts = range.split("-"); // Split the range into start and end
-
-					// Parse range start
-					if (parts.length > 0 && !parts[0].isEmpty()) {
-						rangeStart = Long.parseLong(parts[0]);
-					}
-
-					// Parse range end, if present
-					if (parts.length > 1 && !parts[1].isEmpty()) {
-						rangeEnd = Long.parseLong(parts[1]);
-					}
-
-					isPartial = true; // Indicate that this is a partial content request
+			long fileSize = Files.size(path);
+			String mimeType = context.getMimeType(path.toString());
+	
+			// Attempt to read the "Range" header from the request to support partial content delivery (e.g., for video streaming or resumable downloads)
+			String range = request.getHeader("Range");
+	
+			long rangeStart = 0;
+			long rangeEnd = fileSize - 1;
+			boolean isPartial = false;
+	
+			// If a Range header is present and no base64 encoding is requested, parse the range values
+			if (range != null && encoding == null) {
+				range = range.replace("bytes=", ""); // Remove the "bytes=" prefix
+				String[] parts = range.split("-"); // Split the range into start and end
+	
+				// Parse range start
+				if (parts.length > 0 && !parts[0].isEmpty()) {
+					rangeStart = Long.parseLong(parts[0]);
 				}
-
-				// Calculate how many bytes should be sent in the response
-				long contentLength = rangeEnd - rangeStart + 1;
-
-				// Inform the client that byte ranges are supported
-				response.setHeader("Accept-Ranges", "bytes");
-
-				if (isPartial) {
-					// If partial content was requested, return 206 Partial Content with appropriate headers
-					response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
-					response.setHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, fileSize));
-				} else {
-					// Otherwise, return the entire file with status 200 OK
-					response.setStatus(HttpServletResponse.SC_OK);
+	
+				// Parse range end, if present
+				if (parts.length > 1 && !parts[1].isEmpty()) {
+					rangeEnd = Long.parseLong(parts[1]);
 				}
-
-				// Initialize output streams for writing the file to the response
-				OutputStream rawOut = response.getOutputStream();
-				OutputStream base64Out = null;
-				OutputStream gzipOut = null;
-
+	
+				isPartial = true; // Indicate that this is a partial content request
+			}
+	
+			// Calculate how many bytes should be sent in the response
+			long contentLength = rangeEnd - rangeStart + 1;
+	
+			// Inform the client that byte ranges are supported
+			response.setHeader("Accept-Ranges", "bytes");
+	
+			if (isPartial) {
+				// If partial content was requested, return 206 Partial Content with appropriate headers
+				response.setStatus(HttpServletResponse.SC_PARTIAL_CONTENT);
+				response.setHeader("Content-Range", String.format("bytes %d-%d/%d", rangeStart, rangeEnd, fileSize));
+			} else {
+				// Otherwise, return the entire file with status 200 OK
+				response.setStatus(HttpServletResponse.SC_OK);
+			}
+	
+			// Initialize output streams for writing the file to the response
+			OutputStream rawOut = null;
+			OutputStream base64Out = null;
+			OutputStream gzipOut = null;
+	
+			try {
+				rawOut = response.getOutputStream();
+	
 				if (encoding != null && "base64".equalsIgnoreCase(encoding)) {
 					// If base64 encoding is requested, override content type
 					response.setContentType("text/plain");
-
+	
 					// Check if the client accepts gzip encoding
 					String acceptEncoding = request.getHeader("Accept-Encoding");
 					boolean wantsGzip = acceptEncoding != null && acceptEncoding.contains("gzip");
-
+	
 					if (wantsGzip) {
 						// Wrap output in GZIP and Base64 streams if gzip is accepted
 						response.setHeader("Content-Encoding", "gzip");
@@ -2047,50 +2049,62 @@ public String finalizeUpload(
 						// Wrap output in Base64 only
 						base64Out = java.util.Base64.getEncoder().wrap(rawOut);
 					}
-
+	
 					rawOut = base64Out; // Use the wrapped stream for writing
 				} else {
 					// For raw binary output, set the content type and length
 					response.setContentType(mimeType != null ? mimeType : "application/octet-stream");
 					response.setContentLength((int) contentLength);
 				}
-			// Stream file content
-			try (InputStream inputStream = Files.newInputStream(path)) {
-				if (rangeStart > 0) {
-					inputStream.skip(rangeStart);
+	
+				// Stream file content
+				try (InputStream inputStream = Files.newInputStream(path)) {
+					if (rangeStart > 0) {
+						inputStream.skip(rangeStart);
+					}
+	
+					byte[] buffer = new byte[65536];
+					long bytesRemaining = contentLength;
+					int bytesRead;
+	
+					while (bytesRemaining > 0 && (bytesRead = inputStream.read(buffer, 0, (int) Math.min(buffer.length, bytesRemaining))) != -1) {
+						rawOut.write(buffer, 0, bytesRead);
+						bytesRemaining -= bytesRead;
+					}
 				}
 	
-				byte[] buffer = new byte[65536];
-				long bytesRemaining = contentLength;
-				int bytesRead;
-	
-				while (bytesRemaining > 0 && (bytesRead = inputStream.read(buffer, 0, (int) Math.min(buffer.length, bytesRemaining))) != -1) {
-					rawOut.write(buffer, 0, bytesRead);
-					bytesRemaining -= bytesRead;
+				// Stream finished
+				if (base64Out != null) {
+					base64Out.close(); // Also flushes and closes the wrapped gzipOut
+				} else if (gzipOut != null) {
+					gzipOut.close(); // Only close gzipOut if it wasn't wrapped by base64Out
+				} else {
+					rawOut.flush(); // Flush only the base output stream if nothing was wrapped
 				}
+	
+				if (!response.isCommitted()) {
+					response.setStatus(HttpServletResponse.SC_OK);
+					response.getWriter().write(" ");
+				}
+	
+			} catch (IOException e) {
+				// Streaming errors should not rethrow — just log
+				LOGGER.warn(String.format("Streaming error for %s %s: %s", service, name, e.getMessage()), e);
 			}
-// Stream finished
-if (base64Out != null) {
-    base64Out.close(); // Also flushes and closes the wrapped gzipOut
-} else if (gzipOut != null) {
-    gzipOut.close(); // Only close gzipOut if it wasn't wrapped by base64Out
-} else {
-    rawOut.flush(); // Flush only the base output stream if nothing was wrapped
-}
-if (!response.isCommitted()) {
-    response.setStatus(HttpServletResponse.SC_OK);
-    response.getWriter().write(" ");
-}
-
-		} catch (IOException | InterruptedException  | ApiException | DataException e) {
-			LOGGER.error(String.format("Unable to load %s %s: %s", service, name, e.getMessage()), e);
-			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
-		}
-		catch ( NumberFormatException e) {
-			LOGGER.error(String.format("Unable to load %s %s: %s", service, name, e.getMessage()), e);
-			throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_DATA, e.getMessage());
+	
+		} catch (IOException | ApiException | DataException e) {
+			LOGGER.warn(String.format("Unable to load %s %s: %s", service, name, e.getMessage()), e);
+			if (!response.isCommitted()) {
+				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
+			}
+		} catch (NumberFormatException e) {
+			LOGGER.warn(String.format("Invalid range for %s %s: %s", service, name, e.getMessage()), e);
+			if (!response.isCommitted()) {
+				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_DATA, e.getMessage());
+			}
 		}
 	}
+	
 	
 
 	private FileProperties getFileProperties(Service service, String name, String identifier) {
