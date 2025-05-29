@@ -400,7 +400,7 @@ public class ArbitraryDataFileListManager {
         String signature58 = Base58.encode(signature);
         for (Iterator<Map.Entry<Integer, Triple<String, Peer, Long>>> it = arbitraryDataFileListRequests.entrySet().iterator(); it.hasNext();) {
             Map.Entry<Integer, Triple<String, Peer, Long>> entry = it.next();
-            if (entry == null || entry.getKey() == null || entry.getValue() != null) {
+            if (entry == null || entry.getKey() == null || entry.getValue() == null) {
                 continue;
             }
             if (Objects.equals(entry.getValue().getA(), signature58)) {
