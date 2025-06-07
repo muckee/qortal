@@ -2093,12 +2093,12 @@ public String finalizeUpload(
 			}
 	
 		} catch (IOException | ApiException | DataException e) {
-			LOGGER.warn(String.format("Unable to load %s %s: %s", service, name, e.getMessage()), e);
+			LOGGER.warn(String.format("Unable to load %s %s: %s", service, name, e.getMessage()));
 			if (!response.isCommitted()) {
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.FILE_NOT_FOUND, e.getMessage());
 			}
 		} catch (NumberFormatException e) {
-			LOGGER.warn(String.format("Invalid range for %s %s: %s", service, name, e.getMessage()), e);
+			LOGGER.warn(String.format("Invalid range for %s %s: %s", service, name, e.getMessage()));
 			if (!response.isCommitted()) {
 				throw ApiExceptionFactory.INSTANCE.createCustomException(request, ApiError.INVALID_DATA, e.getMessage());
 			}

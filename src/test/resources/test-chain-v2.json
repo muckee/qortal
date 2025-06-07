@@ -115,7 +115,8 @@
 		"ignoreLevelForRewardShareHeight": 9999999999999,
 		"nullGroupMembershipHeight": 20,
 		"adminQueryFixHeight": 9999999999999,
-		"multipleNamesPerAccountHeight": 10
+		"multipleNamesPerAccountHeight": 10,
+		"mintedBlocksAdjustmentRemovalHeight": 9999999999999
 	},
 	"genesisInfo": {
 		"version": 4,
