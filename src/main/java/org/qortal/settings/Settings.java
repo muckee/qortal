@@ -759,14 +759,14 @@ public class Settings {
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA_FILE_LIST", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE_LIST", 5));
+		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA_FILE_LIST", 50));
+		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE_LIST", 50));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_SIGNATURES", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_METADATA", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_METADATA", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("GET_TRANSACTION", 10));
-		maxThreadsPerMessageType.add(new ThreadLimit("TRANSACTION_SIGNATURES", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("TRADE_PRESENCES", 5));
+		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_METADATA", 50));
+		maxThreadsPerMessageType.add(new ThreadLimit("GET_TRANSACTION", 50));
+		maxThreadsPerMessageType.add(new ThreadLimit("TRANSACTION_SIGNATURES", 50));
+		maxThreadsPerMessageType.add(new ThreadLimit("TRADE_PRESENCES", 50));
 	}
 
 	// Getters / setters

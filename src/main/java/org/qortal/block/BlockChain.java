@@ -93,7 +93,8 @@ public class BlockChain {
 		nullGroupMembershipHeight,
 		ignoreLevelForRewardShareHeight,
 		adminQueryFixHeight,
-		multipleNamesPerAccountHeight
+		multipleNamesPerAccountHeight,
+		mintedBlocksAdjustmentRemovalHeight
 	}
 
 	// Custom transaction fees
@@ -693,6 +694,10 @@ public class BlockChain {
 
 	public int getMultipleNamesPerAccountHeight() {
 		return this.featureTriggers.get(FeatureTrigger.multipleNamesPerAccountHeight.name()).intValue();
+	}
+
+	public int getMintedBlocksAdjustmentRemovalHeight() {
+		return this.featureTriggers.get(FeatureTrigger.mintedBlocksAdjustmentRemovalHeight.name()).intValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp

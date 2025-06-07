@@ -25,6 +25,8 @@ import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class ArbitraryDataFileManager extends Thread {
@@ -48,7 +50,7 @@ public class ArbitraryDataFileManager extends Thread {
     /**
      * List to keep track of any arbitrary data file hash responses
      */
-    public final List<ArbitraryFileListResponseInfo> arbitraryDataFileHashResponses = Collections.synchronizedList(new ArrayList<>());
+    private final List<ArbitraryFileListResponseInfo> arbitraryDataFileHashResponses = Collections.synchronizedList(new ArrayList<>());
 
     /**
      * List to keep track of peers potentially available for direct connections, based on recent requests
@@ -67,6 +69,7 @@ public class ArbitraryDataFileManager extends Thread {
 
 
     private ArbitraryDataFileManager() {
+        this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate( this::processResponses, 60, 1, TimeUnit.SECONDS);
     }
 
     public static ArbitraryDataFileManager getInstance() {
@@ -81,13 +84,6 @@ public class ArbitraryDataFileManager extends Thread {
         Thread.currentThread().setName("Arbitrary Data File Manager");
 
         try {
-            // Use a fixed thread pool to execute the arbitrary data file requests
-            int threadCount = 5;
-            ExecutorService arbitraryDataFileRequestExecutor = Executors.newFixedThreadPool(threadCount);
-            for (int i = 0; i < threadCount; i++) {
-                arbitraryDataFileRequestExecutor.execute(new ArbitraryDataFileRequestThread());
-            }
-
             while (!isStopping) {
                 // Nothing to do yet
                 Thread.sleep(1000);
@@ -112,7 +108,6 @@ public class ArbitraryDataFileManager extends Thread {
 
         final long relayMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_RELAY_TIMEOUT;
         arbitraryRelayMap.removeIf(entry -> entry == null || entry.getTimestamp() == null || entry.getTimestamp() < relayMinimumTimestamp);
-        arbitraryDataFileHashResponses.removeIf(entry -> entry.getTimestamp() < relayMinimumTimestamp);
 
         final long directConnectionInfoMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_DIRECT_CONNECTION_INFO_TIMEOUT;
         directConnectionInfo.removeIf(entry -> entry.getTimestamp() < directConnectionInfoMinimumTimestamp);
@@ -125,8 +120,7 @@ public class ArbitraryDataFileManager extends Thread {
 
     // Fetch data files by hash
 
-    public boolean fetchArbitraryDataFiles(Repository repository,
-                                           Peer peer,
+    public boolean fetchArbitraryDataFiles(Peer peer,
                                            byte[] signature,
                                            ArbitraryTransactionData arbitraryTransactionData,
                                            List<byte[]> hashes) throws DataException {
@@ -151,15 +145,9 @@ public class ArbitraryDataFileManager extends Thread {
                     if (receivedArbitraryDataFile != null) {
                         LOGGER.debug("Received data file {} from peer {}. Time taken: {} ms", receivedArbitraryDataFile.getHash58(), peer, (endTime-startTime));
                         receivedAtLeastOneFile = true;
-
-                        // Remove this hash from arbitraryDataFileHashResponses now that we have received it
-                        arbitraryDataFileHashResponses.remove(hash58);
                     }
                     else {
                         LOGGER.debug("Peer {} didn't respond with data file {} for signature {}. Time taken: {} ms", peer, Base58.encode(hash), Base58.encode(signature), (endTime-startTime));
-
-                        // Remove this hash from arbitraryDataFileHashResponses now that we have failed to receive it
-                        arbitraryDataFileHashResponses.remove(hash58);
 
                         // Stop asking for files from this peer
                         break;
@@ -168,10 +156,6 @@ public class ArbitraryDataFileManager extends Thread {
                 else {
                     LOGGER.trace("Already requesting data file {} for signature {} from peer {}", arbitraryDataFile, Base58.encode(signature), peer);
                 }
-            }
-            else {
-                // Remove this hash from arbitraryDataFileHashResponses because we have a local copy
-                arbitraryDataFileHashResponses.remove(hash58);
             }
         }
 
@@ -189,6 +173,38 @@ public class ArbitraryDataFileManager extends Thread {
         }
 
         return receivedAtLeastOneFile;
+    }
+
+    // Lock to synchronize access to the list
+    private final Object arbitraryDataFileHashResponseLock = new Object();
+
+    // Scheduled executor service to process messages every second
+    private final ScheduledExecutorService arbitraryDataFileHashResponseScheduler = Executors.newScheduledThreadPool(1);
+
+
+    public void addResponse( ArbitraryFileListResponseInfo responseInfo ) {
+
+        synchronized (arbitraryDataFileHashResponseLock) {
+            this.arbitraryDataFileHashResponses.add(responseInfo);
+        }
+    }
+
+    private void processResponses() {
+        try {
+            List<ArbitraryFileListResponseInfo> responsesToProcess;
+            synchronized (arbitraryDataFileHashResponseLock) {
+                responsesToProcess = new ArrayList<>(arbitraryDataFileHashResponses);
+                arbitraryDataFileHashResponses.clear();
+            }
+
+            if (responsesToProcess.isEmpty()) return;
+
+            Long now = NTP.getTime();
+
+            ArbitraryDataFileRequestThread.getInstance().processFileHashes(now, responsesToProcess, this);
+        } catch (Exception e) {
+            LOGGER.error(e.getMessage(), e);
+        }
     }
 
     private ArbitraryDataFile fetchArbitraryDataFile(Peer peer, Peer requestingPeer, ArbitraryTransactionData arbitraryTransactionData, byte[] signature, byte[] hash, Message originalMessage) throws DataException {

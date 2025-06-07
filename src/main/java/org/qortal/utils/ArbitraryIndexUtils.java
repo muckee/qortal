@@ -131,15 +131,11 @@ public class ArbitraryIndexUtils {
                     )
             );
 
-            LOGGER.info("processed indices by term: count = " + indicesByTerm.size());
-
             // lock, clear old, load new
             synchronized( IndexCache.getInstance().getIndicesByTerm() ) {
                 IndexCache.getInstance().getIndicesByTerm().clear();
                 IndexCache.getInstance().getIndicesByTerm().putAll(indicesByTerm);
             }
-
-            LOGGER.info("loaded indices by term");
 
             LOGGER.debug("processing indices by issuer ...");
             Map<String, List<ArbitraryDataIndexDetail>> indicesByIssuer
@@ -154,15 +150,11 @@ public class ArbitraryIndexUtils {
                     )
             );
 
-            LOGGER.info("processed indices by issuer: count = " + indicesByIssuer.size());
-
             // lock, clear old, load new
             synchronized( IndexCache.getInstance().getIndicesByIssuer() ) {
                 IndexCache.getInstance().getIndicesByIssuer().clear();
                 IndexCache.getInstance().getIndicesByIssuer().putAll(indicesByIssuer);
             }
-
-            LOGGER.info("loaded indices by issuer");
         }
     }
 
@@ -221,7 +213,6 @@ public class ArbitraryIndexUtils {
                         }
                     }
                 }
-                Thread.sleep(3000L);
             }
 
             java.nio.file.Path outputPath = arbitraryDataReader.getFilePath();
