@@ -73,8 +73,6 @@ import java.util.stream.Collectors;
 
 public class Controller extends Thread {
 
-	public static HSQLDBRepositoryFactory REPOSITORY_FACTORY;
-
 	static {
 		// This must go before any calls to LogManager/Logger
 		System.setProperty("log4j2.formatMsgNoLookups", "true");
@@ -405,8 +403,8 @@ public class Controller extends Thread {
 
 		LOGGER.info("Starting repository");
 		try {
-			REPOSITORY_FACTORY = new HSQLDBRepositoryFactory(getRepositoryUrl());
-			RepositoryManager.setRepositoryFactory(REPOSITORY_FACTORY);
+			HSQLDBRepositoryFactory repositoryFactory = new HSQLDBRepositoryFactory(getRepositoryUrl());
+			RepositoryManager.setRepositoryFactory(repositoryFactory);
 			RepositoryManager.setRequestedCheckpoint(Boolean.TRUE);
 
 			try (final Repository repository = RepositoryManager.getRepository()) {
