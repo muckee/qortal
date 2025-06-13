@@ -1735,7 +1735,7 @@ public class Block {
 
 			for (int newLevel = maximumLevel; newLevel >= 0; --newLevel)
 				if (effectiveBlocksMinted >= cumulativeBlocksByLevel.get(newLevel)) {
-					if (newLevel > accountData.getLevel()) {
+					if (newLevel != accountData.getLevel()) {
 						// Account has increased in level!
 						accountData.setLevel(newLevel);
 						bumpedAccounts.put(accountData.getAddress(), newLevel);
@@ -2141,7 +2141,7 @@ public class Block {
 
 			int blocksMintedAdjustment
 				=
-				(this.blockData.getHeight() > BlockChain.getInstance().getMintedBlocksAdjustmentRemovalHeight())
+				(this.blockData.getHeight() -1 > BlockChain.getInstance().getMintedBlocksAdjustmentRemovalHeight())
 				?
 				0
 				:
@@ -2151,7 +2151,7 @@ public class Block {
 
 			for (int newLevel = maximumLevel; newLevel >= 0; --newLevel)
 				if (effectiveBlocksMinted >= cumulativeBlocksByLevel.get(newLevel)) {
-					if (newLevel < accountData.getLevel()) {
+					if (newLevel != accountData.getLevel()) {
 						// Account has decreased in level!
 						accountData.setLevel(newLevel);
 						repository.getAccountRepository().setLevel(accountData);

@@ -116,7 +116,7 @@
 		"nullGroupMembershipHeight": 20,
 		"adminQueryFixHeight": 9999999999999,
 		"multipleNamesPerAccountHeight": 10,
-		"mintedBlocksAdjustmentRemovalHeight": 9999999999999
+		"mintedBlocksAdjustmentRemovalHeight": 27
 	},
 	"genesisInfo": {
 		"version": 4,
