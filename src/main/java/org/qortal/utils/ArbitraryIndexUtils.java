@@ -53,7 +53,7 @@ public class ArbitraryIndexUtils {
                 try {
                     fillCache(IndexCache.getInstance());
                 } catch (IOException | DataException e) {
-                    LOGGER.error(e.getMessage(), e);
+                    LOGGER.warn(e.getMessage());
                 }
             }
         };
