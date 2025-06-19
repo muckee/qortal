@@ -756,14 +756,14 @@ public class Settings {
 	private void setAdditionalDefaults() {
 		// Populate defaults for maxThreadsPerMessageType. If any are specified in settings.json, they will take priority.
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA_FILE", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE", 5));
+		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE", 20));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA_FILE_LIST", 50));
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE_LIST", 50));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_SIGNATURES", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_METADATA", 5));
-		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_METADATA", 50));
+		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_METADATA", 100));
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_TRANSACTION", 50));
 		maxThreadsPerMessageType.add(new ThreadLimit("TRANSACTION_SIGNATURES", 50));
 		maxThreadsPerMessageType.add(new ThreadLimit("TRADE_PRESENCES", 50));

@@ -2089,7 +2089,7 @@ public String finalizeUpload(
 	
 			} catch (IOException e) {
 				// Streaming errors should not rethrow — just log
-				LOGGER.warn(String.format("Streaming error for %s %s: %s", service, name, e.getMessage()), e);
+				LOGGER.warn(String.format("Streaming error for %s %s: %s", service, name, e.getMessage()));
 			}
 	
 		} catch (IOException | ApiException | DataException e) {

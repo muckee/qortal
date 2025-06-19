@@ -53,7 +53,7 @@ public class ArbitraryIndexUtils {
                 try {
                     fillCache(IndexCache.getInstance());
                 } catch (IOException | DataException e) {
-                    LOGGER.error(e.getMessage(), e);
+                    LOGGER.warn(e.getMessage());
                 }
             }
         };
@@ -111,6 +111,8 @@ public class ArbitraryIndexUtils {
 
                         indexDetails.add( new ArbitraryDataIndexDetail(indexResource.name, rank, indices.get(rank - 1), indexResource.identifier ));
                     }
+                } catch (MissingDataException e) {
+                    LOGGER.warn( e.getMessage() );
                 } catch (InvalidFormatException e) {
                    LOGGER.debug("invalid format, skipping: " + indexResource);
                 } catch (UnrecognizedPropertyException e) {
@@ -191,7 +193,7 @@ public class ArbitraryIndexUtils {
         }
     }
 
-    public static String getJson(String name, String identifier) throws IOException {
+    public static String getJson(String name, String identifier) throws IOException, MissingDataException {
 
         try {
             ArbitraryDataReader arbitraryDataReader
@@ -209,7 +211,7 @@ public class ArbitraryIndexUtils {
                     } catch (MissingDataException e) {
                         if (attempts > maxAttempts) {
                             // Give up after 5 attempts
-                            throw new IOException("Data unavailable. Please try again later.");
+                            throw e;
                         }
                     }
                 }
