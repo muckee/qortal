@@ -76,15 +76,13 @@ public class ArbitraryDataFileRequestThread {
             LOGGER.error(e.getMessage(), e);
         }
     }
+
     public void processFileHashes(Long now, List<ArbitraryFileListResponseInfo> responseInfos, ArbitraryDataFileManager arbitraryDataFileManager) {
 		if (Controller.isStopping()) {
             return;
         }
 
-        List<ArbitraryFileListResponseInfo> toProcess = new ArrayList<>(responseInfos.size());
-
-        Map<String, ArbitraryFileListResponseInfo> responseInfoByHash58 = new HashMap<>(responseInfos.size());
-        Map<String, byte[]> signatureBySignature58 = new HashMap<>(toProcess.size());
+        Map<String, byte[]> signatureBySignature58 = new HashMap<>(responseInfos.size());
         Map<String, List<ArbitraryFileListResponseInfo>> responseInfoBySignature58 = new HashMap<>();
 
         for( ArbitraryFileListResponseInfo responseInfo : responseInfos) {
@@ -119,8 +117,6 @@ public class ArbitraryDataFileRequestThread {
             }
 
             // We want to process this file, store and map data to process later
-            toProcess.add(responseInfo);
-            responseInfoByHash58.put(responseInfo.getHash58(), responseInfo);
             signatureBySignature58.put(responseInfo.getSignature58(), signature);
             responseInfoBySignature58
                     .computeIfAbsent(responseInfo.getSignature58(), signature58 -> new ArrayList<>())
@@ -162,6 +158,17 @@ public class ArbitraryDataFileRequestThread {
 
     private void arbitraryDataFileFetcher(ArbitraryDataFileManager arbitraryDataFileManager, ArbitraryFileListResponseInfo responseInfo, ArbitraryTransactionData arbitraryTransactionData)  {
         try {
+            Long now = NTP.getTime();
+
+            if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT ) {
+
+                Peer peer = responseInfo.getPeer();
+                String hash58 = responseInfo.getHash58();
+                String signature58 = responseInfo.getSignature58();
+                LOGGER.debug("Peer {} version {} didn't fetch data file {} for signature {} due to relay timeout.", peer, peer.getPeersVersionString(), hash58, signature58);
+                return;
+            }
+
             arbitraryDataFileManager.fetchArbitraryDataFiles(
                 responseInfo.getPeer(),
                 arbitraryTransactionData.getSignature(),
