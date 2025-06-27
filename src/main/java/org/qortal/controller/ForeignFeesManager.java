@@ -169,7 +169,7 @@ public class ForeignFeesManager implements Listener {
 
         }
         catch (DataException | IOException e) {
-            LOGGER.info("Unable to import data into foreign fees manager: {}", e.getMessage());
+            LOGGER.debug("Unable to import data into foreign fees manager: {}", e.getMessage());
         }
         catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
@@ -220,12 +220,12 @@ public class ForeignFeesManager implements Listener {
      */
     public void addSignedFees(List<ForeignFeeEncodedData> signedFees) {
 
-        LOGGER.info("adding signed fees: count = " + signedFees.size());
+        LOGGER.debug("adding signed fees: count = " + signedFees.size());
 
         // for each encoided fee, decode and add to import queue
         for( ForeignFeeEncodedData signedFeeEncoded : signedFees ) {
 
-            LOGGER.info("adding to import queue: " + signedFeeEncoded);
+            LOGGER.debug("adding to import queue: " + signedFeeEncoded);
 
             // decode the fee data and add to the queue
             this.foreignFeesImportQueue.add(
@@ -236,10 +236,10 @@ public class ForeignFeesManager implements Listener {
                     signedFeeEncoded.getFee()
                 )
             );
-            LOGGER.info("added");
+            LOGGER.debug("added");
         }
 
-        LOGGER.info("done adding to queue: count = " + this.foreignFeesImportQueue.size());
+        LOGGER.debug("done adding to queue: count = " + this.foreignFeesImportQueue.size());
 
         // process the fees immediately (not waiting for the fee process timer task already in place)
         processForeignFeesImportQueue();
@@ -274,7 +274,7 @@ public class ForeignFeesManager implements Listener {
 
                     long now = nowDetermined.get();
                     try (final Repository repository = RepositoryManager.getRepository()) {
-                        LOGGER.info("processing trade offer in waiting event");
+                        LOGGER.debug("processing trade offer in waiting event");
 
                         Optional<CrossChainTradeData> offerOptional = getTradeOfferData(repository, data.getAtAddress());
 
@@ -350,16 +350,16 @@ public class ForeignFeesManager implements Listener {
 
         try {
             if( this.needToBackupLockingForeignFees.compareAndSet( true, false )) {
-                LOGGER.info("backing up locking foreign fees");
+                LOGGER.debug("backing up locking foreign fees");
                 backupForeignFeeData( bitcoiny -> bitcoiny.getFeePerKb().value, LOCKING_FOREIGN_FEES_FILE_NAME, LOCKING_FOREIGN_FEES_TYPE);
             }
             if( this.needToBackupRequiredForeignFees.compareAndSet(true, false) ) {
-                LOGGER.info("backing up required foreign fees");
+                LOGGER.debug("backing up required foreign fees");
                 backupForeignFeeData(Bitcoiny::getFeeRequired, REQUIRED_FOREIGN_FEES_FILE_NAME, REQUIRED_FOREIGN_FEES_TYPE);
             }
 
             if( this.needToBackupSignedForeignFees.compareAndSet( true, false ) ) {
-                LOGGER.info("backing up signed foreign fees");
+                LOGGER.debug("backing up signed foreign fees");
                 backupSignedForeignFeeData();
             }
         } catch (DataException e) {
@@ -380,15 +380,15 @@ public class ForeignFeesManager implements Listener {
      */
     private void processForeignFeesImportQueue() {
 
-        LOGGER.info("processing foreign fees import queue ...");
+        LOGGER.debug("processing foreign fees import queue ...");
 
         if (this.foreignFeesImportQueue.isEmpty()) {
 
-            LOGGER.info("foreign fees import queue is empty");
+            LOGGER.debug("foreign fees import queue is empty");
             return;
         }
 
-        LOGGER.info("Processing foreign fee import queue (size: {})", this.foreignFeesImportQueue.size());
+        LOGGER.debug("Processing foreign fee import queue (size: {})", this.foreignFeesImportQueue.size());
 
         Set<ForeignFeeDecodedData> foreignFeesToRemove = new HashSet<>(this.foreignFeesImportQueue.size());
 
@@ -403,7 +403,7 @@ public class ForeignFeesManager implements Listener {
                 // need to get the AT address for mapping key identification purposes
                 String atAddress = foreignFeeToImport.getAtAddress();
 
-                LOGGER.info("foreign fee import, timestamp = " + getFormattedDateTime(foreignFeeToImport.getTimestamp()));
+                LOGGER.debug("foreign fee import, timestamp = " + getFormattedDateTime(foreignFeeToImport.getTimestamp()));
 
                 Optional<ForeignFeeDecodedData> validatedForeignFeeData
                     = this.signedByAT.getOrDefault( atAddress, Optional.empty() );
@@ -415,7 +415,7 @@ public class ForeignFeesManager implements Listener {
 
                     ATData atData = repository.getATRepository().fromATAddress(atAddress);
 
-                    LOGGER.info("verify signer for atAddress = " + atAddress);
+                    LOGGER.debug("verify signer for atAddress = " + atAddress);
 
                     // determine if the creator authorized the foreign fee
                     byte[] publicKey = atData.getCreatorPublicKey();
@@ -430,7 +430,7 @@ public class ForeignFeesManager implements Listener {
                     // if trade offer creator authorized the imported fee,
                     // then finish the import and clear it from the unsigned mapping
                     if( Crypto.verify(publicKey, signature, message) ) {
-                        LOGGER.info("signer verified");
+                        LOGGER.debug("signer verified");
                         this.signedByAT.put(atAddress, Optional.of(foreignFeeToImport));
                         this.needToBackupSignedForeignFees.compareAndSet(false, true);
                         this.unsignedByAT.remove(atAddress);
@@ -444,8 +444,8 @@ public class ForeignFeesManager implements Listener {
                                 .findAny()
                                 .isEmpty();
 
-                        LOGGER.info("tradeOfferCreatorAddress = " + tradeOfferCreatorAddress);
-                        LOGGER.info("allSignedForCreatorAddress = " + allSignedForCreatorAddress);
+                        LOGGER.debug("tradeOfferCreatorAddress = " + tradeOfferCreatorAddress);
+                        LOGGER.debug("allSignedForCreatorAddress = " + allSignedForCreatorAddress);
 
                         if(allSignedForCreatorAddress) {
                             EventBus.INSTANCE.notify(new FeeWaitingEvent(false, tradeOfferCreatorAddress));
@@ -453,11 +453,11 @@ public class ForeignFeesManager implements Listener {
                     }
                     // otherwise this fee will get discarded
                     else {
-                        LOGGER.info("invalid signature");
+                        LOGGER.debug("invalid signature");
                     }
                 }
                 else {
-                    LOGGER.info(
+                    LOGGER.debug(
                         "skipping imported fee since the timestamp is not updated: atAddress = {}, timestamp = {}",
                         atAddress,
                         foreignFeeToImport.getTimestamp()
@@ -470,7 +470,7 @@ public class ForeignFeesManager implements Listener {
         } catch (Exception e) {
             LOGGER.error("Repository issue while verifying foreign fees", e);
         } finally {
-            LOGGER.info("removing foreign fees from import queue: count = " + foreignFeesToRemove.size());
+            LOGGER.debug("removing foreign fees from import queue: count = " + foreignFeesToRemove.size());
             this.foreignFeesImportQueue.removeAll(foreignFeesToRemove);
         }
     }
@@ -500,7 +500,7 @@ public class ForeignFeesManager implements Listener {
      */
     private void maintainCrossChainOffers() {
 
-        LOGGER.info("maintaining ATs ...");
+        LOGGER.debug("maintaining ATs ...");
 
         try (final Repository repository = RepositoryManager.getRepository()) {
 
@@ -513,14 +513,14 @@ public class ForeignFeesManager implements Listener {
                     .map( data -> data.qortalAtAddress )
                     .collect(Collectors.toSet());
 
-            LOGGER.info("foreign fees before AT removal: count = " + this.signedByAT.size() );
+            LOGGER.debug("foreign fees before AT removal: count = " + this.signedByAT.size() );
 
             // retain the fees for the current sell offers, remove all others
             if( retainFeeByAT(this.signedByAT, atAddresses) ) {
                 this.needToBackupSignedForeignFees.compareAndSet(false, true);
             }
 
-            LOGGER.info("foreign fees after AT removal: count = " + this.signedByAT.size() );
+            LOGGER.debug("foreign fees after AT removal: count = " + this.signedByAT.size() );
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
         }
@@ -649,11 +649,11 @@ public class ForeignFeesManager implements Listener {
      */
     private void requestRemoteForeignFees() {
 
-        LOGGER.info("requesting remote foreign fees ...");
+        LOGGER.debug("requesting remote foreign fees ...");
 
         if (!isUpToDate()) return;
 
-        LOGGER.info("Requesting foreign fees via broadcast...");
+        LOGGER.debug("Requesting foreign fees via broadcast...");
 
         Message message
             = new GetForeignFeesMessage(
@@ -664,7 +664,7 @@ public class ForeignFeesManager implements Listener {
 
         Network.getInstance().broadcast(peer -> message);
 
-        LOGGER.info("Requested foreign fees via broadcast...");
+        LOGGER.debug("Requested foreign fees via broadcast...");
     }
 
     /**
@@ -683,7 +683,7 @@ public class ForeignFeesManager implements Listener {
 
         if (!Controller.getInstance().isUpToDate()) {
 
-            LOGGER.info("not up to date, aborting");
+            LOGGER.debug("not up to date, aborting");
             return false;
         }
         return true;
@@ -731,7 +731,7 @@ public class ForeignFeesManager implements Listener {
 
         Set<String> addressesThatNeedSignatures = new HashSet<>();
 
-        LOGGER.info("processing local foreign fees ...");
+        LOGGER.debug("processing local foreign fees ...");
 
         Optional<Long> nowDetermined = determineNow();
         if (nowDetermined.isEmpty()){
@@ -750,7 +750,7 @@ public class ForeignFeesManager implements Listener {
                     .filter(d -> SupportedBlockchain.getAcctByName( d.getAcctName() ).getBlockchain().equals( bitcoiny ))
                     .collect(Collectors.toList());
 
-            LOGGER.info("trade offers waiting: count = " + tradeOffersWaiting.size());
+            LOGGER.debug("trade offers waiting: count = " + tradeOffersWaiting.size());
 
             // process each local trade offer waiting (listed)
             for (TradeBotData tradeOfferWaiting : tradeOffersWaiting) {
@@ -810,7 +810,7 @@ public class ForeignFeesManager implements Listener {
         String foreignBlockchain = tradeOfferWaiting.getForeignBlockchain();
         SupportedBlockchain supportedBlockchain = SupportedBlockchain.fromString(foreignBlockchain);
 
-        LOGGER.info("trade offer waiting: blockchain = " + foreignBlockchain);
+        LOGGER.debug("trade offer waiting: blockchain = " + foreignBlockchain);
 
         // if the supported blockchain is a Bitcoiny blockchain, then the fee will be available
         if (supportedBlockchain.getInstance() instanceof Bitcoiny) {
@@ -820,7 +820,7 @@ public class ForeignFeesManager implements Listener {
             String atAddress = tradeOfferWaiting.getAtAddress();
             int fee = Math.toIntExact(bitcoiny.getFeeRequired());
 
-            LOGGER.info("atAddress = {}, fee = {}", atAddress, fee);
+            LOGGER.debug("atAddress = {}, fee = {}", atAddress, fee);
 
             // get the signed foreign fee, if it exists
             Optional<ForeignFeeDecodedData> foreignFeeDecodedData = this.signedByAT.get(atAddress);
@@ -828,13 +828,13 @@ public class ForeignFeesManager implements Listener {
             // if the foreign fee has been signed
             if (foreignFeeDecodedData != null && foreignFeeDecodedData.isPresent()) {
 
-                LOGGER.info("signed available");
+                LOGGER.debug("signed available");
 
                 // if the local fee is different than the fee stored in this manager,
                 // then empty the fee in the manager and set the updated fee to unsigned data
                 if (!foreignFeeDecodedData.get().getFee().equals(fee)) {
 
-                    LOGGER.info("fee updated");
+                    LOGGER.debug("fee updated");
                     this.signedByAT.remove(atAddress);
 
                     this.needToBackupSignedForeignFees.compareAndSet(false, true);
@@ -842,12 +842,12 @@ public class ForeignFeesManager implements Listener {
                     isFeeWaiting = true;
                 }
                 else {
-                    LOGGER.info("fee not updated");
+                    LOGGER.debug("fee not updated");
                 }
             }
             // if the foreign fee has not been signed, then set the fee to unsigned data
             else {
-                LOGGER.info("fee not signed");
+                LOGGER.debug("fee not signed");
                 setUnsignedData(now, atAddress, fee);
                 isFeeWaiting = true;
             }
@@ -878,9 +878,9 @@ public class ForeignFeesManager implements Listener {
                 fee
         );
 
-        LOGGER.info("updating unsigned");
+        LOGGER.debug("updating unsigned");
         this.unsignedByAT.put(atAddress, feeData);
-        LOGGER.info("updated unsigned = " + this.unsignedByAT);
+        LOGGER.debug("updated unsigned = " + this.unsignedByAT);
     }
 
     // Network handlers
@@ -912,12 +912,12 @@ public class ForeignFeesManager implements Listener {
 
                 String atAddress = entry.getKey();
 
-                LOGGER.info("comparing signed foreign fee for get foreign fee message: atAddress = " + atAddress);
+                LOGGER.debug("comparing signed foreign fee for get foreign fee message: atAddress = " + atAddress);
 
                 // if message contains AT address, then check timestamps
                 if (inMessageDataByAT.containsKey(atAddress) ) {
 
-                    LOGGER.info("message does contain: atAddress = " + atAddress);
+                    LOGGER.debug("message does contain: atAddress = " + atAddress);
 
                     // get data from message for AT address
                     ForeignFeeDecodedData feeData = inMessageDataByAT.get(atAddress);
@@ -929,23 +929,23 @@ public class ForeignFeesManager implements Listener {
                 }
                 // if the message does not contain data for this AT, then send the data out to the peer
                 else {
-                    LOGGER.info("message does not contain: atAddress = " + atAddress);
+                    LOGGER.debug("message does not contain: atAddress = " + atAddress);
 
                     outgoingForeignFees.add(signedForeignFeeData.get());
                 }
             }
             // if value is empty, then do nothing
             else {
-                LOGGER.info("unavailable signed foreign fee for get foreign fee message: atAddress = " + entry.getKey());
+                LOGGER.debug("unavailable signed foreign fee for get foreign fee message: atAddress = " + entry.getKey());
             }
         }
 
-        LOGGER.info("Sending {} foreign fees to {}", outgoingForeignFees.size(), peer);
+        LOGGER.debug("Sending {} foreign fees to {}", outgoingForeignFees.size(), peer);
 
         // send out to peer
         peer.sendMessage(new ForeignFeesMessage(outgoingForeignFees));
 
-        LOGGER.info("Sent {} foreign fees to {}", outgoingForeignFees.size(), peer);
+        LOGGER.debug("Sent {} foreign fees to {}", outgoingForeignFees.size(), peer);
     }
 
     /**
@@ -958,7 +958,7 @@ public class ForeignFeesManager implements Listener {
         ForeignFeesMessage onlineAccountsMessage = (ForeignFeesMessage) message;
 
         List<ForeignFeeDecodedData> peersForeignFees = onlineAccountsMessage.getForeignFees();
-        LOGGER.info("Received {} foreign fees from {}", peersForeignFees.size(), peer);
+        LOGGER.debug("Received {} foreign fees from {}", peersForeignFees.size(), peer);
 
         int importCount = 0;
 
@@ -970,7 +970,7 @@ public class ForeignFeesManager implements Listener {
         }
 
         if (importCount > 0)
-            LOGGER.info("Added {} foreign to queue", importCount);
+            LOGGER.debug("Added {} foreign to queue", importCount);
     }
 
     /**
@@ -1099,7 +1099,7 @@ public class ForeignFeesManager implements Listener {
             throw new FileNotFoundException(String.format("Unable to read file contents: %s", filename));
         }
 
-        LOGGER.info(String.format("Importing %s into foreign fees manager ...", filename));
+        LOGGER.debug(String.format("Importing %s into foreign fees manager ...", filename));
 
         String jsonString = new String(fileContents);
 
@@ -1129,7 +1129,7 @@ public class ForeignFeesManager implements Listener {
             }
         }
 
-        LOGGER.info(String.format("Imported %s into foreign fees manager from %s", type, filename));
+        LOGGER.debug(String.format("Imported %s into foreign fees manager from %s", type, filename));
     }
 
     /**
