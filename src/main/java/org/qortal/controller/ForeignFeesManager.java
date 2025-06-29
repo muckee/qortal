@@ -438,7 +438,7 @@ public class ForeignFeesManager implements Listener {
                         String tradeOfferCreatorAddress = Crypto.toAddress(publicKey);
                         boolean allSignedForCreatorAddress
                             = this.offersByAddress
-                                .get(tradeOfferCreatorAddress).stream()
+                                .getOrDefault(tradeOfferCreatorAddress, new ArrayList<>(0)).stream()
                                 .map(data -> data.qortalAtAddress)
                                 .filter(qortalAtAddress -> this.unsignedByAT.contains(qortalAtAddress))
                                 .findAny()
