@@ -62,7 +62,17 @@ public enum Service {
 
             // Custom validation function to require an index HTML file in the root directory
             List<String> fileNames = ArbitraryDataRenderer.indexFiles();
-            String[] files = path.toFile().list();
+            List<String> files;
+
+            // single files are paackaged differently
+            if( path.toFile().isFile() ) {
+                files = new ArrayList<>(1);
+                files.add(path.getFileName().toString());
+            }
+            else {
+                files = new ArrayList<>(Arrays.asList(path.toFile().list()));
+            }
+
             if (files != null) {
                 for (String file : files) {
                     Path fileName = Paths.get(file).getFileName();
