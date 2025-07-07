@@ -114,9 +114,7 @@ public class Follower {
                     // if passed examination for fetching, then fetch
                     if (examined) {
                         LOGGER.info("for {} on {}, fetching {}", name, arbitraryTransaction.getService(), arbitraryTransaction.getIdentifier());
-                        boolean fetched
-                            = ArbitraryDataFileListManager.getInstance().fetchArbitraryDataFileList(
-                                arbitraryTransaction, ArbitraryDataConstants.REQUEST_TIMEOUT);
+                        boolean fetched = ArbitraryDataFileListManager.getInstance().fetchArbitraryDataFileList(arbitraryTransaction);
 
                         LOGGER.info("fetched = " + fetched);
                     }
