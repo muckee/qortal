@@ -402,8 +402,8 @@ public class ArbitraryDataFileListManager {
         return true;
     }
 
-    public void deleteFileListRequestsForSignature(byte[] signature) {
-        String signature58 = Base58.encode(signature);
+    public void deleteFileListRequestsForSignature(String signature58) {
+
         for (Iterator<Map.Entry<Integer, Triple<String, Peer, Long>>> it = arbitraryDataFileListRequests.entrySet().iterator(); it.hasNext();) {
             Map.Entry<Integer, Triple<String, Peer, Long>> entry = it.next();
             if (entry == null || entry.getKey() == null || entry.getValue() == null) {
