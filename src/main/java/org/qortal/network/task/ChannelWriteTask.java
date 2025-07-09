@@ -31,7 +31,20 @@ public class ChannelWriteTask implements Task {
     @Override
     public void perform() throws InterruptedException {
         try {
-            boolean isSocketClogged = peer.writeChannel();
+
+            boolean isSocketClogged;
+            do {
+                isSocketClogged = peer.writeChannel();
+
+                if (isSocketClogged) {
+                    LOGGER.info(
+                            "socket is clogged: peer = {} {}, retrying",
+                            peer.getPeerData().getAddress().toString(),
+                            Thread.currentThread().getName()
+                    );
+                    Thread.sleep(1000);
+                }
+            } while( isSocketClogged );
 
             // Tell Network that we've finished
             Network.getInstance().notifyChannelNotWriting(socketChannel);
