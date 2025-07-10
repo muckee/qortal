@@ -1,6 +1,7 @@
 package org.qortal.controller.arbitrary;
 
 import com.google.common.net.InetAddresses;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.arbitrary.ArbitraryDataFile;
@@ -23,10 +24,14 @@ import org.qortal.utils.NTP;
 
 import java.security.SecureRandom;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import org.qortal.network.PeerSendManager;
 
 public class ArbitraryDataFileManager extends Thread {
 
@@ -65,11 +70,38 @@ public class ArbitraryDataFileManager extends Thread {
 
 
     public static int MAX_FILE_HASH_RESPONSES = 1000;
+private final Map<Peer, PeerSendManager> peerSendManagers = new ConcurrentHashMap<>();
+
+private PeerSendManager getOrCreateSendManager(Peer peer) {
+    return peerSendManagers.computeIfAbsent(peer, p -> new PeerSendManager(p));
+}
+
+
+
 
 
     private ArbitraryDataFileManager() {
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate( this::processResponses, 60, 1, TimeUnit.SECONDS);
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60, 1, TimeUnit.SECONDS);
+       ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
+
+        cleaner.scheduleAtFixedRate(() -> {
+            long idleCutoff = TimeUnit.MINUTES.toMillis(2);
+            Iterator<Map.Entry<Peer, PeerSendManager>> iterator = peerSendManagers.entrySet().iterator();
+
+            while (iterator.hasNext()) {
+                Map.Entry<Peer, PeerSendManager> entry = iterator.next();
+                Peer peer = entry.getKey();
+                PeerSendManager manager = entry.getValue();
+
+                if (manager.isIdle(idleCutoff)) {
+                    iterator.remove(); // SAFE removal during iteration
+                    manager.shutdown();
+                    LOGGER.debug("Cleaned up PeerSendManager for peer {}", peer);
+                }
+            }
+        }, 0, 5, TimeUnit.MINUTES);
+        
     }
 
     public static ArbitraryDataFileManager getInstance() {
@@ -78,6 +110,8 @@ public class ArbitraryDataFileManager extends Thread {
 
         return instance;
     }
+
+
 
     @Override
     public void run() {
@@ -374,13 +408,8 @@ public class ArbitraryDataFileManager extends Thread {
             // The ID needs to match that of the original request
             message.setId(originalMessage.getId());
 
-            if (!requestingPeer.sendMessageWithTimeout(message, (int) ArbitraryDataManager.ARBITRARY_REQUEST_TIMEOUT)) {
-                LOGGER.info("Failed to forward arbitrary data file to peer {}", requestingPeer);
-                requestingPeer.disconnect("failed to forward arbitrary data file");
-            }
-            else {
-                LOGGER.info("Forwarded arbitrary data file to peer {}", requestingPeer);
-            }
+            getOrCreateSendManager(requestingPeer).queueMessage(message);
+
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
         }
@@ -656,13 +685,9 @@ public class ArbitraryDataFileManager extends Thread {
                 LOGGER.debug("Sending file {}...", arbitraryDataFile);
                 ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(signature, arbitraryDataFile);
                 arbitraryDataFileMessage.setId(message.getId());
-                if (!peer.sendMessageWithTimeout(arbitraryDataFileMessage, (int) ArbitraryDataManager.ARBITRARY_REQUEST_TIMEOUT)) {
-                    LOGGER.debug("Couldn't send file {}", arbitraryDataFile);
-                    peer.disconnect("failed to send file");
-                }
-                else {
-                    LOGGER.debug("Sent file {}", arbitraryDataFile);
-                }
+
+                getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage);
+
             }
             else if (relayInfo != null) {
                 LOGGER.debug("We have relay info for hash {}", Base58.encode(hash));
@@ -696,7 +721,6 @@ public class ArbitraryDataFileManager extends Thread {
                 fileUnknownMessage.setId(message.getId());
                 if (!peer.sendMessage(fileUnknownMessage)) {
                     LOGGER.debug("Couldn't sent file-unknown response");
-                    peer.disconnect("failed to send file-unknown response");
                 }
                 else {
                     LOGGER.debug("Sent file-unknown response for file {}", arbitraryDataFile);
