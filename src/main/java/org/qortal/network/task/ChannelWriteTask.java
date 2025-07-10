@@ -42,7 +42,7 @@ public class ChannelWriteTask implements Task {
 					break;
 				}
                 if (isSocketClogged) {
-                    LOGGER.info(
+                    LOGGER.debug(
                             "socket is clogged: peer = {} {}, retrying",
                             peer.getPeerData().getAddress().toString(),
                             Thread.currentThread().getName()

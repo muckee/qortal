@@ -59,7 +59,7 @@ public class PeerSendManager {
                                 break;
                             }
                         } catch (Exception e) {
-                            LOGGER.warn("Attempt {} failed for message {} to peer {}: {}", attempt, message.getId(), peer, e.getMessage());
+                            LOGGER.debug("Attempt {} failed for message {} to peer {}: {}", attempt, message.getId(), peer, e.getMessage());
                         }
 
                         Thread.sleep(RETRY_DELAY_MS);
@@ -67,10 +67,10 @@ public class PeerSendManager {
 
                     if (!success) {
                         int totalFailures = failureCount.incrementAndGet();
-                        LOGGER.warn("Failed to send message {} to peer {}. Total failures: {}", message.getId(), peer, totalFailures);
+                        LOGGER.debug("Failed to send message {} to peer {}. Total failures: {}", message.getId(), peer, totalFailures);
 
                         if (totalFailures >= MAX_FAILURES) {
-                            LOGGER.warn("Peer {} exceeded failure limit ({}). Disconnecting...", peer, totalFailures);
+                            LOGGER.debug("Peer {} exceeded failure limit ({}). Disconnecting...", peer, totalFailures);
                             peer.disconnect("Too many message send failures");
                             coolingDown = true;
                             queue.clear();
@@ -92,7 +92,7 @@ public class PeerSendManager {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
-                    LOGGER.warn("Unexpected error in PeerSendManager for peer {}: {}", peer, e.getMessage(), e);
+                    LOGGER.error("Unexpected error in PeerSendManager for peer {}: {}", peer, e.getMessage(), e);
                 }
             }
         });
@@ -106,7 +106,7 @@ public class PeerSendManager {
 
         lastUsed = System.currentTimeMillis();
         if (!queue.offer(new TimedMessage(message))) {
-            LOGGER.warn("Send queue full, dropping message {}", message.getId());
+            LOGGER.debug("Send queue full, dropping message {}", message.getId());
         }
     }
 

@@ -664,31 +664,24 @@ public class Peer {
 
             // If output byte buffer is not null, send from that
             int bytesWritten = this.socketChannel.write(outputBuffer);
-          if ("ARBITRARY_DATA_FILE".equals(this.outputMessageType)) {
-    LOGGER.info("[{}] Sent {} bytes of {} message with ID {} to peer {} ({} total)",
-            this.peerConnectionId,
-            bytesWritten,
-            this.outputMessageType,
-            this.outputMessageId,
-            this,
-            outputBuffer.limit());
-}
-          int zeroSendCount = 0;
-while (bytesWritten == 0) {
-	if (zeroSendCount > 9) {
-		LOGGER.warn("Socket write stuck for too long, returning");
-		return true;
-	}
-	try {
-		Thread.sleep(10); // 10MS CPU Sleep to try and give it time to flush the socket 
-	}
-	catch (InterruptedException e) {
-    Thread.currentThread().interrupt();
-    return false; // optional, if you want to signal shutdown
-}
-	zeroSendCount++;
-	bytesWritten = this.socketChannel.write(outputBuffer);
-}
+
+            int zeroSendCount = 0;
+
+            while (bytesWritten == 0) {
+                if (zeroSendCount > 9) {
+                    LOGGER.debug("Socket write stuck for too long, returning");
+                    return true;
+                }
+                try {
+                    Thread.sleep(10); // 10MS CPU Sleep to try and give it time to flush the socket 
+                }
+                catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false; // optional, if you want to signal shutdown
+            }
+                zeroSendCount++;
+                bytesWritten = this.socketChannel.write(outputBuffer);
+            }
 
             // If we then exhaust the byte buffer, set it to null (otherwise loop and try to send more)
             if (!this.outputBuffer.hasRemaining()) {

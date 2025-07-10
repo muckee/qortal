@@ -76,9 +76,7 @@ private PeerSendManager getOrCreateSendManager(Peer peer) {
     return peerSendManagers.computeIfAbsent(peer, p -> new PeerSendManager(p));
 }
 
-public void queueFileSendToPeer(Peer peer, Message fileMessage) {
-    getOrCreateSendManager(peer).queueMessage(fileMessage);
-}
+
 
 
 
@@ -267,7 +265,7 @@ public void queueFileSendToPeer(Peer peer, Message fileMessage) {
                 LOGGER.trace(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
 
                 if (response == null) {
-                    LOGGER.info("Received null response from peer {}", peer);
+                    LOGGER.debug("Received null response from peer {}", peer);
                     return null;
                 }
                 if (response.getType() != MessageType.ARBITRARY_DATA_FILE) {
@@ -674,7 +672,7 @@ public void queueFileSendToPeer(Peer peer, Message fileMessage) {
         byte[] signature = getArbitraryDataFileMessage.getSignature();
         Controller.getInstance().stats.getArbitraryDataFileMessageStats.requests.incrementAndGet();
 
-        LOGGER.info("Received GetArbitraryDataFileMessage from peer {} for hash {}", peer, Base58.encode(hash));
+        LOGGER.debug("Received GetArbitraryDataFileMessage from peer {} for hash {}", peer, Base58.encode(hash));
 
         try {
             ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromHash(hash, signature);
