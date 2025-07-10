@@ -567,6 +567,9 @@ public class Controller extends Thread {
 		LOGGER.info("Starting foreign fees manager");
 		ForeignFeesManager.getInstance().start();
 
+		LOGGER.info("Starting follower");
+		Follower.getInstance().start();
+
 		LOGGER.info("Starting transaction importer");
 		TransactionImporter.getInstance().start();
 
