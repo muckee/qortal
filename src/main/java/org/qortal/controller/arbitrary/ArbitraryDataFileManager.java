@@ -367,8 +367,6 @@ private PeerSendManager getOrCreateSendManager(Peer peer) {
 
         if( signaturesToProcess.isEmpty() ) return;
 
-        LOGGER.info("signatures to process = " + signaturesToProcess.size());
-
         try (final Repository repository = RepositoryManager.getRepository()) {
 
             // Fetch the transaction data
@@ -380,7 +378,7 @@ private PeerSendManager getOrCreateSendManager(Peer peer) {
 
                 if (completeFileExists) {
                     String signature58 = Base58.encode(arbitraryTransactionData.getSignature());
-                    LOGGER.info("All chunks or complete file exist for transaction {}", signature58);
+                    LOGGER.debug("All chunks or complete file exist for transaction {}", signature58);
 
                     ArbitraryDataFileListManager.getInstance().deleteFileListRequestsForSignature(signature58);
                 }
