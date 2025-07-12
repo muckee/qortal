@@ -214,11 +214,9 @@ public class HSQLDBChatRepository implements ChatRepository {
 
 		// if the PrimaryTable is available, then use it
 		if( this.repository.getBlockRepository().getBlockchainHeight() > BlockChain.getInstance().getMultipleNamesPerAccountHeight()) {
-			LOGGER.debug("using PrimaryNames for chat transactions");
 			tableName = "PrimaryNames";
 		}
 		else {
-			LOGGER.debug("using Names for chat transactions");
 			tableName = "Names";
 		}
 
