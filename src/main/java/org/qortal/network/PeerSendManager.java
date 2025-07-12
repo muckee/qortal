@@ -12,7 +12,6 @@ public class PeerSendManager {
 
     private static final int MAX_FAILURES = 15;
     private static final int MAX_MESSAGE_ATTEMPTS = 2;
-    private static final int SEND_TIMEOUT_MS = 500;
     private static final int RETRY_DELAY_MS = 100;
     private static final long MAX_QUEUE_DURATION_MS = 20_000;
     private static final long COOLDOWN_DURATION_MS = 20_000;
@@ -49,11 +48,12 @@ public class PeerSendManager {
                     }
 
                     Message message = timedMessage.message;
+                    int timeout = timedMessage.timeout;
                     boolean success = false;
 
                     for (int attempt = 1; attempt <= MAX_MESSAGE_ATTEMPTS; attempt++) {
                         try {
-                            if (peer.sendMessageWithTimeout(message, SEND_TIMEOUT_MS)) {
+                            if (peer.sendMessageWithTimeoutNow(message, timeout)) {
                                 success = true;
                                 failureCount.set(0); // reset on success
                                 break;
@@ -98,16 +98,21 @@ public class PeerSendManager {
         });
     }
 
-    public void queueMessage(Message message) {
+    public boolean queueMessage(Message message, int timeout) {
         if (coolingDown) {
             LOGGER.debug("In cooldown, ignoring message {}", message.getId());
-            return;
+
+            return false;
         }
 
         lastUsed = System.currentTimeMillis();
-        if (!queue.offer(new TimedMessage(message))) {
+        if (!queue.offer(new TimedMessage(message, timeout))) {
             LOGGER.debug("Send queue full, dropping message {}", message.getId());
+
+            return false;
         }
+
+        return true;
     }
 
     public boolean isIdle(long cutoffMillis) {
@@ -122,10 +127,12 @@ public class PeerSendManager {
     private static class TimedMessage {
         final Message message;
         final long timestamp;
+        final int timeout;
 
-        TimedMessage(Message message) {
+        TimedMessage(Message message, int timeout) {
             this.message = message;
             this.timestamp = System.currentTimeMillis();
+            this.timeout = timeout;
         }
     }
 }

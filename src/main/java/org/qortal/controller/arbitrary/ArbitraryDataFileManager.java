@@ -13,6 +13,7 @@ import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerSendManagement;
 import org.qortal.network.message.*;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -31,10 +32,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import org.qortal.network.PeerSendManager;
-
 public class ArbitraryDataFileManager extends Thread {
 
+    public static final int SEND_TIMEOUT_MS = 500;
     private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataFileManager.class);
 
     private static ArbitraryDataFileManager instance;
@@ -70,38 +70,10 @@ public class ArbitraryDataFileManager extends Thread {
 
 
     public static int MAX_FILE_HASH_RESPONSES = 1000;
-private final Map<Peer, PeerSendManager> peerSendManagers = new ConcurrentHashMap<>();
-
-private PeerSendManager getOrCreateSendManager(Peer peer) {
-    return peerSendManagers.computeIfAbsent(peer, p -> new PeerSendManager(p));
-}
-
-
-
-
 
     private ArbitraryDataFileManager() {
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate( this::processResponses, 60, 1, TimeUnit.SECONDS);
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60, 1, TimeUnit.SECONDS);
-       ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
-
-        cleaner.scheduleAtFixedRate(() -> {
-            long idleCutoff = TimeUnit.MINUTES.toMillis(2);
-            Iterator<Map.Entry<Peer, PeerSendManager>> iterator = peerSendManagers.entrySet().iterator();
-
-            while (iterator.hasNext()) {
-                Map.Entry<Peer, PeerSendManager> entry = iterator.next();
-                Peer peer = entry.getKey();
-                PeerSendManager manager = entry.getValue();
-
-                if (manager.isIdle(idleCutoff)) {
-                    iterator.remove(); // SAFE removal during iteration
-                    manager.shutdown();
-                    LOGGER.debug("Cleaned up PeerSendManager for peer {}", peer);
-                }
-            }
-        }, 0, 5, TimeUnit.MINUTES);
-        
     }
 
     public static ArbitraryDataFileManager getInstance() {
@@ -406,7 +378,7 @@ private PeerSendManager getOrCreateSendManager(Peer peer) {
             // The ID needs to match that of the original request
             message.setId(originalMessage.getId());
 
-            getOrCreateSendManager(requestingPeer).queueMessage(message);
+            PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer).queueMessage(message, SEND_TIMEOUT_MS);
 
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
@@ -684,7 +656,7 @@ private PeerSendManager getOrCreateSendManager(Peer peer) {
                 ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(signature, arbitraryDataFile);
                 arbitraryDataFileMessage.setId(message.getId());
 
-                getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage);
+                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage, SEND_TIMEOUT_MS);
 
             }
             else if (relayInfo != null) {
