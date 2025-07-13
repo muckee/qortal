@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>org.qortal</groupId>
 	<artifactId>qortal</artifactId>
-	<version>4.7.2</version>
+	<version>5.0.2</version>
 	<packaging>jar</packaging>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -804,5 +804,10 @@
 			<artifactId>jaxb-runtime</artifactId>
 			<version>${jaxb-runtime.version}</version>
 		</dependency>
+		<dependency>
+<groupId>org.apache.tika</groupId>
+<artifactId>tika-core</artifactId>
+<version>3.1.0</version> 
+</dependency>
 	</dependencies>
 </project>

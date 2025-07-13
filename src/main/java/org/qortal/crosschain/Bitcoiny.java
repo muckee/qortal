@@ -864,9 +864,9 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 		} while (true);
 	}
 
-	public abstract long getFeeCeiling();
+	public abstract long getFeeRequired();
 
-	public abstract void setFeeCeiling(long fee);
+	public abstract void setFeeRequired(long fee);
 
 	// UTXOProvider support
 
