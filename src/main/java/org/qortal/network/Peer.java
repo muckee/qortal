@@ -43,7 +43,7 @@ public class Peer {
     /**
      * Maximum time to wait for a message reply to arrive from peer. (ms)
      */
-    private static final int RESPONSE_TIMEOUT = 3000; // ms
+    private static final int RESPONSE_TIMEOUT = 180_000; // ms, was 3000
 
     /**
      * Maximum time to wait for a message to be added to sendQueue (ms)
@@ -483,13 +483,16 @@ public class Peer {
         } catch (IOException e) {
             LOGGER.trace("[{}] Post-connection setup failed, peer {}", this.peerConnectionId, this);
             try {
+                LOGGER.info("Closing Socket");
                 socketChannel.close();
             } catch (IOException ce) {
                 // Failed to close?
+                LOGGER.info("EXCEPTION closing socket");
             }
             return null;
         }
     }
+
 
     /**
      * Attempt to buffer bytes from socketChannel.
@@ -499,9 +502,15 @@ public class Peer {
     public void readChannel() throws IOException {
         synchronized (this.byteBufferLock) {
             while (true) {
-                if (!this.socketChannel.isOpen() || this.socketChannel.socket().isClosed()) {
+                if (!this.socketChannel.isOpen() ) {
+                    LOGGER.info("RETURNING - Socket isNotOpen or Socket it Close");
                     return;
                 }
+                if (this.socketChannel.socket().isClosed()) {
+                    LOGGER.info("RETURN - Socket isClosed");
+                    return;
+                }
+
 
                 // Do we need to allocate byteBuffer?
                 if (this.byteBuffer == null) {
@@ -737,6 +746,7 @@ public class Peer {
      */
     public boolean sendMessageWithTimeout(Message message, int timeout) {
         if (!this.socketChannel.isOpen()) {
+            LOGGER.debug("SocketChannel was not open; returning false");
             return false;
         }
 
@@ -755,6 +765,42 @@ public class Peer {
             return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             // Send failure
+            LOGGER.error("Interrupt Exception");
+            return false;
+        } catch (MessageException e) {
+            LOGGER.error(e.getMessage(), e);
+            return false;
+        }
+    }
+
+    public boolean sendMessageWhenReady(Message message) throws InterruptedException {  // TimeOut Value removed
+
+        // We need this to be open, loop and stall until ready...  micro sleeps but forever, eventually the channel will open
+        try {
+            while(!this.socketChannel.isOpen()) {
+                Thread.sleep(10); // Process a little something else
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        try {
+            // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
+            LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
+                    message.getType().name(), message.getId(), this);
+
+            // Check message properly constructed
+            message.checkValidOutgoing();
+
+            // Possible race condition:
+            // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
+            // Avoided by poll-with-timeout in writeChannel() above.
+            Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+
+            return this.sendQueue.tryTransfer(message, 24, TimeUnit.HOURS);  // Give it a day to transfer, stupid long
+        } catch (InterruptedException e) {
+            // Send failure
+            LOGGER.error("Interrupt Exception");
             return false;
         } catch (MessageException e) {
             LOGGER.error(e.getMessage(), e);
@@ -821,6 +867,38 @@ public class Peer {
         }
     }
 
+    // @ToDo: NEW ICE
+    // Calling sendMessageWhenReady is now blocking until socket.isOpen == true
+    public Message getResponseToDataFile(Message message) {
+        BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
+
+        // Assign random ID to this message
+        Random random = new Random();
+        int id;
+        do {
+            id = random.nextInt(Integer.MAX_VALUE - 1) + 1;
+
+            // Put queue into map (keyed by message ID) so we can poll for a response
+            // If putIfAbsent() doesn't return null, then this ID is already taken
+        } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
+        message.setId(id);
+
+        try {
+            this.sendMessageWhenReady(message);
+            this.replyQueues.remove(id);
+            return null;
+        }
+        catch (Exception e) {
+            LOGGER.warn("FAIL: Upstream from sendMessageWhenReady()");
+        }
+
+        try {
+            return blockingQueue.poll(1, TimeUnit.HOURS);  // If we get here, we are F'ed
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     protected void startPings() {
         // Replacing initial null value allows getPingTask() to start sending pings.
         LOGGER.trace("[{}] Enabling pings for peer {}", this.peerConnectionId, this);
@@ -849,6 +927,8 @@ public class Peer {
             LOGGER.debug("[{}] Disconnecting peer {} after {}: {}", this.peerConnectionId, this,
                     getConnectionAge(), reason);
         }
+        LOGGER.info("peer.disconnect because {} - peer : {} ", reason, peersNodeId);
+
         this.shutdown();
 
         Network.getInstance().onDisconnect(this);
@@ -865,6 +945,7 @@ public class Peer {
 
         if (this.socketChannel.isOpen()) {
             try {
+                LOGGER.info("CLOSING SOCKET - This is Intentional");
                 this.socketChannel.shutdownOutput();
                 this.socketChannel.close();
             } catch (IOException e) {

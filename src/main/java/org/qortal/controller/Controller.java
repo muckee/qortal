@@ -445,7 +445,7 @@ public class Controller extends Thread {
 				}
 			}
 			else {
-				LOGGER.info("Balance Recorder Disabled");
+				LOGGER.debug("Balance Recorder Disabled");
 			}
 		} catch (DataException e) {
 			// If exception has no cause or message then repository is in use by some other process.
@@ -464,6 +464,8 @@ public class Controller extends Thread {
 		if (!Settings.getInstance().isLite()) {
 
 			// Rebuild Names table and check database integrity (if enabled)
+			// @toDo : We rebuild this table everytime?  This is not sustainable as we age, need a
+			//  	   table that tracks completed features such as this to determine if it needs to run
 			NamesDatabaseIntegrityCheck namesDatabaseIntegrityCheck = new NamesDatabaseIntegrityCheck();
 			namesDatabaseIntegrityCheck.rebuildAllNames();
 			if (Settings.getInstance().isNamesIntegrityCheckEnabled()) {
@@ -516,6 +518,7 @@ public class Controller extends Thread {
 		try {
 			Network network = Network.getInstance();
 			network.start();
+			// @todo : This is where we need to start a listener for "data flows - arbitrary RX"
 		} catch (IOException | DataException e) {
 			LOGGER.error("Unable to start networking", e);
 			Controller.getInstance().shutdown();
