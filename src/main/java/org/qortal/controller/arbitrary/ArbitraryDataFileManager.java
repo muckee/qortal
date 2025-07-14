@@ -40,25 +40,16 @@ public class ArbitraryDataFileManager extends Thread {
     private static ArbitraryDataFileManager instance;
     private volatile boolean isStopping = false;
 
-
-    /**
-     * Map to keep track of our in progress (outgoing) arbitrary data file requests
-     */
+    // Map to keep track of our in progress (outgoing) arbitrary data file requests
     public Map<String, Long> arbitraryDataFileRequests = Collections.synchronizedMap(new HashMap<>());
 
-    /**
-     * Map to keep track of hashes that we might need to relay
-     */
+    // Map to keep track of hashes that we might need to relay
     public final List<ArbitraryRelayInfo> arbitraryRelayMap = Collections.synchronizedList(new ArrayList<>());
 
-    /**
-     * List to keep track of any arbitrary data file hash responses
-     */
+    // List to keep track of any arbitrary data file hash responses
     private final List<ArbitraryFileListResponseInfo> arbitraryDataFileHashResponses = Collections.synchronizedList(new ArrayList<>());
 
-    /**
-     * List to keep track of peers potentially available for direct connections, based on recent requests
-     */
+     // List to keep track of peers potentially available for direct connections, based on recent requests
     private final List<ArbitraryDirectConnectionInfo> directConnectionInfo = Collections.synchronizedList(new ArrayList<>());
 
     /**
@@ -68,12 +59,41 @@ public class ArbitraryDataFileManager extends Thread {
      */
     private Map<String, Long> recentDataRequests = Collections.synchronizedMap(new HashMap<>());
 
-
     public static int MAX_FILE_HASH_RESPONSES = 1000;
+
+    private final Map<String, PeerSendManager> peerSendManagers = new ConcurrentHashMap<>();
+
+    private PeerSendManager getOrCreateSendManager(Peer peer) {
+        try {
+            return peerSendManagers.computeIfAbsent(peer.toString(), key -> new PeerSendManager(peer));
+        } catch (Exception e) {
+            LOGGER.info("FAILED - Could not map to a peer or create a peer");
+            return null;
+        }
+    }
 
     private ArbitraryDataFileManager() {
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate( this::processResponses, 60, 1, TimeUnit.SECONDS);
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60, 1, TimeUnit.SECONDS);
+
+       ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
+
+        cleaner.scheduleAtFixedRate(() -> {
+            long idleCutoff = TimeUnit.MINUTES.toMillis(2);
+            Iterator<Map.Entry<String, PeerSendManager>> iterator = peerSendManagers.entrySet().iterator();
+
+            while (iterator.hasNext()) {
+                Map.Entry<String, PeerSendManager> entry = iterator.next();
+                String peerHash = entry.getKey();
+                PeerSendManager manager = entry.getValue();
+
+                if (manager.isIdle(idleCutoff)) {
+                    iterator.remove(); // SAFE removal during iteration
+                    manager.shutdown();
+                    LOGGER.debug("Cleaned up PeerSendManager for peer {}", peerHash);
+                }
+            }
+        }, 0, 5, TimeUnit.MINUTES);
     }
 
     public static ArbitraryDataFileManager getInstance() {
@@ -82,8 +102,6 @@ public class ArbitraryDataFileManager extends Thread {
 
         return instance;
     }
-
-
 
     @Override
     public void run() {
@@ -104,7 +122,6 @@ public class ArbitraryDataFileManager extends Thread {
         this.interrupt();
     }
 
-
     public void cleanupRequestCache(Long now) {
         if (now == null) {
             return;
@@ -122,10 +139,7 @@ public class ArbitraryDataFileManager extends Thread {
         recentDataRequests.entrySet().removeIf(entry -> entry.getValue() < recentDataRequestMinimumTimestamp);
     }
 
-
-
     // Fetch data files by hash
-
     public boolean fetchArbitraryDataFiles(Peer peer,
                                            byte[] signature,
                                            ArbitraryTransactionData arbitraryTransactionData,
@@ -187,7 +201,6 @@ public class ArbitraryDataFileManager extends Thread {
     // Scheduled executor service to process messages every second
     private final ScheduledExecutorService arbitraryDataFileHashResponseScheduler = Executors.newScheduledThreadPool(1);
 
-
     public void addResponse( ArbitraryFileListResponseInfo responseInfo ) {
 
         synchronized (arbitraryDataFileHashResponseLock) {
@@ -228,11 +241,10 @@ public class ArbitraryDataFileManager extends Thread {
                 Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
 
                 Message response = null;
-                try {
-                    response = peer.getResponseWithTimeout(getArbitraryDataFileMessage, (int) ArbitraryDataManager.ARBITRARY_REQUEST_TIMEOUT);
-                } catch (InterruptedException e) {
-                    // Will return below due to null response
-                }
+
+                //response = peer.getResponseWithTimeout(getArbitraryDataFileMessage, (int) ArbitraryDataManager.ARBITRARY_REQUEST_TIMEOUT); // This constant is 24s, not good
+                response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
+
                 arbitraryDataFileRequests.remove(hash58);
                 LOGGER.trace(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
 
@@ -385,9 +397,7 @@ public class ArbitraryDataFileManager extends Thread {
         }
     }
 
-
     // Fetch data directly from peers
-
     private List<ArbitraryDirectConnectionInfo> getDirectConnectionInfoForSignature(byte[] signature) {
         synchronized (directConnectionInfo) {
             return directConnectionInfo.stream().filter(i -> Arrays.equals(i.getSignature(), signature)).collect(Collectors.toList());
@@ -519,9 +529,7 @@ public class ArbitraryDataFileManager extends Thread {
         return success;
     }
 
-
     // Relays
-
     private List<ArbitraryRelayInfo> getRelayInfoListForHash(String hash58) {
         synchronized (arbitraryRelayMap) {
             return arbitraryRelayMap.stream()
@@ -588,9 +596,7 @@ public class ArbitraryDataFileManager extends Thread {
         arbitraryRelayMap.removeIf(relayInfo -> relayInfo.equals(entry));
     }
 
-
     // Peers requesting QDN data from us
-
     /**
      * Add an address string of a peer that is trying to request data from us.
      * @param peerAddress
@@ -627,9 +633,7 @@ public class ArbitraryDataFileManager extends Thread {
         return !this.recentDataRequests.isEmpty();
     }
 
-
     // Network handlers
-
     public void onNetworkGetArbitraryDataFileMessage(Peer peer, Message message) {
         // Don't respond if QDN is disabled
         if (!Settings.getInstance().isQdnEnabled()) {
@@ -699,6 +703,8 @@ public class ArbitraryDataFileManager extends Thread {
         }
         catch (DataException e) {
             LOGGER.debug("Unable to handle request for arbitrary data file: {}", hash58);
+        } catch (MessageException e) {
+            throw new RuntimeException(e);
         }
     }
 
