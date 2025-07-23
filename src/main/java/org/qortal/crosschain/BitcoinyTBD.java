@@ -1,6 +1,5 @@
 package org.qortal.crosschain;
 
-import org.bitcoinj.core.Block;
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.Context;
 import org.bitcoinj.core.NetworkParameters;
@@ -148,17 +147,5 @@ public class BitcoinyTBD extends Bitcoiny {
 	public void setFeeRequired(long fee) {
 
 		this.netTBD.setFeeRequired( fee );
-	}
-
-	@Override
-	public String getPaymentProtocolId() {
-		return params.getId();
-	}
-
-	@Override
-	public Block getGenesisBlock() {
-		if(genesisBlock == null)
-			genesisBlock = params.getGenesisBlock();
-		return this.genesisBlock;
 	}
 }
