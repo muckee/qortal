@@ -32,6 +32,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.qortal.crypto.Crypto;
+
 public class ArbitraryDataFileManager extends Thread {
 
     public static final int SEND_TIMEOUT_MS = 500;
@@ -249,6 +251,18 @@ public class ArbitraryDataFileManager extends Thread {
 
                 ArbitraryDataFileMessage peersArbitraryDataFileMessage = (ArbitraryDataFileMessage) response;
                 arbitraryDataFile = peersArbitraryDataFileMessage.getArbitraryDataFile();
+                byte[] fileBytes = arbitraryDataFile.getBytes();
+                if (fileBytes == null) {
+                    LOGGER.debug(String.format("Failed to read bytes for file hash %s", hash58));
+                    return null;
+                }
+
+                byte[] actualHash = Crypto.digest(fileBytes);
+                if (!Arrays.equals(hash, actualHash)) {
+                    LOGGER.debug(String.format("Hash mismatch for chunk: expected %s but got %s",
+                        hash58, Base58.encode(actualHash)));
+                    return null; 
+                }
             } else {
                 LOGGER.debug(String.format("File hash %s already exists, so skipping the request", hash58));
                 arbitraryDataFile = existingFile;
