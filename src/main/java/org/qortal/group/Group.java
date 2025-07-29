@@ -717,7 +717,9 @@ public class Group {
 	public void uncancelInvite(CancelGroupInviteTransactionData cancelGroupInviteTransactionData) throws DataException {
 		// Reinstate invite
 		TransactionData transactionData = this.repository.getTransactionRepository().fromSignature(cancelGroupInviteTransactionData.getInviteReference());
-		this.addInvite((GroupInviteTransactionData) transactionData);
+		if( transactionData != null ) {
+			this.addInvite((GroupInviteTransactionData) transactionData);
+		}
 
 		// Clear cached reference to invite transaction
 		cancelGroupInviteTransactionData.setInviteReference(null);
