@@ -706,7 +706,9 @@ public class Group {
 
 		// Save reference to invite transaction so invite can be rebuilt during orphaning.
 		GroupInviteData groupInviteData = this.getInvite(invitee);
-		cancelGroupInviteTransactionData.setInviteReference(groupInviteData.getReference());
+		if( groupInviteData != null) {
+			cancelGroupInviteTransactionData.setInviteReference(groupInviteData.getReference());
+		}
 
 		// Delete invite
 		this.deleteInvite(invitee);
