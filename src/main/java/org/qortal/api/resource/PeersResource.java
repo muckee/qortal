@@ -22,6 +22,7 @@ import org.qortal.controller.Synchronizer.SynchronizationResult;
 import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
 import org.qortal.repository.DataException;
@@ -90,6 +91,27 @@ public class PeersResource {
 	})
 	public List<PeerData> getKnownPeers() {
 		return Network.getInstance().getAllKnownPeers();
+	}
+
+	@GET
+	@Path("/data")
+	@Operation(
+			summary = "Fetch list of peers on the Data Network",
+			responses = {
+					@ApiResponse(
+							content = @Content(
+									mediaType = MediaType.APPLICATION_JSON,
+									array = @ArraySchema(
+											schema = @Schema(
+													implementation = PeerData.class
+											)
+									)
+							)
+					)
+			}
+	)
+	public List<ConnectedPeer> getDataPeers() {
+		return NetworkData.getInstance().getImmutableConnectedPeers().stream().map(ConnectedPeer::new).collect(Collectors.toList());
 	}
 
 	@GET
