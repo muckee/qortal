@@ -708,8 +708,6 @@ public class Network {
                      * Those isXXXable() calls could throw CancelledKeyException, so we catch it here and return null.
                      */
                     return null;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
                 }
             }
 
