@@ -11,9 +11,7 @@ import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
 import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
-import org.qortal.network.Network;
-import org.qortal.network.Peer;
-import org.qortal.network.PeerSendManagement;
+import org.qortal.network.*;
 import org.qortal.network.message.*;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -26,7 +24,7 @@ import org.qortal.utils.NTP;
 import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+//import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -34,7 +32,7 @@ import java.util.stream.Collectors;
 
 public class ArbitraryDataFileManager extends Thread {
 
-    public static final int SEND_TIMEOUT_MS = 500;
+    //public static final int SEND_TIMEOUT_MS = 500; We Now use the new TimedMessage Features
     private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataFileManager.class);
 
     private static ArbitraryDataFileManager instance;
@@ -390,7 +388,7 @@ public class ArbitraryDataFileManager extends Thread {
             // The ID needs to match that of the original request
             message.setId(originalMessage.getId());
 
-            PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer).queueMessage(message, SEND_TIMEOUT_MS);
+            PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer).queueMessage(message); //, SEND_TIMEOUT_MS
 
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
@@ -476,7 +474,7 @@ public class ArbitraryDataFileManager extends Thread {
                 }
 
                 String peerAddressStringWithPort = String.format("%s:%d", host, port);
-                success = Network.getInstance().requestDataFromPeer(peerAddressStringWithPort, signature);
+                success = NetworkData.getInstance().requestDataFromPeer(peerAddressStringWithPort, signature);
 
                 int defaultPort = Settings.getInstance().getDefaultListenPort();
 
@@ -487,7 +485,7 @@ public class ArbitraryDataFileManager extends Thread {
                     if (host != null && port > 0) {
                         if (port != defaultPort) {
                             String newPeerAddressString = String.format("%s:%d", host, defaultPort);
-                            success = Network.getInstance().requestDataFromPeer(newPeerAddressString, signature);
+                            success = NetworkData.getInstance().requestDataFromPeer(newPeerAddressString, signature);
                         }
                     }
                 }
@@ -497,7 +495,7 @@ public class ArbitraryDataFileManager extends Thread {
                 if (!success) {
                     if (host != null) {
                         final String finalHost = host;
-                        List<PeerData> knownPeers = Network.getInstance().getAllKnownPeers().stream()
+                        List<PeerData> knownPeers = NetworkData.getInstance().getAllKnownPeers().stream()
                                 .filter(knownPeerData -> knownPeerData.getAddress().getHost().equals(finalHost))
                                 .collect(Collectors.toList());
                         // Loop through each match and attempt a connection
@@ -506,7 +504,7 @@ public class ArbitraryDataFileManager extends Thread {
                             int matchingPeerPort = matchingPeer.getAddress().getPort();
                             // Make sure that it's not a port we've already tried
                             if (matchingPeerPort != port && matchingPeerPort != defaultPort) {
-                                success = Network.getInstance().requestDataFromPeer(matchingPeerAddress, signature);
+                                success = NetworkData.getInstance().requestDataFromPeer(matchingPeerAddress, signature);
                                 if (success) {
                                     // Successfully connected, so stop making connections
                                     break;
@@ -598,8 +596,18 @@ public class ArbitraryDataFileManager extends Thread {
 
     // Peers requesting QDN data from us
     /**
-     * Add an address string of a peer that is trying to request data from us.
-     * @param peerAddress
+     * Adds a recent data request timestamp for the specified peer address.
+     * <p>
+     * The method performs validation on the input to ensure it is non-null,
+     * that the current NTP time is available, and that the host portion of
+     * the peer address is a valid IP address. If valid, the host portion
+     * (without the port) is recorded with the current timestamp.
+     * <p>
+     * This is typically used to track which peers have recently requested data,
+     * while normalizing peer addresses to avoid mismatches due to port differences.
+     *
+     * @param peerAddress the address of the peer in the format "host:port" (e.g., "192.168.0.2:1234")
+     *
      */
     public void addRecentDataRequest(String peerAddress) {
         if (peerAddress == null) {
@@ -660,7 +668,7 @@ public class ArbitraryDataFileManager extends Thread {
                 ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(signature, arbitraryDataFile);
                 arbitraryDataFileMessage.setId(message.getId());
 
-                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage, SEND_TIMEOUT_MS);
+                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage); // , SEND_TIMEOUT_MS
 
             }
             else if (relayInfo != null) {
@@ -686,7 +694,7 @@ public class ArbitraryDataFileManager extends Thread {
                 Controller.getInstance().stats.getArbitraryDataFileMessageStats.unknownFiles.getAndIncrement();
 
                 // Send valid, yet unexpected message type in response, so peer's synchronizer doesn't have to wait for timeout
-                LOGGER.debug(String.format("Sending 'file unknown' response to peer %s for GET_FILE request for unknown file %s", peer, arbitraryDataFile));
+                LOGGER.debug("Sending 'file unknown' response to peer {} for GET_FILE request for unknown file {}", peer, arbitraryDataFile);
 
                 // Send generic 'unknown' message as it's very short
                 Message fileUnknownMessage = peer.getPeersVersion() >= GenericUnknownMessage.MINIMUM_PEER_VERSION

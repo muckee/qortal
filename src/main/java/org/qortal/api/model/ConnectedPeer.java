@@ -9,7 +9,7 @@ import org.qortal.network.Peer;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @XmlAccessorType(XmlAccessType.FIELD)
@@ -36,6 +36,10 @@ public class ConnectedPeer {
     public byte[] lastBlockSignature;
     public Long lastBlockTimestamp;
     public UUID connectionId;
+
+    @Schema(description = "Capabilities as an array of single-entry key:value maps")
+    public List<Map<String, Object>> capabilities;
+
     public String age;
     public Boolean isTooDivergent;
 
@@ -56,6 +60,11 @@ public class ConnectedPeer {
         this.version = peer.getPeersVersionString();
         this.nodeId = peer.getPeersNodeId();
         this.connectionId = peer.getPeerConnectionId();
+
+        if (peer.getPeersCapabilities().size() > 0) {
+            capabilities = peer.getPeersCapabilities().getPeerCapabilitesListMap();
+        }
+
         if (peer.getConnectionEstablishedTime() > 0) {
             long age = (System.currentTimeMillis() - peer.getConnectionEstablishedTime());
             long minutes = TimeUnit.MILLISECONDS.toMinutes(age);

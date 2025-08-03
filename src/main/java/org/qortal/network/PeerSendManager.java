@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.network.message.Message;
-import org.qortal.network.PeerSpeedTracker;
+import org.qortal.network.helper.PeerSpeedTracker;
 import org.qortal.network.message.MessageException;
 
 
@@ -58,7 +58,7 @@ public class PeerSendManager {
      * to enqueue messages, while the internal worker sends them asynchronously.
      *
      * @see org.qortal.network.Peer
-     * @see org.qortal.network.PeerSpeedTracker
+     * @see PeerSpeedTracker
      * @see org.qortal.network.message.Message
      *
      * @since v5.0.1
@@ -234,7 +234,7 @@ public class PeerSendManager {
         }
 
         // Below here is for 2-9 priorities
-        // @todo Figure out what prios should be for other tasks
+        // @ToDo Figure out what prios should be for other tasks
         // For other priorities: calculate insertion index based on priority scale (1–10)
         int insertIndex = (int) Math.round(((double) (priority - 1) / 9.0) * queueSize);
         insertIndex = Math.min(insertIndex, queueSize); // Safety bound
@@ -252,8 +252,6 @@ public class PeerSendManager {
                 queue.offer(allMessages[i]);
             }
         }
-
-        return true;
     }
 
     /**

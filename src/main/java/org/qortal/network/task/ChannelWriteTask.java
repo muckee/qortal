@@ -3,6 +3,7 @@ package org.qortal.network.task;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.utils.ExecuteProduceConsume.Task;
 
@@ -54,10 +55,25 @@ public class ChannelWriteTask implements Task {
             } while( isSocketClogged );
 			
             // Tell Network that we've finished
-            Network.getInstance().notifyChannelNotWriting(socketChannel);
+            switch (peer.getPeerType()) {
+                case Peer.NETWORKDATA:
+                    NetworkData.getInstance().notifyChannelNotWriting(socketChannel);
+                    break;
+                default:
+                    Network.getInstance().notifyChannelNotWriting(socketChannel);
+                    break;
+            }
 
-            if (isSocketClogged)
-                Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+            if (isSocketClogged) {
+                switch (peer.getPeerType()) {
+                    case Peer.NETWORKDATA:
+                        NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                        break;
+                    default:
+                        Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                        break;
+                }
+            }
         } catch (IOException e) {
             if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
                 peer.disconnect("Connection reset");

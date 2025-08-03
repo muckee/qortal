@@ -9,6 +9,7 @@ import org.qortal.controller.Controller;
 import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.block.CommonBlockData;
 import org.qortal.data.network.PeerData;
+import org.qortal.network.helper.PeerCapabilities;
 import org.qortal.network.message.ChallengeMessage;
 import org.qortal.network.message.Message;
 import org.qortal.network.message.MessageException;
@@ -33,6 +34,10 @@ import java.util.regex.Pattern;
 
 // For managing one peer
 public class Peer {
+
+    public static final int NETWORK = 0;
+    public static final int NETWORKDATA = 1;
+
     private static final Logger LOGGER = LogManager.getLogger(Peer.class);
 
     /**
@@ -70,6 +75,7 @@ public class Peer {
      * True if connected for the purposes of transfering specific QDN data
      */
     private boolean isDataPeer;
+    private int peerType; // Type 0 is default, Type 1 is NetworkData
 
     private final UUID peerConnectionId = UUID.randomUUID();
     private final Object byteBufferLock = new Object();
@@ -129,7 +135,7 @@ public class Peer {
     private byte[] peersChallenge;
 
     private PeerData peerData = null;
-
+    private PeerCapabilities peerCapabilities;
     /**
      * Peer's value of connectionTimestamp.
      */
@@ -174,24 +180,35 @@ public class Peer {
     /**
      * Construct unconnected, outbound Peer using socket address in peer data
      */
-    public Peer(PeerData peerData) {
+    public Peer(PeerData peerData, int network) {
         this.isOutbound = true;
         this.peerData = peerData;
+        this.peerType = network;
     }
 
     /**
      * Construct Peer using existing, connected socket
      */
-    public Peer(SocketChannel socketChannel) throws IOException {
+//    public Peer(SocketChannel socketChannel) throws IOException {
+//        this(socketChannel, Peer.NETWORK);
+//    }
+
+    public Peer(SocketChannel socketChannel, int network) throws IOException {
         this.isOutbound = false;
         this.socketChannel = socketChannel;
-        sharedSetup();
+        int port = socketChannel.socket().getPort();
+        if (port == 12394 || network == Peer.NETWORKDATA)
+            sharedSetup(Peer.NETWORKDATA);
+        else
+            sharedSetup(Peer.NETWORK);
 
         this.resolvedAddress = ((InetSocketAddress) socketChannel.socket().getRemoteSocketAddress());
         this.isLocal = isAddressLocal(this.resolvedAddress.getAddress());
 
         PeerAddress peerAddress = PeerAddress.fromSocket(socketChannel.socket());
         this.peerData = new PeerData(peerAddress);
+
+        this.peerType = network;
     }
 
     // Getters / setters
@@ -224,6 +241,17 @@ public class Peer {
         this.isDataPeer = isDataPeer;
     }
 
+    public void setPeerType (int type) {
+        this.peerType = type;
+    }
+
+    public int getPeerType () {
+        return this.peerType;
+    }
+    public Object getPeerCapability(String capName) {
+        return peerCapabilities.getCapability(capName);
+    }
+
     public Handshake getHandshakeStatus() {
         synchronized (this.handshakingLock) {
             return this.handshakeStatus;
@@ -253,6 +281,7 @@ public class Peer {
 
         // Generate a random number between the min and the max
         Random random = new Random();
+        // @ToDo : what the helly???  random age? MAx is default - 6 hrs in settings
         this.maxConnectionAge = (random.nextInt(peerConnectionTimeRange) + minPeerConnectionTime) * 1000L;
         LOGGER.debug(String.format("[%s] Generated max connection age for peer %s. Min: %ds, max: %ds, range: %ds, random max: %dms", this.peerConnectionId, this, minPeerConnectionTime, maxPeerConnectionTime, peerConnectionTimeRange, this.maxConnectionAge));
 
@@ -290,6 +319,16 @@ public class Peer {
         synchronized (this.peerInfoLock) {
             this.peersVersionString = versionString;
             this.peersVersion = version;
+        }
+    }
+
+    public PeerCapabilities getPeersCapabilities() {
+        return this.peerCapabilities;
+    }
+
+    protected void setPeersCapabilities(PeerCapabilities capabilities) {
+        synchronized (this.peerInfoLock) {
+            this.peerCapabilities = capabilities;
         }
     }
 
@@ -439,11 +478,14 @@ public class Peer {
 
     // Processing
 
-    private void sharedSetup() throws IOException {
+    private void sharedSetup(int network) throws IOException {
         this.connectionTimestamp = NTP.getTime();
         this.socketChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
         this.socketChannel.configureBlocking(false);
-        Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
+        if (network == Peer.NETWORK)
+            Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
+        else
+            NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
         this.byteBuffer = null; // Defer allocation to when we need it, to save memory. Sorry GC!
         this.sendQueue = new LinkedTransferQueue<>();
         this.replyQueues = new ConcurrentHashMap<>();
@@ -454,7 +496,7 @@ public class Peer {
         random.nextBytes(this.ourChallenge);
     }
 
-    public SocketChannel connect() {
+    public SocketChannel connect(int network) {
         LOGGER.trace("[{}] Connecting to peer {}", this.peerConnectionId, this);
 
         try {
@@ -478,7 +520,7 @@ public class Peer {
 
         try {
             LOGGER.debug("[{}] Connected to peer {}", this.peerConnectionId, this);
-            sharedSetup();
+            sharedSetup(network);
             return socketChannel;
         } catch (IOException e) {
             LOGGER.trace("[{}] Post-connection setup failed, peer {}", this.peerConnectionId, this);
@@ -510,7 +552,6 @@ public class Peer {
                     LOGGER.info("RETURN - Socket isClosed");
                     return;
                 }
-
 
                 // Do we need to allocate byteBuffer?
                 if (this.byteBuffer == null) {
@@ -616,7 +657,14 @@ public class Peer {
 
                     // Prematurely end any blocking channel select so that new messages can be processed.
                     // This might cause this.socketChannel.read() above to return zero into bytesRead.
-                    Network.getInstance().wakeupChannelSelector();
+                    switch (this.peerType) {
+                        case Peer.NETWORK:
+                            Network.getInstance().wakeupChannelSelector();
+                            break;
+                        case Peer.NETWORKDATA:
+                            NetworkData.getInstance().wakeupChannelSelector();
+                            break;
+                    }
                 }
             }
         }
@@ -701,7 +749,7 @@ public class Peer {
         }
     }
 
-    protected Task getMessageTask() {
+    protected Task getMessageTask(int network) {
         /*
          * If we are still handshaking and there is a message yet to be processed then
          * don't produce another message task. This allows us to process handshake
@@ -725,7 +773,10 @@ public class Peer {
         }
 
         // Return a task to process message in queue
-        return new MessageTask(this, nextMessage);
+        LOGGER.trace("Generating getMessageTask for {}", peerType);
+
+        return new MessageTask(this, nextMessage, network);
+
     }
 
     /**
@@ -745,10 +796,50 @@ public class Peer {
      * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
      */
     public boolean sendMessageWithTimeout(Message message, int timeout) {
+        if (!this.socketChannel.isOpen()) {
+            LOGGER.debug("SocketChannel was not open; returning false");
+            return false;
+        }
 
-        return PeerSendManagement.getInstance().getOrCreateSendManager(this).queueMessage(message, timeout);
+        try {
+            // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
+            LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
+                    message.getType().name(), message.getId(), this);
+
+            // Check message properly constructed
+            message.checkValidOutgoing();
+
+            // Possible race condition:
+            // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
+            // Avoided by poll-with-timeout in writeChannel() above.
+            switch (this.getPeerType()) {
+                case Peer.NETWORK:
+                    Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+                case Peer.NETWORKDATA:
+                    LOGGER.info("Setting OP_WRITE on NetworkData");
+                    NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+            }
+
+
+            return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            // Send failure
+            LOGGER.error("Interrupt Exception");
+            return false;
+        } catch (MessageException e) {
+            LOGGER.error(e.getMessage(), e);
+            return false;
+        }
     }
 
+    /**
+     * Attempt to send Message to peer, using custom timeout.
+     *
+     * @param message message to be sent
+     * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
+     */
     public boolean sendMessageWithTimeoutNow(Message message, int timeout) {
         if (!this.socketChannel.isOpen()) {
             LOGGER.debug("SocketChannel was not open; returning false");
@@ -766,7 +857,14 @@ public class Peer {
             // Possible race condition:
             // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
             // Avoided by poll-with-timeout in writeChannel() above.
-            Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+            switch (this.getPeerType()) {
+                case Peer.NETWORK:
+                    Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+                case Peer.NETWORKDATA:
+                    NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+            }
             return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             // Send failure
@@ -800,7 +898,14 @@ public class Peer {
             // Possible race condition:
             // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
             // Avoided by poll-with-timeout in writeChannel() above.
-            Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+            switch (this.getPeerType()) {
+                case Peer.NETWORK:
+                    Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+                case Peer.NETWORKDATA:
+                    NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+            }
 
             return this.sendQueue.tryTransfer(message, 24, TimeUnit.HOURS);  // Give it a day to transfer, stupid long
         } catch (InterruptedException e) {
@@ -932,11 +1037,18 @@ public class Peer {
             LOGGER.debug("[{}] Disconnecting peer {} after {}: {}", this.peerConnectionId, this,
                     getConnectionAge(), reason);
         }
-        LOGGER.info("peer.disconnect because {} - peer : {} ", reason, peersNodeId);
+        LOGGER.info("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
 
         this.shutdown();
 
-        Network.getInstance().onDisconnect(this);
+        switch (this.getPeerType()) {
+            case Peer.NETWORK:
+                Network.getInstance().onDisconnect(this);
+                break;
+            case Peer.NETWORKDATA:
+                NetworkData.getInstance().onDisconnect(this);
+                break;
+        }
     }
 
     public void shutdown() {

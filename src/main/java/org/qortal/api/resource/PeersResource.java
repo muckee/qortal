@@ -48,6 +48,7 @@ public class PeersResource {
 	HttpServletRequest request;
 
 	@GET
+	@Produces(MediaType.APPLICATION_JSON)
 	@Operation(
 		summary = "Fetch list of connected peers",
 		responses = {

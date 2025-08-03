@@ -9,8 +9,6 @@ import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
 import org.qortal.crypto.Crypto;
-import org.qortal.data.block.BlockData;
-import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.network.message.*;
@@ -41,56 +39,38 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-// For managing peers
-public class Network {
-    private static final Logger LOGGER = LogManager.getLogger(Network.class);
+// For managing arbitrary data between peers
+public class NetworkData {
+    private static final Logger LOGGER = LogManager.getLogger(NetworkData.class);
 
+    // the maximum number of pending connections the operating system will allow to queue up for the server socket
     private static final int LISTEN_BACKLOG = 5;
-    /**
-     * How long before retrying after a connection failure, in milliseconds.
-     */
+
+    // How long before retrying after a connection failure, in milliseconds.
     private static final long CONNECT_FAILURE_BACKOFF = 5 * 60 * 1000L; // ms
-    /**
-     * How long between informational broadcasts to all connected peers, in milliseconds.
-     */
+
+    // How long between informational broadcasts to all connected peers, in milliseconds.
+    // @ToDo : What is being broadcast?
     private static final long BROADCAST_INTERVAL = 30 * 1000L; // ms
-    /**
-     * Maximum time since last successful connection for peer info to be propagated, in milliseconds.
-     */
+
+    // Maximum time since last successful connection for peer info to be propagated, in milliseconds.
     private static final long RECENT_CONNECTION_THRESHOLD = 24 * 60 * 60 * 1000L; // ms
-    /**
-     * Maximum time since last connection attempt before a peer is potentially considered "old", in milliseconds.
-     */
+
+    // Maximum time since last connection attempt before a peer is potentially considered "old", in milliseconds.
     private static final long OLD_PEER_ATTEMPTED_PERIOD = 24 * 60 * 60 * 1000L; // ms
-    /**
-     * Maximum time since last successful connection before a peer is potentially considered "old", in milliseconds.
-     */
+
+    //  Maximum time since last successful connection before a peer is potentially considered "old", in milliseconds.
     private static final long OLD_PEER_CONNECTION_PERIOD = 7 * 24 * 60 * 60 * 1000L; // ms
-    /**
-     * Maximum time allowed for handshake to complete, in milliseconds.
-     */
+
+    //  Maximum time allowed for handshake to complete, in milliseconds.
     private static final long HANDSHAKE_TIMEOUT = 60 * 1000L; // ms
 
     private static final byte[] MAINNET_MESSAGE_MAGIC = new byte[]{0x51, 0x4f, 0x52, 0x54}; // QORT
     private static final byte[] TESTNET_MESSAGE_MAGIC = new byte[]{0x71, 0x6f, 0x72, 0x54}; // qorT
 
-    private static final String[] INITIAL_PEERS = new String[]{
-            "node1.qortal.org", "node2.qortal.org", "node3.qortal.org", "node4.qortal.org", "node5.qortal.org",
-            "node6.qortal.org", "node7.qortal.org", "node8.qortal.org", "node9.qortal.org", "node10.qortal.org",
-            "node.qortal.ru", "node2.qortal.ru", "node3.qortal.ru", "node.qortal.uk", "node22.qortal.org",
-            "cinfu1.crowetic.com", "node.cwd.systems", "bootstrap.cwd.systems", "node1.qortalnodes.live",
-            "node2.qortalnodes.live", "node3.qortalnodes.live", "node4.qortalnodes.live", "node5.qortalnodes.live",
-            "node6.qortalnodes.live", "node7.qortalnodes.live", "node8.qortalnodes.live"
-    };
-
     private static final long NETWORK_EPC_KEEPALIVE = 5L; // seconds
 
-    public static final int MAX_SIGNATURES_PER_REPLY = 500;
-    public static final int MAX_BLOCK_SUMMARIES_PER_REPLY = 500;
-
-    private static final long DISCONNECTION_CHECK_INTERVAL = 20 * 1000L; // milliseconds
-
-    private static final int BROADCAST_CHAIN_TIP_DEPTH = 7; // Just enough to fill a SINGLE TCP packet (~1440 bytes)
+    private static final long DISCONNECTION_CHECK_INTERVAL = 180 * 1000L; // milliseconds - 3min
 
     // Generate our node keys / ID
     private final Ed25519PrivateKeyParameters edPrivateKeyParams = new Ed25519PrivateKeyParameters(new SecureRandom());
@@ -120,20 +100,13 @@ public class Network {
     private final List<Peer> outboundHandshakedPeers = Collections.synchronizedList(new ArrayList<>());
     private List<Peer> immutableOutboundHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
 
-
-    /**
-     * Count threads per message type in order to enforce limits
-     */
+    //  Count threads per message type in order to enforce limits
     private final Map<MessageType, Integer> threadsPerMessageType = Collections.synchronizedMap(new HashMap<>());
 
-    /**
-     * Keep track of total thread count, to warn when the thread pool is getting low
-     */
+    //  Keep track of total thread count, to warn when the thread pool is getting low
     private int totalThreadCount = 0;
 
-    /**
-     * Thresholds at which to warn about the number of active threads
-     */
+    // * Thresholds at which to warn about the number of active threads
     private final int threadCountWarningThreshold = (int) (Settings.getInstance().getMaxNetworkThreadPoolSize() * 0.9f);
     private final Integer threadCountPerMessageTypeWarningThreshold = Settings.getInstance().getThreadCountPerMessageTypeWarningThreshold();
 
@@ -149,7 +122,7 @@ public class Network {
 
     private final Lock mergePeersLock = new ReentrantLock();
 
-    private List<String> ourExternalIpAddressHistory = new ArrayList<>();
+    private final List<String> ourExternalIpAddressHistory = new ArrayList<>();
     private String ourExternalIpAddress = null;
     private int ourExternalPort = Settings.getInstance().getListenPort();
 
@@ -157,7 +130,7 @@ public class Network {
 
     // Constructors
 
-    private Network() {
+    private NetworkData() {
         maxMessageSize = 4 + 1 + 4 + BlockChain.getInstance().getMaxBlockSize();
 
         minOutboundPeers = Settings.getInstance().getMinOutboundPeers();
@@ -166,15 +139,16 @@ public class Network {
         // We'll use a cached thread pool but with more aggressive timeout.
         ExecutorService networkExecutor = new ThreadPoolExecutor(2,
                 Settings.getInstance().getMaxNetworkThreadPoolSize(),
-                NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,
+                NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,  // 5 Seconds
                 new SynchronousQueue<Runnable>(),
-                new NamedThreadFactory("Network-EPC", Settings.getInstance().getNetworkThreadPriority()));
-        networkEPC = new NetworkProcessor(networkExecutor);
+                new NamedThreadFactory("NetworkData-EPC", Settings.getInstance().getNetworkThreadPriority()));
+        networkEPC = new NetworkDataProcessor(networkExecutor);
     }
 
     public void start() throws IOException, DataException {
+        LOGGER.trace("Running start()");
         // Grab P2P port from settings
-        int listenPort = Settings.getInstance().getListenPort();
+        int listenPort = Settings.getInstance().getDataListenPort();
 
         // Grab P2P bind addresses from settings
         List<String> bindAddresses = new ArrayList<>();
@@ -201,6 +175,7 @@ public class Network {
                 serverSelectionKey = serverChannel.register(channelSelector, SelectionKey.OP_ACCEPT);
 
                 this.bindAddress = bindAddress; // Store the selected address, so that it can be used by other parts of the app
+                LOGGER.trace("Success - Bound to interface: {}:{}", this.bindAddress,listenPort);
                 break; // We don't want to bind to more than one address
             } catch (UnknownHostException | UnsupportedAddressTypeException e) {
                 LOGGER.error("Can't bind listen socket to address {}", Settings.getInstance().getBindAddress());
@@ -215,28 +190,6 @@ public class Network {
             }
         }
 
-        // Load all known peers from repository
-        synchronized (this.allKnownPeers) {
-            List<String> fixedNetwork = Settings.getInstance().getFixedNetwork();
-            if (fixedNetwork != null && !fixedNetwork.isEmpty()) {
-                Long addedWhen = NTP.getTime();
-                String addedBy = "fixedNetwork";
-                List<PeerAddress> peerAddresses = new ArrayList<>();
-                for (String address : fixedNetwork) {
-                    PeerAddress peerAddress = PeerAddress.fromString(address);
-                    peerAddresses.add(peerAddress);
-                }
-                List<PeerData> peers = peerAddresses.stream()
-                        .map(peerAddress -> new PeerData(peerAddress, addedWhen, addedBy))
-                        .collect(Collectors.toList());
-                this.allKnownPeers.addAll(peers);
-            } else {
-                try (Repository repository = RepositoryManager.getRepository()) {
-                    this.allKnownPeers.addAll(repository.getNetworkRepository().getAllPeers());
-                }
-            }
-        }
-
         // Attempt to set up UPnP. All errors are ignored.
         if (Settings.getInstance().isUPnPEnabled()) {
             UPnP.openPortTCP(Settings.getInstance().getListenPort());
@@ -247,22 +200,15 @@ public class Network {
 
         // Start up first networking thread
         networkEPC.start();
-
-        // Completed Setup for Network, Time to launch NetworkData for non-priority tasks
-        LOGGER.info("Starting second network (NetworkData) on port {}", Settings.getInstance().getDataListenPort());
-        try {
-            NetworkData.getInstance().start();
-        } catch (IOException | DataException e) {
-            LOGGER.error("Unable to start second network for data (QDN)", e);
-        }
     }
 
     // Getters / setters
 
     private static class SingletonContainer {
-        private static final Network INSTANCE = new Network();
+        private static final NetworkData INSTANCE = new NetworkData();
     }
 
+    // @ToDo : does this return all MessageTypes?
     public Map<MessageType, Integer> getThreadsPerMessageType() {
         return this.threadsPerMessageType;
     }
@@ -273,16 +219,16 @@ public class Network {
         }
     }
 
-    public static Network getInstance() {
+    public static NetworkData getInstance() {
         return SingletonContainer.INSTANCE;
-    }
-
-    public int getMaxPeers() {
-        return this.maxPeers;
     }
 
     public String getBindAddress() {
         return this.bindAddress;
+    }
+
+    public int getMaxPeers() {
+        return this.maxPeers;
     }
 
     public byte[] getMessageMagic() {
@@ -309,6 +255,33 @@ public class Network {
     }
 
     // Peer lists
+//    public void updatePeerList(List<PeerData> networkPeerList) {
+//        synchronized (this.allKnownPeers) {
+//
+//            LOGGER.info("Our Connected Peer Count is: {}", connectedPeers.size());
+//            LOGGER.info("Updating Peer List from Network");
+//
+//            // Because we need to set values from Network to baseline(0), only merge in new address, also skip already existing ones.
+//            networkPeerList.removeIf(allKnownPeers::contains);
+//            for(PeerData passedPeer : networkPeerList) {
+//                passedPeer.setLastAttempted(0L);
+//                passedPeer.setLastConnected(0L);
+//                passedPeer.setLastMisbehaved(0L);
+//                passedPeer.setFailedSyncCount(0);
+//                allKnownPeers.add(passedPeer);              // Add to the list of peers
+//            }
+//
+//            // Shows New Peers we are adding to the DataNetwork
+//            for (PeerData p : networkPeerList ){
+//                LOGGER.info("This is a peer passed into the list: {}", p.getAddress().toString());
+//            }
+//
+//            // Shows all peers in the DataNetwork
+//            for (PeerData p : allKnownPeers ){
+//                LOGGER.info("This is the complete peer list: {}", p.getAddress().toString());
+//            }
+//        }
+//    }
 
     public List<PeerData> getAllKnownPeers() {
         synchronized (this.allKnownPeers) {
@@ -326,11 +299,11 @@ public class Network {
                 .collect(Collectors.toList());
     }
 
-    public List<Peer> getImmutableConnectedNonDataPeers() {
-        return this.getImmutableConnectedPeers().stream()
-                .filter(p -> !p.isDataPeer())
-                .collect(Collectors.toList());
-    }
+//    public List<Peer> getImmutableConnectedNonDataPeers() {
+//        return this.getImmutableConnectedPeers().stream()
+//                .filter(p -> !p.isDataPeer())
+//                .collect(Collectors.toList());
+//    }
 
     public void addConnectedPeer(Peer peer) {
         this.connectedPeers.add(peer); // thread safe thanks to synchronized list
@@ -356,6 +329,7 @@ public class Network {
             PeerAddress peerAddress = PeerAddress.fromString(peerAddressString);
             PeerData peerData = null;
 
+            LOGGER.info("Requesting data using NetworkData from {}", peerAddressString);
             // Reuse an existing PeerData instance if it's already in the known peers list
             synchronized (this.allKnownPeers) {
                 peerData = this.allKnownPeers.stream()
@@ -364,9 +338,10 @@ public class Network {
                         .orElse(null);
             }
 
+            // When should we get a peer we don't know about?  We get our peers from the main NetWork
             if (peerData == null) {
                 // Not a known peer, so we need to create one
-                Long addedWhen = NTP.getTime();
+                Long addedWhen =  NTP.getTime();
                 String addedBy = "requestDataFromPeer";
                 peerData = new PeerData(peerAddress, addedWhen, addedBy);
             }
@@ -397,9 +372,10 @@ public class Network {
                     if (!isConnected) {
                         // Add this signature to the list of pending requests for this peer
                         LOGGER.debug("Making connection to peer {} to request files for signature {}...", peerAddressString, Base58.encode(signature));
-                        Peer peer = new Peer(peerData, Peer.NETWORK);
-                        peer.setIsDataPeer(true);
+                        Peer peer = new Peer(peerData, Peer.NETWORKDATA);
+                        peer.setIsDataPeer(true);   // This is set when we make a connection
                         peer.addPendingSignatureRequest(signature);
+                        //peer.setPeerType(Peer.NETWORKDATA);
                         return this.connectPeer(peer);
                         // If connection (and handshake) is successful, data will automatically be requested
                     }
@@ -418,11 +394,9 @@ public class Network {
     }
 
     private boolean requestDataFromConnectedPeer(Peer connectedPeer, byte[] signature) {
-        if (signature == null) {
-            // Nothing to do
+        if (signature == null) {  // Nothing to do
             return false;
         }
-
         return ArbitraryDataFileListManager.getInstance().fetchArbitraryDataFileList(connectedPeer, signature);
     }
 
@@ -512,31 +486,18 @@ public class Network {
         }
     };
 
-    // Initial setup
-
-    public static void installInitialPeers(Repository repository) throws DataException {
-        for (String address : INITIAL_PEERS) {
-            PeerAddress peerAddress = PeerAddress.fromString(address);
-
-            PeerData peerData = new PeerData(peerAddress, System.currentTimeMillis(), "INIT");
-            repository.getNetworkRepository().save(peerData);
-        }
-
-        repository.saveChanges();
-    }
-
     // Main thread
 
-    class NetworkProcessor extends ExecuteProduceConsume {
+    class NetworkDataProcessor extends ExecuteProduceConsume {
 
-        private final Logger LOGGER = LogManager.getLogger(NetworkProcessor.class);
+        private final Logger LOGGER = LogManager.getLogger(NetworkDataProcessor.class);
 
         private final AtomicLong nextConnectTaskTimestamp = new AtomicLong(0L); // ms - try first connect once NTP syncs
-        private final AtomicLong nextBroadcastTimestamp = new AtomicLong(0L); // ms - try first broadcast once NTP syncs
+       // private final AtomicLong nextBroadcastTimestamp = new AtomicLong(0L); // ms - try first broadcast once NTP syncs
 
         private Iterator<SelectionKey> channelIterator = null;
 
-        NetworkProcessor(ExecutorService executor) {
+        NetworkDataProcessor(ExecutorService executor) {
             super(executor);
         }
 
@@ -557,20 +518,24 @@ public class Network {
 
             final Long now = NTP.getTime();
 
-            task = maybeProducePeerPingTask(now);
-            if (task != null) {
-                return task;
-            }
+            // We dont track pings as NetworkData
+//            task = maybeProducePeerPingTask(now);
+//            if (task != null) {
+//                return task;
+//            }
 
+            // If its a new peer we need to connect it on the data port
             task = maybeProduceConnectPeerTask(now);
             if (task != null) {
+                LOGGER.info("Attempting Connect Peer Task");
                 return task;
             }
 
-            task = maybeProduceBroadcastTask(now);
-            if (task != null) {
-                return task;
-            }
+            // This is broadcasting out chain data, NetworkData doesnt do this
+//            task = maybeProduceBroadcastTask(now);
+//            if (task != null) {
+//                return task;
+//            }
 
             // Only this method can block to reduce CPU spin
             return maybeProduceChannelTask(canBlock);
@@ -578,47 +543,46 @@ public class Network {
 
         private Task maybeProducePeerMessageTask() {
             return getImmutableConnectedPeers().stream()
-                    .map(peer -> peer.getMessageTask(Peer.NETWORK))
+                    .map(peer -> peer.getMessageTask(Peer.NETWORKDATA))
                     .filter(Objects::nonNull)
                     .findFirst()
                     .orElse(null);
         }
 
-        private Task maybeProducePeerPingTask(Long now) {
-            return getImmutableHandshakedPeers().stream()
-                    .map(peer -> peer.getPingTask(now))
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElse(null);
-        }
+//        private Task maybeProducePeerPingTask(Long now) {
+//            return getImmutableHandshakedPeers().stream()
+//                    .map(peer -> peer.getPingTask(now))
+//                    .filter(Objects::nonNull)
+//                    .findFirst()
+//                    .orElse(null);
+//        }
 
         private Task maybeProduceConnectPeerTask(Long now) throws InterruptedException {
-            if (now == null || now < nextConnectTaskTimestamp.get()) {
+            if(now == null) {
+                LOGGER.info("Now is null :(");
+                return null;
+            }
+            if (now < nextConnectTaskTimestamp.get()) {
+                //LOGGER.info("Not going to try and connect, {} < {}", now, nextConnectTaskTimestamp.get());
                 return null;
             }
 
             if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers) {
+                LOGGER.info("Not going to try to connect, .size() >= {}", minOutboundPeers);
                 return null;
             }
 
-            nextConnectTaskTimestamp.set(now + 1000L);
+            nextConnectTaskTimestamp.set(now + 3000L); // change from 1s to 3s, don't need to get data peers so aggressively
 
             Peer targetPeer = getConnectablePeer(now);
             if (targetPeer == null) {
                 return null;
             }
+            targetPeer.setPeerType(Peer.NETWORKDATA);      // Make sure we set this to a NetworkData Type
 
+            LOGGER.info("Time to connect a Peer");
             // Create connection task
             return new PeerConnectTask(targetPeer);
-        }
-
-        private Task maybeProduceBroadcastTask(Long now) {
-            if (now == null || now < nextBroadcastTimestamp.get()) {
-                return null;
-            }
-
-            nextBroadcastTimestamp.set(now + BROADCAST_INTERVAL);
-            return new BroadcastTask();
         }
 
         private Task maybeProduceChannelTask(boolean canBlock) throws InterruptedException {
@@ -672,14 +636,7 @@ public class Network {
                         Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
                         if (peer == null)
                             return null;
-                        // Added in 5.10 to swap network
-//                        if (((InetSocketAddress) ((SocketChannel) socketChannel).getLocalAddress()).getPort() == 12394 ) {
-//                            NetworkData.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);
-//
-//                            NetworkData.getInstance().clearInterestOps(nextSelectionKey, SelectionKey.OP_READ);
-//                            peer.setPeerType(Peer.NETWORKDATA);
-//                            return null;
-//                        }
+
                         return new ChannelReadTask((SocketChannel) socketChannel, peer);
                     }
 
@@ -699,7 +656,11 @@ public class Network {
 
                     if (nextSelectionKey.isAcceptable()) {
                         clearInterestOps(nextSelectionKey, SelectionKey.OP_ACCEPT);
-                        return new ChannelAcceptTask((ServerSocketChannel) socketChannel, Peer.NETWORK);
+                        if (getImmutableConnectedPeers().size() >= getMaxPeers())
+                                return null;
+
+                        // Need to pass in a reference to the network type
+                        return new ChannelAcceptTask((ServerSocketChannel) socketChannel, Peer.NETWORKDATA);
                     }
                 } catch (CancelledKeyException e) {
                     /*
@@ -708,8 +669,6 @@ public class Network {
                      * Those isXXXable() calls could throw CancelledKeyException, so we catch it here and return null.
                      */
                     return null;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
                 }
             }
 
@@ -717,35 +676,42 @@ public class Network {
         }
     }
 
-    public boolean ipNotInFixedList(PeerAddress address, List<String> fixedNetwork) {
-        for (String ipAddress : fixedNetwork) {
-            String[] bits = ipAddress.split(":");
-            if (bits.length >= 1 && bits.length <= 2 && address.getHost().equals(bits[0])) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     private Peer getConnectablePeer(final Long now) throws InterruptedException {
-        // We can't block here so use tryRepository(). We don't NEED to connect a new peer.
-        try (Repository repository = RepositoryManager.tryRepository()) {
-            if (repository == null) {
-                LOGGER.warn("Unable to get repository connection : Network.getConnectablePeer()");
+
+            LOGGER.info("ConnectedPeers: {}, Handshaked Peers: {} ", immutableConnectedPeers.size(), immutableHandshakedPeers.size());
+            if(getAllKnownPeers().isEmpty()) {
                 return null;
             }
-
-            LOGGER.trace("ConnectedPeers: {}, Handshaked Peers: {} ", immutableConnectedPeers.size(), immutableHandshakedPeers.size());
 
             // Find an address to connect to
             List<PeerData> peers = this.getAllKnownPeers();
 
             // Don't consider peers with recent connection failures
             final long lastAttemptedThreshold = now - CONNECT_FAILURE_BACKOFF;
-            peers.removeIf(peerData -> peerData.getLastAttempted() != null
-                    && (peerData.getLastConnected() == null
-                    || peerData.getLastConnected() < peerData.getLastAttempted())
-                    && peerData.getLastAttempted() > lastAttemptedThreshold);
+
+            // @ToDo: What does this filter parse out?
+        // ( ) || ( )
+//            peers.removeIf(peerData -> peerData.getLastAttempted() != null
+//                    && (peerData.getLastConnected() == null
+//                    || peerData.getLastConnected() < peerData.getLastAttempted())
+//                    && peerData.getLastAttempted() > lastAttemptedThreshold);
+            // 1st Part of filter commented out
+        peers.removeIf(peerData -> peerData.getLastAttempted() != null
+                && (peerData.getLastConnected() == null ));
+
+        //LOGGER.info("Size is: {} after first filter", peers.size());
+
+        // 2nd Part of filter commented block
+        //for (PeerData pd : peers ) {
+            //LOGGER.info(" {} < {} : true?", pd.getLastConnected(), pd.getLastAttempted());
+            //LOGGER.info(" {} > {} : true?", pd.getLastAttempted(), lastAttemptedThreshold);
+        //}
+        // Ah this might be because we pasesd the data from Network and it does not have initial values!
+
+        peers.removeIf(peerData ->
+                peerData.getLastConnected() < peerData.getLastAttempted()
+                && peerData.getLastAttempted() > lastAttemptedThreshold);
+
 
             // Don't consider peers that we know loop back to ourself
             synchronized (this.selfPeers) {
@@ -764,6 +730,7 @@ public class Network {
 
             // Any left?
             if (peers.isEmpty()) {
+                //LOGGER.info("Peers List is empty after filters!");
                 return null;
             }
 
@@ -772,34 +739,29 @@ public class Network {
 
             // Pick candidate
             PeerData peerData = peers.get(peerIndex);
-            Peer newPeer = new Peer(peerData, Peer.NETWORK);
-            newPeer.setIsDataPeer(false);
+            Peer newPeer = new Peer(peerData, Peer.NETWORKDATA);
+            newPeer.setIsDataPeer(true);
 
             // Update connection attempt info
             peerData.setLastAttempted(now);
-            synchronized (this.allKnownPeers) {
-                repository.getNetworkRepository().save(peerData);
-                repository.saveChanges();
-            }
-
             return newPeer;
-        } catch (DataException e) {
-            LOGGER.error("Repository issue while finding a connectable peer", e);
-            return null;
-        }
     }
 
     public boolean connectPeer(Peer newPeer) throws InterruptedException {
         // Also checked before creating PeerConnectTask
-        if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers)
+        if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers) {
+            LOGGER.info("Bad: size() > {} ", minOutboundPeers);
             return false;
+        }
 
-        SocketChannel socketChannel = newPeer.connect(Peer.NETWORK);
+        SocketChannel socketChannel = newPeer.connect(Peer.NETWORKDATA);
         if (socketChannel == null) {
+            LOGGER.info("socketChannel == null");
             return false;
         }
 
         if (Thread.currentThread().isInterrupted()) {
+            LOGGER.info("Thread is interuppted");
             return false;
         }
 
@@ -932,6 +894,11 @@ public class Network {
      */
     public void onPeerReady(Peer peer) {
         onHandshakingMessage(peer, null, Handshake.STARTED);
+
+        //onHandshakingMessage(peer, null, Handshake.HELLO);
+        // First 2 states are already handled in the HELLO messaging
+        //peer.setHandshakeStatus(Handshake.CHALLENGE);
+        //onHandshakingMessage(peer, null, Handshake.CHALLENGE);
     }
 
     public void onDisconnect(Peer peer) {
@@ -952,7 +919,7 @@ public class Network {
                 && serverSelectionKey.isValid()
                 && (serverSelectionKey.interestOps() & SelectionKey.OP_ACCEPT) == 0) {
             try {
-                LOGGER.debug("Re-enabling accepting incoming connections because the server is not longer full");
+                LOGGER.debug("Re-enabling accepting incoming connections because the server is no longer full");
                 setInterestOps(serverSelectionKey, SelectionKey.OP_ACCEPT);
             } catch (CancelledKeyException e) {
                 LOGGER.error("Failed to re-enable accepting of incoming connections: {}", e.getMessage());
@@ -991,10 +958,11 @@ public class Network {
 
         Handshake handshakeStatus = peer.getHandshakeStatus();
         if (handshakeStatus != Handshake.COMPLETED) {
-            LOGGER.trace("Calling onHandShakingMessage : {} : on {}", handshakeStatus.toString(), peer.getPeerType());
+            LOGGER.info("Calling onHandShakingMessage : {} : on {}", handshakeStatus.toString(), peer.getPeerType());
             onHandshakingMessage(peer, message, handshakeStatus);
             return;
         }
+
 
         // Should be non-handshaking messages from now on
 
@@ -1031,13 +999,16 @@ public class Network {
 
         // Ordered by message type value
         switch (message.getType()) {
-            case GET_PEERS:
-                onGetPeersMessage(peer, message);
-                break;
+//            We don't exchange peers, we are only passed peers - NETWORKDATA
+//            case GET_PEERS:
+//                // We should not be getting requests for peer lists
+//                onGetPeersMessage(peer, message);
+//                break;
 
-            case PING:
-                onPingMessage(peer, message);
-                break;
+//            We don't ping or Pong in NETWOKRDATA
+//            case PING:
+//                onPingMessage(peer, message);
+//                break;
 
             case HELLO:
             case CHALLENGE:
@@ -1047,9 +1018,9 @@ public class Network {
                 peer.disconnect("unexpected handshaking message");
                 return;
 
-            case PEERS_V2:
-                onPeersV2Message(peer, message);
-                break;
+//            case PEERS_V2:
+//                onPeersV2Message(peer, message);
+//                break;
 
             default:
                 // Bump up to controller for possible action
@@ -1070,13 +1041,13 @@ public class Network {
     private void onHandshakingMessage(Peer peer, Message message, Handshake handshakeStatus) {
         try {
             // Still handshaking
-            LOGGER.trace("[{}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
+            LOGGER.trace("[NetworkData: {}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
                     handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer);
 
             // Check message type is as expected
             if (handshakeStatus.expectedMessageType != null
                     && message.getType() != handshakeStatus.expectedMessageType) {
-                LOGGER.debug("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
+                LOGGER.warn("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
                         message.getType().name(), peer, handshakeStatus.expectedMessageType);
                 peer.disconnect("unexpected message");
                 return;
@@ -1086,12 +1057,13 @@ public class Network {
 
             if (newHandshakeStatus == null) {
                 // Handshake failure
-                LOGGER.debug("[{}] Handshake failure with peer {} message {}", peer.getPeerConnectionId(), peer,
+                LOGGER.warn("[{}] Handshake failure with peer {} message {}", peer.getPeerConnectionId(), peer,
                         message.getType().name());
                 peer.disconnect("handshake failure");
                 return;
             }
 
+            peer.setPeerType(Peer.NETWORKDATA); // <-- This should already have been set
             if (peer.isOutbound()) {
                 // If we made outbound connection then we need to act first
                 newHandshakeStatus.action(peer);
@@ -1101,12 +1073,6 @@ public class Network {
             }
             peer.setHandshakeStatus(newHandshakeStatus);
 
-//            if (peer.getPeerType() == Peer.NETWORKDATA) {
-//                // Need to pull it out as it should not be in here accept for the START/HELLO prior to exchange
-//                this.removeConnectedPeer(peer);
-//                LOGGER.info("Removed peer {} - Handshake {} from Network, type is {}",peer.getPeersNodeId(), peer.getHandshakeStatus(), peer.getPeerType());
-//            }
-
             if (newHandshakeStatus == Handshake.COMPLETED) {
                 this.onHandshakeCompleted(peer);
             }
@@ -1115,44 +1081,53 @@ public class Network {
         }
     }
 
-    private void onGetPeersMessage(Peer peer, Message message) {
-        // Send our known peers
-        if (!peer.sendMessage(this.buildPeersMessage(peer))) {
-            peer.disconnect("failed to send peers list");
-        }
-    }
+    // This method does a send Message of our peer list to other peer, peer list exchange
+    // We do not want to do that on this DataNetwork
+//    private void onGetPeersMessage(Peer peer, Message message) {
+//        // Send our known peers
+//        if (!peer.sendMessage(this.buildPeersMessage(peer), Peer.PRI_2 )) {
+//            peer.disconnect("failed to send peers list");
+//        }
+//    }
 
-    private void onPingMessage(Peer peer, Message message) {
-        PingMessage pingMessage = (PingMessage) message;
+    //  we should not ping pong on NetworkData
+//    private void onPingMessage(Peer peer, Message message) throws MessageException {
+//        PingMessage pingMessage = (PingMessage) message;
+//
+//        // Generate 'pong' using same ID
+//        PingMessage pongMessage = new PingMessage();
+//        pongMessage.setId(pingMessage.getId());
+//
+//
+//        PeerSendManager peerSendManager = PeerSendManagement.getInstance().getOrCreateSendManager(peer);
+//        peerSendManager.queueMessageWithPriority(PeerSendManager.HIGH_PRIORITY, pongMessage);
+////        if (!peer.sendMessage(pongMessage, Peer.HIGH_PRIORITY)) {  // This needs to be high priority in the DATA stream
+////            peer.disconnect("failed to send ping reply");
+////        }
+//    }
 
-        // Generate 'pong' using same ID
-        PingMessage pongMessage = new PingMessage();
-        pongMessage.setId(pingMessage.getId());
-
-        if (!peer.sendMessage(pongMessage)) {
-            peer.disconnect("failed to send ping reply");
-        }
-    }
-
-    private void onPeersV2Message(Peer peer, Message message) {
-        PeersV2Message peersV2Message = (PeersV2Message) message;
-
-        List<PeerAddress> peerV2Addresses = peersV2Message.getPeerAddresses();
-
-        // First entry contains remote peer's listen port but empty address.
-        int peerPort = peerV2Addresses.get(0).getPort();
-        peerV2Addresses.remove(0);
-
-        // If inbound peer, use listen port and socket address to recreate first entry
-        if (!peer.isOutbound()) {
-            String host = peer.getPeerData().getAddress().getHost();
-            PeerAddress sendingPeerAddress = PeerAddress.fromString(host + ":" + peerPort);
-            LOGGER.trace("PEERS_V2 sending peer's listen address: {}", sendingPeerAddress.toString());
-            peerV2Addresses.add(0, sendingPeerAddress);
-        }
-
-        opportunisticMergePeers(peer.toString(), peerV2Addresses);
-    }
+        // This is a peer list message in the v2 format.
+    // Is this is a list of peers being sent to us?
+    // Merge Peers is a list merging tool
+//    private void onPeersV2Message(Peer peer, Message message) {
+//        PeersV2Message peersV2Message = (PeersV2Message) message;
+//
+//        List<PeerAddress> peerV2Addresses = peersV2Message.getPeerAddresses();
+//
+//        // First entry contains remote peer's listen port but empty address.
+//        int peerPort = peerV2Addresses.get(0).getPort();
+//        peerV2Addresses.remove(0);
+//
+//        // If inbound peer, use listen port and socket address to recreate first entry
+//        if (!peer.isOutbound()) {
+//            String host = peer.getPeerData().getAddress().getHost();
+//            PeerAddress sendingPeerAddress = PeerAddress.fromString(host + ":" + peerPort);
+//            LOGGER.trace("PEERS_V2 sending peer's listen address: {}", sendingPeerAddress.toString());
+//            peerV2Addresses.add(0, sendingPeerAddress);
+//        }
+//
+//        opportunisticMergePeers(peer.toString(), peerV2Addresses);
+//    }
 
     protected void onHandshakeCompleted(Peer peer) {
         LOGGER.debug("[{}] Handshake completed with peer {} on {}", peer.getPeerConnectionId(), peer,
@@ -1168,30 +1143,27 @@ public class Network {
             return;
         }
 
-        // Add to this.handshakedPeers cache list
+        // Add to handshaked peers cache
         this.addHandshakedPeer(peer);
 
         // Make a note that we've successfully completed handshake (and when)
         peer.getPeerData().setLastConnected(NTP.getTime());
 
-        // Update connection info for outbound peers only
-        if (peer.isOutbound()) {
+        // Update connection info for outbound peers only - This is not handled by NetworkData
+//        if (peer.isOutbound()) {
+//            try (Repository repository = RepositoryManager.getRepository()) {
+//                synchronized (this.allKnownPeers) {
+//                    repository.getNetworkRepository().save(peer.getPeerData());
+//                    repository.saveChanges();
+//                }
+//            } catch (DataException e) {
+//                LOGGER.error("[{}] Repository issue while trying to update outbound peer {}",
+//                        peer.getPeerConnectionId(), peer, e);
+//            }
+//        }
 
-            // Push to NetworkData if it makes sense
-            if ((Boolean) peer.getPeersCapabilities().getCapability("QDN"))
-                NetworkData.getInstance().addPeer(peer);
-
-            try (Repository repository = RepositoryManager.getRepository()) {
-                synchronized (this.allKnownPeers) {
-                    repository.getNetworkRepository().save(peer.getPeerData());
-                    repository.saveChanges();
-                }
-            } catch (DataException e) {
-                LOGGER.error("[{}] Repository issue while trying to update outbound peer {}",
-                        peer.getPeerConnectionId(), peer, e);
-            }
-        }
-
+        // @ToDo : Need to understand what this is, what are pending signatures?
+        //   Should this be part of the other thread?
         // Process any pending signature requests, as this peer may have been connected for this purpose only
         List<byte[]> pendingSignatureRequests = new ArrayList<>(peer.getPendingSignatureRequests());
         if (pendingSignatureRequests != null && !pendingSignatureRequests.isEmpty()) {
@@ -1203,41 +1175,43 @@ public class Network {
 
         // FUTURE: we may want to disconnect from this peer if we've finished requesting data from it
 
-        // Start regular pings
-        peer.startPings();
+        // Start regular pings - Not as part of NetworkData
+        // peer.startPings();
 
         // Only the outbound side needs to send anything (after we've received handshake-completing response).
         // (If inbound sent anything here, it's possible it could be processed out-of-order with handshake message).
 
-        if (peer.isOutbound()) {
-            if (!Settings.getInstance().isLite()) {
-                // Send our height / chain tip info
-                Message message = this.buildHeightOrChainTipInfo(peer);
+        //if (peer.isOutbound()) {
+//            if (!Settings.getInstance().isLite()) {
+//                // Send our height / chain tip info
+                //Message message = this.buildHeightOrChainTipInfo(peer);
 
-                if (message == null) {
-                    peer.disconnect("Couldn't build our chain tip info");
-                    return;
-                }
-
-                if (!peer.sendMessage(message)) {
-                    peer.disconnect("failed to send height / chain tip info");
-                    return;
-                }
-            }
+//                if (message == null) {
+//                    peer.disconnect("Couldn't build our chain tip info");
+//                    return;
+//                }
+//
+//                if (!peer.sendMessage(message)) {
+//                    peer.disconnect("failed to send height / chain tip info");
+//                    return;
+//                }
+//            }
 
             // Send our peers list
-            Message peersMessage = this.buildPeersMessage(peer);
-            if (!peer.sendMessage(peersMessage)) {
-                peer.disconnect("failed to send peers list");
-            }
+            // We dont need to exchange Peer Lists in NetworkData
+//            Message peersMessage = this.buildPeersMessage(peer);
+//            if (!peer.sendMessage(peersMessage)) {
+//                peer.disconnect("failed to send peers list");
+//            }
+//
+//            // Request their peers list
+//            Message getPeersMessage = new GetPeersMessage();
+//            if (!peer.sendMessage(getPeersMessage)) {
+//                peer.disconnect("failed to request peers list");
+//            }
+        //}
 
-            // Request their peers list
-            Message getPeersMessage = new GetPeersMessage();
-            if (!peer.sendMessage(getPeersMessage)) {
-                peer.disconnect("failed to request peers list");
-            }
-        }
-
+        LOGGER.trace("Handshake has been completed");
         // Ask Controller if they want to do anything
         Controller.getInstance().onPeerHandshakeCompleted(peer);
     }
@@ -1247,104 +1221,105 @@ public class Network {
     /**
      * Returns PEERS message made from peers we've connected to recently, and this node's details
      */
-    public Message buildPeersMessage(Peer peer) {
-        List<PeerData> knownPeers = this.getAllKnownPeers();
-
-        // Filter out peers that we've not connected to ever or within X milliseconds
-        final long connectionThreshold = NTP.getTime() - RECENT_CONNECTION_THRESHOLD;
-        Predicate<PeerData> notRecentlyConnected = peerData -> {
-            final Long lastAttempted = peerData.getLastAttempted();
-            final Long lastConnected = peerData.getLastConnected();
-
-            if (lastAttempted == null || lastConnected == null) {
-                return true;
-            }
-
-            if (lastConnected < lastAttempted) {
-                return true;
-            }
-
-            if (lastConnected < connectionThreshold) {
-                return true;
-            }
-
-            return false;
-        };
-        knownPeers.removeIf(notRecentlyConnected);
-
-        List<PeerAddress> peerAddresses = new ArrayList<>();
-
-        for (PeerData peerData : knownPeers) {
-            try {
-                InetAddress address = InetAddress.getByName(peerData.getAddress().getHost());
-
-                // Don't send 'local' addresses if peer is not 'local'.
-                // e.g. don't send localhost:9084 to node4.qortal.org
-                if (!peer.isLocal() && Peer.isAddressLocal(address)) {
-                    continue;
-                }
-
-                peerAddresses.add(peerData.getAddress());
-            } catch (UnknownHostException e) {
-                // Couldn't resolve hostname to IP address so discard
-            }
-        }
-
-        // New format PEERS_V2 message that supports hostnames, IPv6 and ports
-        return new PeersV2Message(peerAddresses);
-    }
+    // This is not for NetworkData - Sends a list of all Peers we know about in v2 format
+//    public Message buildPeersMessage(Peer peer) {
+//        List<PeerData> knownPeers = this.getAllKnownPeers();
+//
+//        // Filter out peers that we've not connected to ever or within X milliseconds
+//        Long ntpTime = NTP.getTime();
+//        if (ntpTime != null) {
+//        final long connectionThreshold = NTP.getTime() - RECENT_CONNECTION_THRESHOLD;
+//        Predicate<PeerData> notRecentlyConnected = peerData -> {
+//            final Long lastAttempted = peerData.getLastAttempted();
+//            final Long lastConnected = peerData.getLastConnected();
+//
+//            if (lastAttempted == null || lastConnected == null) {
+//                return true;
+//            }
+//
+//            if (lastConnected < lastAttempted) {
+//                return true;
+//            }
+//
+//            return lastConnected < connectionThreshold;
+//        };
+//        knownPeers.removeIf(notRecentlyConnected);
+//
+//        List<PeerAddress> peerAddresses = new ArrayList<>();
+//
+//        for (PeerData peerData : knownPeers) {
+//            try {
+//                InetAddress address = InetAddress.getByName(peerData.getAddress().getHost());
+//
+//                // Don't send 'local' addresses if peer is not 'local'.
+//                // e.g. don't send localhost:9084 to node4.qortal.org
+//                if (!peer.isLocal() && Peer.isAddressLocal(address)) {
+//                    continue;
+//                }
+//
+//                peerAddresses.add(peerData.getAddress());
+//            } catch (UnknownHostException e) {
+//                // Couldn't resolve hostname to IP address so discard
+//            }
+//        }
+//
+//        // New format PEERS_V2 message that supports hostnames, IPv6 and ports
+//        return new PeersV2Message(peerAddresses);
+//    }
 
     /** Builds either (legacy) HeightV2Message or (newer) BlockSummariesV2Message, depending on peer version.
      *
      *  @return Message, or null if DataException was thrown.
      */
-    public Message buildHeightOrChainTipInfo(Peer peer) {
-        if (peer.getPeersVersion() >= BlockSummariesV2Message.MINIMUM_PEER_VERSION) {
-            int latestHeight = Controller.getInstance().getChainHeight();
+    // This is for Main only
+//    public Message buildHeightOrChainTipInfo(Peer peer) {
+//        if (peer.getPeersVersion() >= BlockSummariesV2Message.MINIMUM_PEER_VERSION) {
+//            int latestHeight = Controller.getInstance().getChainHeight();
+//
+//            try (final Repository repository = RepositoryManager.getRepository()) {
+//                List<BlockSummaryData> latestBlockSummaries = repository.getBlockRepository().getBlockSummaries(latestHeight - BROADCAST_CHAIN_TIP_DEPTH, latestHeight);
+//                return new BlockSummariesV2Message(latestBlockSummaries);
+//            } catch (DataException e) {
+//                return null;
+//            }
+//        } else {
+//            // For older peers
+//            BlockData latestBlockData = Controller.getInstance().getChainTip();
+//            return new HeightV2Message(latestBlockData.getHeight(), latestBlockData.getSignature(),
+//                    latestBlockData.getTimestamp(), latestBlockData.getMinterPublicKey());
+//        }
+//    }
 
-            try (final Repository repository = RepositoryManager.getRepository()) {
-                List<BlockSummaryData> latestBlockSummaries = repository.getBlockRepository().getBlockSummaries(latestHeight - BROADCAST_CHAIN_TIP_DEPTH, latestHeight);
-                return new BlockSummariesV2Message(latestBlockSummaries);
-            } catch (DataException e) {
-                return null;
-            }
-        } else {
-            // For older peers
-            BlockData latestBlockData = Controller.getInstance().getChainTip();
-            return new HeightV2Message(latestBlockData.getHeight(), latestBlockData.getSignature(),
-                    latestBlockData.getTimestamp(), latestBlockData.getMinterPublicKey());
-        }
-    }
+    // This is for main Network only
+//    public void broadcastOurChain() {
+//        BlockData latestBlockData = Controller.getInstance().getChainTip();
+//        int latestHeight = latestBlockData.getHeight();
+//
+//        try (final Repository repository = RepositoryManager.getRepository()) {
+//            List<BlockSummaryData> latestBlockSummaries = repository.getBlockRepository().getBlockSummaries(latestHeight - BROADCAST_CHAIN_TIP_DEPTH, latestHeight);
+//            Message latestBlockSummariesMessage = new BlockSummariesV2Message(latestBlockSummaries);
+//
+//            // For older peers
+//            Message heightMessage = new HeightV2Message(latestBlockData.getHeight(), latestBlockData.getSignature(),
+//                    latestBlockData.getTimestamp(), latestBlockData.getMinterPublicKey());
+//
+//            NetworkData.getInstance().broadcast(broadcastPeer -> broadcastPeer.getPeersVersion() >= BlockSummariesV2Message.MINIMUM_PEER_VERSION
+//                    ? latestBlockSummariesMessage
+//                    : heightMessage
+//            );
+//        } catch (DataException e) {
+//            LOGGER.warn("Couldn't broadcast our chain tip info", e);
+//        }
+//    }
 
-    public void broadcastOurChain() {
-        BlockData latestBlockData = Controller.getInstance().getChainTip();
-        int latestHeight = latestBlockData.getHeight();
-
-        try (final Repository repository = RepositoryManager.getRepository()) {
-            List<BlockSummaryData> latestBlockSummaries = repository.getBlockRepository().getBlockSummaries(latestHeight - BROADCAST_CHAIN_TIP_DEPTH, latestHeight);
-            Message latestBlockSummariesMessage = new BlockSummariesV2Message(latestBlockSummaries);
-
-            // For older peers
-            Message heightMessage = new HeightV2Message(latestBlockData.getHeight(), latestBlockData.getSignature(),
-                    latestBlockData.getTimestamp(), latestBlockData.getMinterPublicKey());
-
-            Network.getInstance().broadcast(broadcastPeer -> broadcastPeer.getPeersVersion() >= BlockSummariesV2Message.MINIMUM_PEER_VERSION
-                    ? latestBlockSummariesMessage
-                    : heightMessage
-            );
-        } catch (DataException e) {
-            LOGGER.warn("Couldn't broadcast our chain tip info", e);
-        }
-    }
-
-    public Message buildNewTransactionMessage(Peer peer, TransactionData transactionData) {
-        // In V2 we send out transaction signature only and peers can decide whether to request the full transaction
-        return new TransactionSignaturesMessage(Collections.singletonList(transactionData.getSignature()));
-    }
-
-    public Message buildGetUnconfirmedTransactionsMessage(Peer peer) {
-        return new GetUnconfirmedTransactionsMessage();
-    }
+//    public Message buildNewTransactionMessage(Peer peer, TransactionData transactionData) {
+//        // In V2 we send out transaction signature only and peers can decide whether to request the full transaction
+//        return new TransactionSignaturesMessage(Collections.singletonList(transactionData.getSignature()));
+//    }
+//
+//    public Message buildGetUnconfirmedTransactionsMessage(Peer peer) {
+//        return new GetUnconfirmedTransactionsMessage();
+//    }
 
 
     // External IP / peerAddress tracking
@@ -1419,15 +1394,16 @@ public class Network {
                     // ... and the readings were different to our current recorded value, so
                     // update our external IP address value
                     this.ourExternalIpAddress = ip;
-                    this.onExternalIpUpdate(ip);
+                    //this.onExternalIpUpdate(ip);
                 }
             }
         }
     }
 
-    public void onExternalIpUpdate(String ipAddress) {
-        LOGGER.info("External IP address updated to {}", ipAddress);
-    }
+    // Only need in Main Network
+//    public void onExternalIpUpdate(String ipAddress) {
+//        LOGGER.info("External IP address updated to {}", ipAddress);
+//    }
 
     public String getOurExternalIpAddress() {
         // FUTURE: replace port if UPnP is active, as it will be more accurate
@@ -1508,6 +1484,33 @@ public class Network {
     }
 
     // Network-wide calls
+    public void addPeer(Peer p) {
+        LOGGER.trace("Passed a newly connected peer from Network : {}", p);
+
+        // We need the ip address only
+        String remoteHost = p.getPeerData().getAddress().getHost();
+
+        // if All Known Peers  already has this host. return;
+        boolean alreadyKnown = allKnownPeers.stream()
+                .anyMatch(pd -> pd.getAddress().getHost().equals(remoteHost));
+        if (alreadyKnown)
+            return;
+
+        // Clean out values that were passed in
+        String target = remoteHost + ":12394";
+        p.setPeerType(Peer.NETWORKDATA);
+        PeerAddress pa = PeerAddress.fromString(target);
+        PeerData pd = new PeerData(
+                pa,
+                0L,
+                0L,
+                0L,
+                p.getPeerData().getAddedWhen(),
+                "INIT");
+        // Get Address is <ip:port> of the Network, those ports are in use.....
+
+        allKnownPeers.add(pd);
+    }
 
     public void prunePeers() throws DataException {
         final Long now = NTP.getTime();
@@ -1529,46 +1532,47 @@ public class Network {
 
         // Prune 'old' peers from repository...
         // Pruning peers isn't critical so no need to block for a repository instance.
-        try (Repository repository = RepositoryManager.tryRepository()) {
-            if (repository == null) {
-                LOGGER.warn("Unable to get repository connection : Network.prunePeers()");
-                return;
-            }
-
-            synchronized (this.allKnownPeers) {
-                // Fetch all known peers
-                List<PeerData> peers = new ArrayList<>(this.allKnownPeers);
-
-                // 'Old' peers:
-                // We attempted to connect within the last day
-                // but we last managed to connect over a week ago.
-                Predicate<PeerData> isNotOldPeer = peerData -> {
-                    if (peerData.getLastAttempted() == null
-                            || peerData.getLastAttempted() < now - OLD_PEER_ATTEMPTED_PERIOD) {
-                        return true;
-                    }
-
-                    return peerData.getLastConnected() == null
-                            || peerData.getLastConnected() > now - OLD_PEER_CONNECTION_PERIOD;
-                };
-
-                // Disregard peers that are NOT 'old'
-                peers.removeIf(isNotOldPeer);
-
-                // Don't consider already connected peers (simple address match)
-                peers.removeIf(isConnectedPeer);
-
-                for (PeerData peerData : peers) {
-                    LOGGER.debug("Deleting old peer {} from repository", peerData.getAddress().toString());
-                    repository.getNetworkRepository().delete(peerData.getAddress());
-
-                    // Delete from known peer cache too
-                    this.allKnownPeers.remove(peerData);
-                }
-
-                repository.saveChanges();
-            }
-        }
+        // @ToDo: We should not be writing to the repository
+//        try (Repository repository = RepositoryManager.tryRepository()) {
+//            if (repository == null) {
+//                LOGGER.warn("Unable to get repository connection : Network.prunePeers()");
+//                return;
+//            }
+//
+//            synchronized (this.allKnownPeers) {
+//                // Fetch all known peers
+//                List<PeerData> peers = new ArrayList<>(this.allKnownPeers);
+//
+//                // 'Old' peers:
+//                // We attempted to connect within the last day
+//                // but we last managed to connect over a week ago.
+//                Predicate<PeerData> isNotOldPeer = peerData -> {
+//                    if (peerData.getLastAttempted() == null
+//                            || peerData.getLastAttempted() < now - OLD_PEER_ATTEMPTED_PERIOD) {
+//                        return true;
+//                    }
+//
+//                    return peerData.getLastConnected() == null
+//                            || peerData.getLastConnected() > now - OLD_PEER_CONNECTION_PERIOD;
+//                };
+//
+//                // Disregard peers that are NOT 'old'
+//                peers.removeIf(isNotOldPeer);
+//
+//                // Don't consider already connected peers (simple address match)
+//                peers.removeIf(isConnectedPeer);
+//
+//                for (PeerData peerData : peers) {
+//                    LOGGER.debug("Deleting old peer {} from repository", peerData.getAddress().toString());
+//                    repository.getNetworkRepository().delete(peerData.getAddress());
+//
+//                    // Delete from known peer cache too
+//                    this.allKnownPeers.remove(peerData);
+//                }
+//
+//                repository.saveChanges();
+//            }
+//        }
     }
 
     public boolean mergePeers(String addedBy, long addedWhen, List<PeerAddress> peerAddresses) throws DataException {

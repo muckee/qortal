@@ -12,6 +12,8 @@ import org.qortal.utils.DaemonThreadFactory;
 import org.qortal.utils.NTP;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -43,8 +45,21 @@ public enum Handshake {
 				return null;
 			}
 
+			// Setup the Peer based on the HELLO message
+			int peerType = helloMessage.getPeerType();
+			peer.setPeerType(peerType);
+
 			// Make a note of the senderPeerAddress, as this should be our public IP
-			Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+			switch(peerType) {
+				case Peer.NETWORK:
+					Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+					break;
+				case Peer.NETWORKDATA:
+					NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+					break;
+			}
+//			Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+//			NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
 
 			String versionString = helloMessage.getVersionString();
 
@@ -54,7 +69,7 @@ public enum Handshake {
 				return null;
 			}
 
-			// We're expecting 3 positive shorts, so we can convert 1.2.3 into 0x0100020003
+			// We're expecting 3 positive shorts, so we can convert 1.2.3 into 0x000100020003
 			long version = 0;
 			for (int g = 1; g <= 3; ++g) {
 				long value = Long.parseLong(matcher.group(g));
@@ -68,6 +83,7 @@ public enum Handshake {
 
 			peer.setPeersConnectionTimestamp(peersConnectionTimestamp);
 			peer.setPeersVersion(versionString, version);
+			peer.setPeersCapabilities(helloMessage.getCapabilities());
 
 			// Ensure the peer is running at least the version specified in MIN_PEER_VERSION
 			if (!peer.isAtLeastVersion(MIN_PEER_VERSION)) {
@@ -83,7 +99,7 @@ public enum Handshake {
 					return null;
 				}
 			}
-
+			LOGGER.info("INBOUND - FINISHED PROCESSING HELLO, ready for CHALLENGE on {}", peer.getPeerType());
 			return CHALLENGE;
 		}
 
@@ -93,16 +109,23 @@ public enum Handshake {
 			long timestamp = NTP.getTime();
 			String senderPeerAddress = peer.getPeerData().getAddress().toString();
 
-			Message helloMessage = new HelloMessage(timestamp, versionString, senderPeerAddress);
+			// Added in v5.1.0 to include capabilities enabled
+			Map<String, Object> capabilities = new HashMap<>();
+			capabilities.put("QDN", Settings.getInstance().isQdnEnabled());
+			//LOGGER.info("PeerType is: {} during new HELLO message", peer.getPeerType());
+
+			Message helloMessage = new HelloMessage(timestamp, versionString, senderPeerAddress, capabilities, peer.getPeerType());
+
 			if (!peer.sendMessage(helloMessage))
 				peer.disconnect("failed to send HELLO");
+			LOGGER.info("OUTBOUND - FINISHED sending HELLO: Network {}", peer.getPeerType());
 		}
 	},
 	CHALLENGE(MessageType.CHALLENGE) {
 		@Override
 		public Handshake onMessage(Peer peer, Message message) {
 			ChallengeMessage challengeMessage = (ChallengeMessage) message;
-
+			LOGGER.info("STARTING RX of CHALLENGE on {}", peer.getPeerType());
 			byte[] peersPublicKey = challengeMessage.getPublicKey();
 			byte[] peersChallenge = challengeMessage.getChallenge();
 
@@ -111,8 +134,16 @@ public enum Handshake {
 			if (Arrays.equals(ourPublicKey, peersPublicKey)) {
 				// If outgoing connection then record destination as self so we don't try again
 				if (peer.isOutbound()) {
-					Network.getInstance().noteToSelf(peer);
+					switch (peer.getPeerType()) {
+						case Peer.NETWORK:
+							Network.getInstance().noteToSelf(peer);
+							break;
+						case Peer.NETWORKDATA:
+							NetworkData.getInstance().noteToSelf(peer);
+							break;
+					}
 					// Handshake failure, caller will handle disconnect
+					LOGGER.info("Peer.isOutbound - return null");
 					return null;
 				} else {
 					// We still need to send our ID so our outbound connection can mark their address as 'self'
@@ -128,33 +159,45 @@ public enum Handshake {
 					 * Failing that, our connection will timeout or a future handshake error will
 					 * occur.
 					 */
+					LOGGER.info("FINISHED CHALLENGE, respond CHALLENGE on {}", peer.getPeerType());
 					return CHALLENGE;
 				}
 			}
 
-			// Are we already connected to this peer?
-			Peer existingPeer = Network.getInstance().getHandshakedPeerWithPublicKey(peersPublicKey);
-			if (existingPeer != null) {
-				LOGGER.info(() -> String.format("We already have a connection with peer %s - discarding", peer));
-				// Handshake failure - caller will deal with disconnect
-				return null;
+			// Are we already connected to this peer by Challenge Type (Network / NetworkData)?
+			//LOGGER.info("Checking Existing Peer for ChallengeType : {}", peer.getPeerType());
+			switch (peer.getPeerType()) {
+				case Peer.NETWORK:    // Default Network
+					if (Network.getInstance().getHandshakedPeerWithPublicKey(peersPublicKey) != null) {
+						LOGGER.info("Found existing Peer in Network");
+						return null;
+					}
+					break;
+				case Peer.NETWORKDATA:  // NetworkData
+					if(NetworkData.getInstance().getHandshakedPeerWithPublicKey(peersPublicKey) != null) {
+						LOGGER.info("Found Existing Peer in NetworkData");
+						return null;
+					}
+					break;
 			}
 
 			peer.setPeersPublicKey(peersPublicKey);
 			peer.setPeersChallenge(peersChallenge);
-
+			LOGGER.info("FINISHED processing CHALLENGE, start RESPONSE on {}", peer.getPeerType());
 			return RESPONSE;
 		}
 
 		@Override
 		public void action(Peer peer) {
 			// Send challenge
+			LOGGER.info("STARTING CHALLENGE SEND - RESPONSE TO HELLO on {}", peer.getPeerType());
 			byte[] publicKey = Network.getInstance().getOurPublicKey();
 			byte[] challenge = peer.getOurChallenge();
 
 			Message challengeMessage = new ChallengeMessage(publicKey, challenge);
 			if (!peer.sendMessage(challengeMessage))
 				peer.disconnect("failed to send CHALLENGE");
+			LOGGER.info("FINISHED sending CHALLENGE on {}", peer.getPeerType());
 		}
 	},
 	RESPONSE(MessageType.RESPONSE) {
@@ -221,7 +264,14 @@ public enum Handshake {
 				// So we need to do the extra work to move to COMPLETED state.
 				if (!peer.isOutbound()) {
 					peer.setHandshakeStatus(COMPLETED);
-					Network.getInstance().onHandshakeCompleted(peer);
+					switch(peer.getPeerType()) {
+						case Peer.NETWORK:
+							Network.getInstance().onHandshakeCompleted(peer);
+							break;
+						case Peer.NETWORKDATA:
+							NetworkData.getInstance().onHandshakeCompleted(peer);
+							break;
+					}
 				}
 			});
 		}
@@ -260,7 +310,7 @@ public enum Handshake {
 	private static final long PEER_VERSION_131 = 0x0100030001L;
 
 	/** Minimum peer version that we are allowed to communicate with */
-	private static final String MIN_PEER_VERSION = "4.1.1";
+	private static final String MIN_PEER_VERSION = "5.1.0";
 
 	private static final int POW_BUFFER_SIZE_PRE_131 = 8 * 1024 * 1024; // bytes
 	private static final int POW_DIFFICULTY_PRE_131 = 8; // leading zero bits

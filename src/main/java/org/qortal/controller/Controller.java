@@ -33,6 +33,7 @@ import org.qortal.globalization.Translator;
 import org.qortal.gui.Gui;
 import org.qortal.gui.SysTray;
 import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
 import org.qortal.network.message.*;
@@ -441,7 +442,7 @@ public class Controller extends Thread {
 					recorder.get().start();
 				}
 				else {
-					LOGGER.info("Balance Recorder won't start.");
+					LOGGER.debug("Balance Recorder won't start.");
 				}
 			}
 			else {
@@ -518,7 +519,6 @@ public class Controller extends Thread {
 		try {
 			Network network = Network.getInstance();
 			network.start();
-			// @todo : This is where we need to start a listener for "data flows - arbitrary RX"
 		} catch (IOException | DataException e) {
 			LOGGER.error("Unable to start networking", e);
 			Controller.getInstance().shutdown();
@@ -776,7 +776,6 @@ public class Controller extends Thread {
 				// Check NTP status
 				if (now >= ntpCheckTimestamp) {
 					Long ntpTime = NTP.getTime();
-
 					if (ntpTime != null) {
 						if (ntpTime != now)
 							// Only log if non-zero offset
@@ -785,7 +784,7 @@ public class Controller extends Thread {
 						ntpCheckTimestamp = now + NTP_POST_SYNC_CHECK_PERIOD;
 						requestSysTrayUpdate = true;
 					} else {
-						LOGGER.info(String.format("No NTP offset yet"));
+						LOGGER.info("No NTP offset yet");
 						ntpCheckTimestamp = now + NTP_PRE_SYNC_CHECK_PERIOD;
 						// We can't do much without a valid NTP time
 						continue;
@@ -860,6 +859,7 @@ public class Controller extends Thread {
 					try {
 						LOGGER.debug("Pruning peers...");
 						Network.getInstance().prunePeers();
+						NetworkData.getInstance().prunePeers();
 					} catch (DataException e) {
 						LOGGER.warn(String.format("Repository issue when trying to prune peers: %s", e.getMessage()));
 					}
@@ -1165,6 +1165,7 @@ public class Controller extends Thread {
 
 				LOGGER.info("Shutting down networking");
 				Network.getInstance().shutdown();
+				NetworkData.getInstance().shutdown();
 
 				LOGGER.info("Shutting down controller");
 				this.interrupt();

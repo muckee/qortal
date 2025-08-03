@@ -3,10 +3,12 @@ package org.qortal.network.task;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.utils.ExecuteProduceConsume.Task;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 
@@ -33,7 +35,19 @@ public class ChannelReadTask implements Task {
         try {
             peer.readChannel();
 
-            Network.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);
+            int port = ((InetSocketAddress) socketChannel.getLocalAddress()).getPort();
+            LOGGER.trace("Performing Read for {} on {}", peer.getPeerType(), port);
+
+            if(port == 12394)
+                peer.setPeerType(Peer.NETWORKDATA);
+            switch (peer.getPeerType()) {
+                case Peer.NETWORKDATA:
+                    NetworkData.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);
+                    break;
+                default:
+                    Network.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);
+            }
+
         } catch (IOException e) {
             if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
                 peer.disconnect("Connection reset");
