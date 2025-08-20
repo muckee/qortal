@@ -103,7 +103,7 @@ public class PeersResource {
 									mediaType = MediaType.APPLICATION_JSON,
 									array = @ArraySchema(
 											schema = @Schema(
-													implementation = PeerData.class
+													implementation = ConnectedPeer.class
 											)
 									)
 							)

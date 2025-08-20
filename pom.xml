@@ -33,7 +33,7 @@
 		<java-diff-utils.version>4.15</java-diff-utils.version>
 		<javax.servlet-api.version>4.0.1</javax.servlet-api.version>
 		<jaxb-runtime.version>2.3.9</jaxb-runtime.version>
-		<jersey.version>2.42</jersey.version>
+		<jersey.version>2.47</jersey.version>
 		<jetty.version>9.4.56.v20240826</jetty.version>
 		<!-- <jetty.version>9.4.57.v20241219</jetty.version> v5.2.0 Coming Soon -->
 		<json-simple.version>1.1.1</json-simple.version>
@@ -401,6 +401,7 @@
 							<goal>strip-jar</goal>
 						</goals>
 						<configuration>
+							<!--suppress UnresolvedMavenProperty -->
 							<zipDateTime>${git.commit.time}</zipDateTime>
 						</configuration>
 					</execution>
@@ -471,6 +472,11 @@
 		</repository>
 	</repositories>
 	<dependencies>
+		<!-- <dependency>
+			<groupId>org.glassfish.jersey.media</groupId>
+			<artifactId>jersey-media-json-jackson</artifactId>
+			<version>3.1.10</version>
+		</dependency> -->
 		<!-- https://mvnrepository.com/artifact/org.codehaus.mojo/build-helper-maven-plugin -->
 		<dependency>
 			<groupId>org.codehaus.mojo</groupId>

@@ -189,10 +189,6 @@ public class Peer {
     /**
      * Construct Peer using existing, connected socket
      */
-//    public Peer(SocketChannel socketChannel) throws IOException {
-//        this(socketChannel, Peer.NETWORK);
-//    }
-
     public Peer(SocketChannel socketChannel, int network) throws IOException {
         this.isOutbound = false;
         this.socketChannel = socketChannel;
@@ -469,7 +465,6 @@ public class Peer {
         return this.pendingSignatureRequests;
     }
 
-
     @Override
     public String toString() {
         // Easier, and nicer output, than peer.getRemoteSocketAddress()
@@ -534,7 +529,6 @@ public class Peer {
             return null;
         }
     }
-
 
     /**
      * Attempt to buffer bytes from socketChannel.
@@ -670,6 +664,39 @@ public class Peer {
         }
     }
 
+    public int addToReplyQueue() {
+        BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
+        Random random = new Random();
+        int id;
+        do {
+            id = random.nextInt(Integer.MAX_VALUE - 1) + 1;
+
+            // Put queue into map (keyed by message ID) so we can poll for a response
+            // If putIfAbsent() doesn't return null, then this ID is already taken
+        } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
+
+        return id;
+    }
+
+    public int addMultipleToReplyQueue(int hashCount) {
+        BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
+        Random random = new Random();
+        int id;
+        do {
+            id = random.nextInt(Integer.MAX_VALUE - hashCount) + 1;
+
+            // Put queue into map (keyed by message ID) so we can poll for a response
+            // If putIfAbsent() doesn't return null, then this ID is already taken
+        } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
+        //@ToDo: we might step on other replyQueue keys
+        int next = id + 1;
+        while (id + hashCount < next) {
+            this.replyQueues.put(next, blockingQueue);
+            next++;
+        }
+        return id;
+    }
+
     /** Maybe send some pending outgoing messages.
      *
      * @return true if more data is pending to be sent
@@ -697,8 +724,7 @@ public class Peer {
                     return false;
 
                 try {
-                        byte[] messageBytes = message.toBytes();
-
+                    byte[] messageBytes = message.toBytes();
                     this.outputBuffer = ByteBuffer.wrap(messageBytes);
                     this.outputMessageType = message.getType().name();
                     this.outputMessageId = message.getId();
@@ -738,6 +764,10 @@ public class Peer {
             }
                 zeroSendCount++;
                 bytesWritten = this.socketChannel.write(outputBuffer);
+            }
+
+            if (this.peerType == NETWORKDATA) {
+                // record the time taken for speed Manager
             }
 
             // If we then exhaust the byte buffer, set it to null (otherwise loop and try to send more)
@@ -797,13 +827,13 @@ public class Peer {
      */
     public boolean sendMessageWithTimeout(Message message, int timeout) {
         if (!this.socketChannel.isOpen()) {
-            LOGGER.debug("SocketChannel was not open; returning false");
+            LOGGER.info("SocketChannel was not open; returning false");
             return false;
         }
 
         try {
             // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
-            LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
+            LOGGER.trace("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
                     message.getType().name(), message.getId(), this);
 
             // Check message properly constructed
@@ -817,12 +847,10 @@ public class Peer {
                     Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
                 case Peer.NETWORKDATA:
-                    LOGGER.info("Setting OP_WRITE on NetworkData");
                     NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
             }
-
-
+            //LOGGER.info("Timeout is set to {}", timeout);
             return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             // Send failure
@@ -977,6 +1005,7 @@ public class Peer {
         }
     }
 
+
     // @ToDo: NEW ICE
     // Calling sendMessageWhenReady is now blocking until socket.isOpen == true
     public Message getResponseToDataFile(Message message) {
@@ -995,8 +1024,9 @@ public class Peer {
 
         try {
             this.sendMessageWhenReady(message);
-            this.replyQueues.remove(id);
-            return null;
+            //this.replyQueues.remove(id);
+            // We are returning null as the message?
+            // return null;
         }
         catch (Exception e) {
             LOGGER.warn("FAIL: Upstream from sendMessageWhenReady()");

@@ -4,9 +4,14 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
-import org.qortal.data.arbitrary.ArbitraryResourceData;
+//import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerSendManagement;
+import org.qortal.network.PeerSendManager;
+import org.qortal.network.message.GetArbitraryDataFileMessage;
+import org.qortal.network.message.GetArbitraryDataFilesMessage;
+import org.qortal.network.message.MessageException;
 import org.qortal.network.message.MessageType;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -17,16 +22,17 @@ import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 import org.qortal.utils.NamedThreadFactory;
 
-import java.net.http.HttpResponse;
+//import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+//import java.util.Comparator;
 import java.util.HashMap;
-import java.util.Iterator;
+//import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
+//import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -82,7 +88,7 @@ public class ArbitraryDataFileRequestThread {
         }
     }
 
-    public void processFileHashes(Long now, List<ArbitraryFileListResponseInfo> responseInfos, ArbitraryDataFileManager arbitraryDataFileManager) {
+    public void processFileHashes(Long now, List<ArbitraryFileListResponseInfo> responseInfos, ArbitraryDataFileManager arbitraryDataFileManager) throws InterruptedException, MessageException {
 		if (Controller.isStopping()) {
             return;
         }
@@ -108,6 +114,7 @@ public class ArbitraryDataFileRequestThread {
             // Skip if already requesting, but don't remove, as we might want to retry later
             if (arbitraryDataFileManager.arbitraryDataFileRequests.containsKey(responseInfo.getHash58())) {
                 // Already requesting - leave this attempt for later
+                // @ToDo : don't think this next statement is true, this is why we are queueing up multiple requests for the same thing
                 arbitraryDataFileManager.addResponse(responseInfo); // don't remove -> adding back, beacause it was removed already above
                 continue;
             }
@@ -138,28 +145,60 @@ public class ArbitraryDataFileRequestThread {
             arbitraryTransactionDataList.addAll(
                 ArbitraryTransactionUtils.fetchTransactionDataList(repository, new ArrayList<>(signatureBySignature58.values())));
         } catch (DataException e) {
-            LOGGER.warn("Unable to fetch transaction data: {}", e.getMessage());
+            LOGGER.warn("Unable to fetch transaction data from DB: {}", e.getMessage());
         }
 
         if( !arbitraryTransactionDataList.isEmpty() ) {
-            long start = System.currentTimeMillis();
-
+//            long start = System.currentTimeMillis();
+            Peer peer = null;
+            //LOGGER.info("List of files is not empty, starting to build message of: GetArbitraryDataFilesMessage ");
             for(ArbitraryTransactionData data : arbitraryTransactionDataList ) {
                 String signature58 = Base58.encode(data.getSignature());
+
+                byte[] sigBytes = signature58.getBytes(StandardCharsets.UTF_8);
                 for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
-                    Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
-                    this.executorByPeer
-                            .computeIfAbsent(
-                                responseInfo.getPeer().toString(),
-                                peer -> Executors.newFixedThreadPool(
-                                    FETCHER_LIMIT_PER_PEER,
-                                    new NamedThreadFactory(FETCHER_THREAD_PREFIX + responseInfo.getPeer().toString(), NORM_PRIORITY)
-                                )
-                            )
-                            .execute(fetcher);
+                    peer = responseInfo.getPeer();
+                    String fileHash = responseInfo.getHash58();
+                    byte[] fileHashBytes = fileHash.getBytes(StandardCharsets.UTF_8);
+                    GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(sigBytes,fileHashBytes);
+                    //@ToDo: Is this writing to the wrong Peer object?
+                    int msgId = peer.addToReplyQueue();
+                    message.setId(msgId);
+                    PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);
                 }
+
+                // New Single Request queue tool
+                //List<byte[]> fileHashes = new ArrayList<>();
+                // @ToDo: Com back to this because of below
+                // New Message Type has issues with the response side generating messageId,
+                //GetArbitraryDataFilesMessage message = new GetArbitraryDataFilesMessage(sigBytes, fileHashes);
+//                for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
+//                    GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(sigBytes, responseInfo.getHash58());
+//                    int msgId = peer.addToReplyQueue();
+//                    message.setId(msgId);
+//                    if (peer != null) {
+//                        PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);
+//                    }
+//                }
+//                LOGGER.info("Completed Queueing message for send files to remote host");
+
+                // Legacy Fetch Loop - 1 Thread per file
+//                for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
+//                    LOGGER.trace("Starting Thread to get a file: {}", responseInfo.getHash58());
+//                    Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
+//                    this.executorByPeer
+//                            .computeIfAbsent(
+//                                responseInfo.getPeer().toString(),
+//                                peer -> Executors.newFixedThreadPool(
+//                                    FETCHER_LIMIT_PER_PEER,
+//                                    new NamedThreadFactory(FETCHER_THREAD_PREFIX + responseInfo.getPeer().toString(), NORM_PRIORITY)
+//                                )
+//                            )
+//                            .execute(fetcher);
+//                }
+//                // End Legacy Fetch Loop
             }
-            long timeLapse = System.currentTimeMillis() - start;
+//            long timeLapse = System.currentTimeMillis() - start;
         }
     }
 

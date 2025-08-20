@@ -765,6 +765,7 @@ public class Settings {
 		// Populate defaults for maxThreadsPerMessageType. If any are specified in settings.json, they will take priority.
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA_FILE", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILE", 15));
+		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA_FILES", 5));   // New in v5.10
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("GET_ARBITRARY_DATA", 5));
 		maxThreadsPerMessageType.add(new ThreadLimit("ARBITRARY_DATA_FILE_LIST", 50));

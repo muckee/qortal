@@ -43,7 +43,8 @@ public class ConnectedPeer {
     public String age;
     public Boolean isTooDivergent;
 
-    protected ConnectedPeer() {
+    // Needed for DeSerialization
+    public ConnectedPeer() {
     }
 
     public ConnectedPeer(Peer peer) {
@@ -74,11 +75,13 @@ public class ConnectedPeer {
             this.age = "connecting...";
         }
 
-        BlockSummaryData peerChainTipData = peer.getChainTipData();
-        if (peerChainTipData != null) {
-            this.lastHeight = peerChainTipData.getHeight();
-            this.lastBlockSignature = peerChainTipData.getSignature();
-            this.lastBlockTimestamp = peerChainTipData.getTimestamp();
+        if (peer.getPeerType() == Peer.NETWORK) {
+            BlockSummaryData peerChainTipData = peer.getChainTipData();
+            if (peerChainTipData != null) {
+                this.lastHeight = peerChainTipData.getHeight();
+                this.lastBlockSignature = peerChainTipData.getSignature();
+                this.lastBlockTimestamp = peerChainTipData.getTimestamp();
+            }
         }
 
         // Only include isTooDivergent decision if we've had the opportunity to request block summaries this peer

@@ -1507,6 +1507,10 @@ public class Controller extends Thread {
 				ArbitraryDataFileListManager.getInstance().onNetworkArbitraryDataFileListMessage(peer, message);
 				break;
 
+			case GET_ARBITRARY_DATA_FILES:
+				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFilesMessage(peer, message);
+				break;
+
 			case GET_ARBITRARY_DATA_FILE:
 				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFileMessage(peer, message);
 				break;

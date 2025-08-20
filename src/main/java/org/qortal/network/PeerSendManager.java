@@ -1,5 +1,6 @@
 package org.qortal.network;
 
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -103,7 +104,7 @@ public class PeerSendManager {
                 try {
 
                     TimedMessage timedMessage = queue.take();  // This is a blocking operation
-
+                    LOGGER.info("We took a message off the SendManager queue to process");
                     if (System.currentTimeMillis() > timedMessage.getExpectedStartTime()) {
                         LOGGER.info("Dropped stale message ({}ms old to peer: {})", timedMessage.message.getId(), peer.toString());
                         continue;
@@ -119,6 +120,8 @@ public class PeerSendManager {
                                 success = true;
                                 failureCount.set(0); // reset on success
                                 break;
+                            } else {
+                                LOGGER.warn("Ut-Oh: peer.sendMessage returned false, timeout was {}", timedMessage.getExpectedRunTime());
                             }
                         } catch (Exception e) {
                             LOGGER.info("Attempt {} failed for message {} to peer {}: {}", attempt, message.getId(), peer, e.getMessage());
@@ -153,7 +156,7 @@ public class PeerSendManager {
                         }
                     }
 
-                    Thread.sleep(15); // small throttle, was 50MS
+                    Thread.sleep(25); // small throttle, was 50MS
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     LOGGER.error("ERROR - Caught InterruptedException");
@@ -205,30 +208,35 @@ public class PeerSendManager {
 
         lastUsed = System.currentTimeMillis();
         long fullQueueTime = lastUsed + 50;
-        if (!queue.isEmpty()) {
-            Object[] arr = queue.toArray();  // snapshot copy
+        // @ToDo due to race conditions we have to snapshot, in Java v16 we can fix this
+        // Other option is to try/catch, on catch leave fullQueueTime as is (empty queue)
+        Object[] arr = queue.toArray();  // snapshot copy
+        if (arr.length > 0) {
             TimedMessage lastQueueElement = (TimedMessage) arr[arr.length - 1];
             fullQueueTime = lastQueueElement.getExpectedFinishTime();
         }
 
+
         TimedMessage newTimedMessage = new TimedMessage(message,
                 fullQueueTime,
                 peerSpeedTracker.getEstimatedTime(message.toBytes().length));
+        int queueSize = queue.size();
 
         // NO_PRIORITY? Just treat as normal
-        if (priority == NO_PRIORITY) {
+        if (priority == NO_PRIORITY || queueSize == 0) {
+            LOGGER.info("Added to the end of send queue - NO_PRIORITY");
             queue.offer(newTimedMessage);
             return;
         }
 
-        int queueSize = queue.size();
-
         // HIGH_PRIORITY - Add to front
-        if (priority == HIGH_PRIORITY || queueSize == 0) {
+        if (priority == HIGH_PRIORITY ) {
+            LOGGER.info("Added to the front of queue - HIGH_PRIORITY");
             LinkedBlockingQueue<TimedMessage> tempQueue = new LinkedBlockingQueue<>();
             tempQueue.offer(newTimedMessage);
             queue.drainTo(tempQueue);
             queue.clear();
+            queue.add(newTimedMessage);
             queue.addAll(tempQueue);
             return;
         }
@@ -406,6 +414,8 @@ public class PeerSendManager {
         }
 
         public int getExpectedRunTime() {
+            if (targetRunTime == 0)
+                return 180000;
             return targetRunTime;
         }
 

@@ -132,11 +132,6 @@ public class ChannelAcceptTask implements Task {
             LOGGER.debug("Connection accepted from peer {}", address);
 
             newPeer = new Peer(socketChannel, this.networkType);
-//            newPeer.setPeerType(Peer.NETWORK);
-//            int port = ((InetSocketAddress) socketChannel.getLocalAddress()).getPort();
-//            if (port == 12394)
-//                newPeer.setPeerType(Peer.NETWORKDATA);
-            //newPeer.setPeerType(this.networkType);
 
             if (isDataPeer) { // This check is not enough
                 newPeer.setMaxConnectionAge(Settings.getInstance().getMaxDataPeerConnectionTime() * 1000L);

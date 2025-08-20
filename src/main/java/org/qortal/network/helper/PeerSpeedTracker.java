@@ -24,10 +24,10 @@ public class PeerSpeedTracker {
     private static final int DEFAULT_TRANSFER_TIMEOUT_MS = 180 * 1000; // Default 180s/3min this is calculated by 512KB at 33.6kbps
     private static final int DEFAULT_MAX_CHUNK_SIZE = 524288;       // Default 512 * 1K bytes
 
-    private int historyCount = 5;
+    private int historyCount = 3;
     private int[] transferTimes = new int[historyCount]; // Last 5 Max chunk times
     private int transferTimeOut = 180 * 1000; // Default 180s/3min this is calculated by 512KB at 33.6kbps
-    private int averageTransferTime = 0;
+    private int averageTransferTime;
     private int maxChunkSize = 512000;
     private int timeMargin = 30;
 
@@ -127,7 +127,10 @@ public class PeerSpeedTracker {
      * @author Ice
      */
     public int getEstimatedTime(int bytes) {
-        return bytes/ maxChunkSize * averageTransferTime;
+        if (averageTransferTime == 0) { // We don't have an average yet
+            return DEFAULT_TRANSFER_TIMEOUT_MS;
+        }
+        return bytes / maxChunkSize * averageTransferTime;
     }
 
     /**

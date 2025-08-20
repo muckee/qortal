@@ -33,13 +33,15 @@ public class ChannelReadTask implements Task {
     @Override
     public void perform() throws InterruptedException {
         try {
-            peer.readChannel();
 
             int port = ((InetSocketAddress) socketChannel.getLocalAddress()).getPort();
-            LOGGER.trace("Performing Read for {} on {}", peer.getPeerType(), port);
-
             if(port == 12394)
                 peer.setPeerType(Peer.NETWORKDATA);
+
+            peer.readChannel();
+
+            LOGGER.trace("Performing Read for {} on {}", peer.getPeerType(), port);
+
             switch (peer.getPeerType()) {
                 case Peer.NETWORKDATA:
                     NetworkData.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);

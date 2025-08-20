@@ -8,7 +8,7 @@ import org.qortal.arbitrary.metadata.ArbitraryDataTransactionMetadata;
 import org.qortal.controller.Controller;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
-import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.network.message.ArbitraryMetadataMessage;
 import org.qortal.network.message.GetArbitraryMetadataMessage;
@@ -154,7 +154,7 @@ public class ArbitraryMetadataManager {
         }
         this.addToSignatureRequests(signature58, true, false);
 
-        List<Peer> handshakedPeers = Network.getInstance().getImmutableHandshakedPeers();
+        List<Peer> handshakedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
         LOGGER.debug(String.format("Sending metadata request for signature %s to %d peers...", signature58, handshakedPeers.size()));
 
         // Build request
@@ -174,7 +174,7 @@ public class ArbitraryMetadataManager {
         getArbitraryMetadataMessage.setId(id);
 
         // Broadcast request
-        Network.getInstance().broadcast(peer -> getArbitraryMetadataMessage);
+        NetworkData.getInstance().broadcast(peer -> getArbitraryMetadataMessage);
 
         // Poll to see if data has arrived
         final long singleWait = 100;
@@ -514,7 +514,7 @@ public class ArbitraryMetadataManager {
 
                             Peer peer = peerMessage.peer;
                             LOGGER.debug("Rebroadcasting metadata request from peer {} for signature {} to our other peers... totalRequestTime: {}, requestHops: {}", peer, Base58.encode(signature), totalRequestTime, requestHops);
-                            Network.getInstance().broadcast(
+                            NetworkData.getInstance().broadcast(
                                     broadcastPeer ->
                                             !broadcastPeer.isAtLeastVersion(RELAY_MIN_PEER_VERSION) ? null :
                                                     broadcastPeer == peer || Objects.equals(broadcastPeer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getHost()) ? null : relayGetArbitraryMetadataMessage);

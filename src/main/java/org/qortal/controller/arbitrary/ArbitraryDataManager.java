@@ -13,6 +13,7 @@ import org.qortal.data.transaction.TransactionData;
 import org.qortal.event.DataMonitorEvent;
 import org.qortal.event.EventBus;
 import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -118,7 +119,7 @@ public class ArbitraryDataManager extends Thread {
 				}
 
 				// Needs a mutable copy of the unmodifiableList
-				List<Peer> peers = new ArrayList<>(Network.getInstance().getImmutableHandshakedPeers());
+				List<Peer> peers = new ArrayList<>(NetworkData.getInstance().getImmutableHandshakedPeers());
 
 				// Disregard peers that have "misbehaved" recently
 				peers.removeIf(Controller.hasMisbehaved);
