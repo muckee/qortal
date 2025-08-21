@@ -50,6 +50,7 @@ public enum Handshake {
 			peer.setPeerType(peerType);
 
 			// Make a note of the senderPeerAddress, as this should be our public IP
+			// @ToDo: Probably change this to if(NETWORK) do, DATA not needed
 			switch(peerType) {
 				case Peer.NETWORK:
 					Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
@@ -58,8 +59,6 @@ public enum Handshake {
 					NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
 					break;
 			}
-//			Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
-//			NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
 
 			String versionString = helloMessage.getVersionString();
 

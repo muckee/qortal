@@ -10,6 +10,7 @@ import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.network.Network;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.network.message.ArbitraryDataFileListMessage;
@@ -301,7 +302,8 @@ public class ArbitraryDataFileListManager {
         LOGGER.debug(String.format("Sending data file list request for signature %s with %d hashes to %d peers...", signature58, hashCount, handshakedPeers.size()));
 
         // Send our address as requestingPeer, to allow for potential direct connections with seeds/peers
-        String requestingPeer = NetworkData.getInstance().getOurExternalIpAddressAndPort();
+        //String requestingPeer = NetworkData.getInstance().getOurExternalIpAddressAndPort();
+        String requestingPeer = Network.getInstance().getOurExternalIpAddress() + ":12394";
 
         // Build request
         Message getArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, missingHashes, now, 0, requestingPeer);
@@ -787,7 +789,8 @@ public class ArbitraryDataFileListManager {
                         arbitraryDataFileListRequests.put(message.getId(), newEntry);
                     }
 
-                    String ourAddress = NetworkData.getInstance().getOurExternalIpAddressAndPort();
+                    //String ourAddress = NetworkData.getInstance().getOurExternalIpAddressAndPort();
+                    String ourAddress = Network.getInstance().getOurExternalIpAddress() + ":12394";
                     ArbitraryDataFileListMessage arbitraryDataFileListMessage;
 
                     // Remove optional parameters if the requesting peer doesn't support it yet

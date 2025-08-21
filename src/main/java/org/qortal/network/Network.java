@@ -1375,6 +1375,13 @@ public class Network {
         // Add to the list
         this.ourExternalIpAddressHistory.add(host);
 
+        // In the beginning we don't have 10 connections, so assume the first client tells the truth
+        if (Objects.equals(this.ourExternalIpAddress, "null")) {
+            this.ourExternalIpAddress = host;
+            this.onExternalIpUpdate(host);
+            return;
+        }
+
         // Limit to 25 entries
         while (this.ourExternalIpAddressHistory.size() > 25) {
             this.ourExternalIpAddressHistory.remove(0);
@@ -1388,6 +1395,7 @@ public class Network {
         // our stored IP address value, treat it as updated.
         int consecutiveReadingsRequired = 10;
         int size = ipAddressHistory.size();
+
         if (size < consecutiveReadingsRequired) {
             // Need at least 10 readings
             return;
