@@ -193,6 +193,7 @@ public class Peer {
         this.isOutbound = false;
         this.socketChannel = socketChannel;
         int port = socketChannel.socket().getPort();
+
         if (port == 12394 || network == Peer.NETWORKDATA)
             sharedSetup(Peer.NETWORKDATA);
         else
@@ -678,6 +679,10 @@ public class Peer {
         return id;
     }
 
+    public boolean isExpectingMessage (int msgId) {
+        return this.replyQueues.containsKey(msgId);
+    }
+
     public int addMultipleToReplyQueue(int hashCount) {
         BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
         Random random = new Random();
@@ -850,7 +855,7 @@ public class Peer {
                     NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
             }
-            //LOGGER.info("Timeout is set to {}", timeout);
+
             return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             // Send failure

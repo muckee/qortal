@@ -104,7 +104,6 @@ public class PeerSendManager {
                 try {
 
                     TimedMessage timedMessage = queue.take();  // This is a blocking operation
-                    LOGGER.info("We took a message off the SendManager queue to process");
                     if (System.currentTimeMillis() > timedMessage.getExpectedStartTime()) {
                         LOGGER.info("Dropped stale message ({}ms old to peer: {})", timedMessage.message.getId(), peer.toString());
                         continue;
@@ -224,7 +223,6 @@ public class PeerSendManager {
 
         // NO_PRIORITY? Just treat as normal
         if (priority == NO_PRIORITY || queueSize == 0) {
-            LOGGER.info("Added to the end of send queue - NO_PRIORITY");
             queue.offer(newTimedMessage);
             return;
         }

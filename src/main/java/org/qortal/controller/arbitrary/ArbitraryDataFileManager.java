@@ -165,12 +165,11 @@ public class ArbitraryDataFileManager extends Thread {
                     ArbitraryDataFile receivedArbitraryDataFile = fetchArbitraryDataFile(peer, arbitraryTransactionData, signature, hash);
                     Long endTime = NTP.getTime();
                     if (receivedArbitraryDataFile != null) {
-                        LOGGER.info("Received data file {} from peer {}. Time taken: {} ms", receivedArbitraryDataFile.getHash58(), peer, (endTime-startTime));
+                        LOGGER.trace("Received data file {} from peer {}. Time taken: {} ms", receivedArbitraryDataFile.getHash58(), peer, (endTime-startTime));
                         receivedAtLeastOneFile = true;
                     }
                     else {
-                        LOGGER.info("Peer {} didn't respond with data file {} for signature {}. Time taken: {} ms", peer, Base58.encode(hash), Base58.encode(signature), (endTime-startTime));
-
+                        LOGGER.trace("Peer {} didn't respond with data file {} for signature {}. Time taken: {} ms", peer, Base58.encode(hash), Base58.encode(signature), (endTime-startTime));
                         // Stop asking for files from this peer
                         break;
                     }
@@ -223,7 +222,6 @@ public class ArbitraryDataFileManager extends Thread {
             }
 
             Long now = NTP.getTime();
-            LOGGER.info("Sending all responses to Process for Hashes");
             ArbitraryDataFileRequestThread.getInstance().processFileHashes(now, responsesToProcess, this);
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
@@ -270,18 +268,11 @@ public class ArbitraryDataFileManager extends Thread {
                 arbitraryDataFileRequests.put(hash58, NTP.getTime());
                 Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
 
-                //Message response = null;
-
-                //response = peer.getResponseWithTimeout(getArbitraryDataFileMessage, (int) ArbitraryDataManager.ARBITRARY_REQUEST_TIMEOUT); // This constant is 24s, not good
                 // @ToDo: The response is null....  Need to figure out the logic here
                 Message response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
 
                 arbitraryDataFileRequests.remove(hash58);
                 LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
-
-                // This should be the end, the message is published out, assume queued on the
-                // remote peer to send back arbitrary file message
-                // We should wait for a new message to come in
 
                 if (response == null) {
                     LOGGER.debug("Received null response from peer {}", peer);
@@ -691,7 +682,6 @@ public class ArbitraryDataFileManager extends Thread {
                 LOGGER.info("Hash {} exists, queueing send file", hash58);
 
                 // We can serve the file directly as we already have it
-                //LOGGER.info("Sending file {}...", arbitraryDataFile);
                 ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(sig, arbitraryDataFile);
                 arbitraryDataFileMessage.setId(msgId);
 
@@ -704,8 +694,8 @@ public class ArbitraryDataFileManager extends Thread {
                 Peer peerToAsk = relayInfo.getPeer();
                 if (peerToAsk != null) {
                     // New Logic in v5.20 - Provide relay data to peer instead of fetching it
-                    PeerRelayDataMessage pdrm = new PeerRelayDataMessage(peerToAsk.getPeerData().getAddress().getHost(), hash );
-                    PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageWithPriority(HIGH_PRIORITY, pdrm);
+                    PeerRelayDataMessage prdm = new PeerRelayDataMessage(peerToAsk.getPeerData().getAddress().getHost(), hash);
+                    PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageWithPriority(HIGH_PRIORITY, prdm);
                     /* Old Logic,
                     // Forward the message to this peer
                     LOGGER.debug("Asking peer {} for hash {}", peerToAsk, hash58);
@@ -777,7 +767,6 @@ public class ArbitraryDataFileManager extends Thread {
         byte[] hash = getArbitraryDataFileMessage.getHash();
         byte[] signature = getArbitraryDataFileMessage.getSignature();
         Controller.getInstance().stats.getArbitraryDataFileMessageStats.requests.incrementAndGet();
-        LOGGER.info("Received GetArbitraryDataFileMessage from peer {} for hash {}", peer, Base58.encode(hash));
 
         processDataFile(peer, hash, signature, message.getId());
     }

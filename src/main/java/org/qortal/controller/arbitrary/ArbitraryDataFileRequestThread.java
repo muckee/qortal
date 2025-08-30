@@ -108,6 +108,7 @@ public class ArbitraryDataFileRequestThread {
 
             // if relay timeout, then move on
             if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null || peer == null) {
+                LOGGER.trace("TIMED OUT in ArbitraryDataFileRequestThread");
                 continue;
             }
 
@@ -155,15 +156,17 @@ public class ArbitraryDataFileRequestThread {
             for(ArbitraryTransactionData data : arbitraryTransactionDataList ) {
                 String signature58 = Base58.encode(data.getSignature());
 
-                byte[] sigBytes = signature58.getBytes(StandardCharsets.UTF_8);
                 for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
                     peer = responseInfo.getPeer();
                     String fileHash = responseInfo.getHash58();
-                    byte[] fileHashBytes = fileHash.getBytes(StandardCharsets.UTF_8);
-                    GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(sigBytes,fileHashBytes);
-                    //@ToDo: Is this writing to the wrong Peer object?
+
+                    byte[] fileHashBytes = Base58.decode(fileHash);
+
+                    GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(data.getSignature(), fileHashBytes);
                     int msgId = peer.addToReplyQueue();
                     message.setId(msgId);
+
+                    LOGGER.trace("Adding hash {} to PeerSendManager send to {}", fileHash, peer);
                     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);
                 }
 
@@ -183,20 +186,20 @@ public class ArbitraryDataFileRequestThread {
 //                LOGGER.info("Completed Queueing message for send files to remote host");
 
                 // Legacy Fetch Loop - 1 Thread per file
-//                for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
-//                    LOGGER.trace("Starting Thread to get a file: {}", responseInfo.getHash58());
-//                    Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
-//                    this.executorByPeer
-//                            .computeIfAbsent(
-//                                responseInfo.getPeer().toString(),
-//                                peer -> Executors.newFixedThreadPool(
-//                                    FETCHER_LIMIT_PER_PEER,
-//                                    new NamedThreadFactory(FETCHER_THREAD_PREFIX + responseInfo.getPeer().toString(), NORM_PRIORITY)
-//                                )
-//                            )
-//                            .execute(fetcher);
-//                }
-//                // End Legacy Fetch Loop
+                for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
+                    LOGGER.trace("Starting Thread to get a file: {}", responseInfo.getHash58());
+                    Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
+                    this.executorByPeer
+                            .computeIfAbsent(
+                                responseInfo.getPeer().toString(),
+                                peerThreadPool -> Executors.newFixedThreadPool(
+                                    FETCHER_LIMIT_PER_PEER,
+                                    new NamedThreadFactory(FETCHER_THREAD_PREFIX + responseInfo.getPeer().toString(), NORM_PRIORITY)
+                                )
+                            )
+                            .execute(fetcher);
+                }
+                // End Legacy Fetch Loop
             }
 //            long timeLapse = System.currentTimeMillis() - start;
         }
@@ -206,14 +209,15 @@ public class ArbitraryDataFileRequestThread {
         try {
             Long now = NTP.getTime();
 
-            if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT ) {
-
-                Peer peer = responseInfo.getPeer();
-                String hash58 = responseInfo.getHash58();
-                String signature58 = responseInfo.getSignature58();
-                LOGGER.debug("Peer {} version {} didn't fetch data file {} for signature {} due to relay timeout.", peer, peer.getPeersVersionString(), hash58, signature58);
-                return;
-            }
+            // @ToDo: Old Timing Method
+//            if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT ) {
+//
+//                Peer peer = responseInfo.getPeer();
+//                String hash58 = responseInfo.getHash58();
+//                String signature58 = responseInfo.getSignature58();
+//                LOGGER.debug("Peer {} version {} didn't fetch data file {} for signature {} due to relay timeout.", peer, peer.getPeersVersionString(), hash58, signature58);
+//                return;
+//            }
 
             arbitraryDataFileManager.fetchArbitraryDataFiles(
                 responseInfo.getPeer(),

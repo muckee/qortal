@@ -1506,13 +1506,19 @@ public class Controller extends Thread {
 			case ARBITRARY_DATA_FILE_LIST:
 				ArbitraryDataFileListManager.getInstance().onNetworkArbitraryDataFileListMessage(peer, message);
 				break;
-
-			case GET_ARBITRARY_DATA_FILES:
-				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFilesMessage(peer, message);
-				break;
+// @ToDo: Future Message Type to get an entire list of file Hashes
+//			case GET_ARBITRARY_DATA_FILES:
+//				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFilesMessage(peer, message);
+//				break;
 
 			case GET_ARBITRARY_DATA_FILE:
 				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFileMessage(peer, message);
+				break;
+
+			case PEER_RELAY_DATA:	// We got information about a peer that has what we want
+				LOGGER.info("We were told to go get our files else where");
+				//ArbitraryDataFileManager.getInstance().onNetworkRelayData(peer, message);
+				//
 				break;
 
 			case GET_ARBITRARY_DATA_FILE_LIST:

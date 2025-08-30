@@ -5,6 +5,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
+import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
@@ -48,7 +49,7 @@ public class NetworkData {
     private static final long CONNECT_FAILURE_BACKOFF = 5 * 60 * 1000L; // ms
 
     // How long between informational broadcasts to all connected peers, in milliseconds.
-    // @ToDo : What is being broadcast?
+
     //private static final long BROADCAST_INTERVAL = 30 * 1000L; // ms
 
     // Maximum time since last successful connection for peer info to be propagated, in milliseconds.
@@ -515,24 +516,12 @@ public class NetworkData {
 
             final Long now = NTP.getTime();
 
-            // We dont track pings as NetworkData
-//            task = maybeProducePeerPingTask(now);
-//            if (task != null) {
-//                return task;
-//            }
-
-            // If its a new peer we need to connect it on the data port
+            // If it's a new peer we need to connect it on the data port
             task = maybeProduceConnectPeerTask(now);
             if (task != null) {
                 LOGGER.info("Attempting Connect Peer Task");
                 return task;
             }
-
-            // This is broadcasting out chain data, NetworkData doesnt do this
-//            task = maybeProduceBroadcastTask(now);
-//            if (task != null) {
-//                return task;
-//            }
 
             // Only this method can block to reduce CPU spin
             return maybeProduceChannelTask(canBlock);
@@ -545,14 +534,6 @@ public class NetworkData {
                     .findFirst()
                     .orElse(null);
         }
-
-//        private Task maybeProducePeerPingTask(Long now) {
-//            return getImmutableHandshakedPeers().stream()
-//                    .map(peer -> peer.getPingTask(now))
-//                    .filter(Objects::nonNull)
-//                    .findFirst()
-//                    .orElse(null);
-//        }
 
         private Task maybeProduceConnectPeerTask(Long now) throws InterruptedException {
             if(now == null) {
@@ -1045,7 +1026,20 @@ public class NetworkData {
                 byte[] hash = prdm.getHash();
                 requestDataFromPeer(pa.toString(), hash);
                 return;
+            case ARBITRARY_DATA_FILE:  // Don't think this is being hit at all, look at stripping out
+                LOGGER.info("Processing ArbitraryDataFile Message");
+                ArbitraryDataFileMessage adfm = (ArbitraryDataFileMessage) message;
+                int msgId = adfm.getId();
+                byte[] fileSig = adfm.getSignature();
+                ArbitraryDataFile adf = adfm.getArbitraryDataFile();
 
+                // Peer has the replyQueue
+                if (peer.isExpectingMessage(msgId)) { // If we knew this was coming in
+                    // @toDo: This is where we are picking up
+                    LOGGER.info("We were expecting: {}", msgId);
+                    //peer.gotSentFileHash(msgId, fileSig, adf);
+                }
+                return;
             default:
                 // Bump up to controller for possible action
                 Controller.getInstance().onNetworkMessage(peer, message);
@@ -1105,31 +1099,6 @@ public class NetworkData {
         }
     }
 
-    // This method does a send Message of our peer list to other peer, peer list exchange
-    // We do not want to do that on this DataNetwork
-//    private void onGetPeersMessage(Peer peer, Message message) {
-//        // Send our known peers
-//        if (!peer.sendMessage(this.buildPeersMessage(peer), Peer.PRI_2 )) {
-//            peer.disconnect("failed to send peers list");
-//        }
-//    }
-
-    //  we should not ping pong on NetworkData
-//    private void onPingMessage(Peer peer, Message message) throws MessageException {
-//        PingMessage pingMessage = (PingMessage) message;
-//
-//        // Generate 'pong' using same ID
-//        PingMessage pongMessage = new PingMessage();
-//        pongMessage.setId(pingMessage.getId());
-//
-//
-//        PeerSendManager peerSendManager = PeerSendManagement.getInstance().getOrCreateSendManager(peer);
-//        peerSendManager.queueMessageWithPriority(PeerSendManager.HIGH_PRIORITY, pongMessage);
-////        if (!peer.sendMessage(pongMessage, Peer.HIGH_PRIORITY)) {  // This needs to be high priority in the DATA stream
-////            peer.disconnect("failed to send ping reply");
-////        }
-//    }
-
         // This is a peer list message in the v2 format.
     // Is this is a list of peers being sent to us?
     // Merge Peers is a list merging tool
@@ -1172,19 +1141,6 @@ public class NetworkData {
 
         // Make a note that we've successfully completed handshake (and when)
         peer.getPeerData().setLastConnected(NTP.getTime());
-
-        // Update connection info for outbound peers only - This is not handled by NetworkData
-//        if (peer.isOutbound()) {
-//            try (Repository repository = RepositoryManager.getRepository()) {
-//                synchronized (this.allKnownPeers) {
-//                    repository.getNetworkRepository().save(peer.getPeerData());
-//                    repository.saveChanges();
-//                }
-//            } catch (DataException e) {
-//                LOGGER.error("[{}] Repository issue while trying to update outbound peer {}",
-//                        peer.getPeerConnectionId(), peer, e);
-//            }
-//        }
 
         // @ToDo : Need to understand what this is, what are pending signatures?
         //   Should this be part of the other thread?
@@ -1509,17 +1465,15 @@ public class NetworkData {
 
         // Clean out values that were passed in
         String target = remoteHost + ":12394";
-        p.setPeerType(Peer.NETWORKDATA);
+
         PeerAddress pa = PeerAddress.fromString(target);
         PeerData pd = new PeerData(
                 pa,
                 0L,
                 0L,
                 0L,
-                p.getPeerData().getAddedWhen(),
+                System.currentTimeMillis(),
                 "INIT");
-        // Get Address is <ip:port> of the Network, those ports are in use.....
-
         allKnownPeers.add(pd);
     }
 
