@@ -501,13 +501,13 @@ public class ArbitraryDataFileManager extends Thread {
                     // Assume no port included
                     host = peerAddressString;
                     // Use default listen port
-                    port = Settings.getInstance().getDefaultDataListenPort();
+                    port = Settings.getInstance().getDefaultQDNListenPort();
                 }
 
                 String peerAddressStringWithPort = String.format("%s:%d", host, port);
                 success = NetworkData.getInstance().requestDataFromPeer(peerAddressStringWithPort, signature);
 
-                int defaultPort = Settings.getInstance().getDefaultDataListenPort();
+                int defaultPort = Settings.getInstance().getDefaultQDNListenPort();
 
                 // If unsuccessful, and using a non-standard port, try a second connection with the default listen port,
                 // since almost all nodes use that. This is a workaround to account for any ephemeral ports that may
@@ -587,7 +587,7 @@ public class ArbitraryDataFileManager extends Thread {
 
             ArbitraryRelayInfo relayInfo = relayInfoList.get(0);
 
-            LOGGER.trace("Returning optimal relay info for hash: {} (requestHops {})", hash58, relayInfo.getRequestHops());
+            LOGGER.debug("Returning optimal relay info for hash: {} (requestHops {})", hash58, relayInfo.getRequestHops());
             return relayInfo;
         }
         LOGGER.trace("No relay info exists for hash: {}", hash58);
@@ -740,23 +740,24 @@ public class ArbitraryDataFileManager extends Thread {
 
     }
 
-    public void onNetworkGetArbitraryDataFilesMessage(Peer peer, Message message) {
-        // Request for Multiple-Files
-        if (!Settings.getInstance().isQdnEnabled()) {
-            return;
-        }
-        LOGGER.info("NEW MESSAGE - GetArbitraryDataFiles");
-        GetArbitraryDataFilesMessage getArbitraryDataFilesMessage = (GetArbitraryDataFilesMessage) message;
-        List<byte[]> hashes = getArbitraryDataFilesMessage.getHashes();
-
-        byte[] signature = getArbitraryDataFilesMessage.getSignature();
-        int hashCount = getArbitraryDataFilesMessage.getHashCount();
-        Controller.getInstance().stats.getArbitraryDataFileMessageStats.requests.addAndGet(hashCount);
-        //LOGGER.info("Received GetArbitraryDataFilesMessages from peer {} for {} hashes", peer, hashCount);
-        for (byte[] hash : hashes) {
-            processDataFile(peer, hash, signature, message.getId());
-        }
-    }
+    // @ToDo: New Message Type, get a series of file hashes
+//    public void onNetworkGetArbitraryDataFilesMessage(Peer peer, Message message) {
+//        // Request for Multiple-Files
+//        if (!Settings.getInstance().isQdnEnabled()) {
+//            return;
+//        }
+//        LOGGER.info("NEW MESSAGE - GetArbitraryDataFiles");
+//        GetArbitraryDataFilesMessage getArbitraryDataFilesMessage = (GetArbitraryDataFilesMessage) message;
+//        List<byte[]> hashes = getArbitraryDataFilesMessage.getHashes();
+//
+//        byte[] signature = getArbitraryDataFilesMessage.getSignature();
+//        int hashCount = getArbitraryDataFilesMessage.getHashCount();
+//        Controller.getInstance().stats.getArbitraryDataFileMessageStats.requests.addAndGet(hashCount);
+//        //LOGGER.info("Received GetArbitraryDataFilesMessages from peer {} for {} hashes", peer, hashCount);
+//        for (byte[] hash : hashes) {
+//            processDataFile(peer, hash, signature, message.getId());
+//        }
+//    }
 
     public void onNetworkGetArbitraryDataFileMessage(Peer peer, Message message) {
         // Don't respond if QDN is disabled

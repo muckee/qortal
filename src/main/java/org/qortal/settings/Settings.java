@@ -33,8 +33,8 @@ import java.util.*;
 public class Settings {
 
 	// New in v5.1.0 - Dedicated Ports for Data Flows; NetworkData Class
-	private static final int MAINNET_DATA_LISTEN_PORT = 12394;
-	private static final int TESTNET_DATA_LISTEN_PORT = 62394;
+	private static final int MAINNET_QDN_LISTEN_PORT = 12394;
+	private static final int TESTNET_QDN_LISTEN_PORT = 62394;
 
 	private static final int MAINNET_LISTEN_PORT = 12392;
 	private static final int TESTNET_LISTEN_PORT = 62392;
@@ -947,18 +947,18 @@ public class Settings {
 		return this.isTestNet ? TESTNET_LISTEN_PORT : MAINNET_LISTEN_PORT;
 	}
 
-	public int getDataListenPort() {
+	public int getQDNListenPort() {
 		if (this.listenDataPort != null)
 			return this.listenPort;
-		return this.isTestNet ? TESTNET_DATA_LISTEN_PORT : MAINNET_DATA_LISTEN_PORT;
+		return this.isTestNet ? TESTNET_QDN_LISTEN_PORT : MAINNET_QDN_LISTEN_PORT;
 	}
 
 	public int getDefaultListenPort() {
 		return this.isTestNet ? TESTNET_LISTEN_PORT : MAINNET_LISTEN_PORT;
 	}
 
-	public int getDefaultDataListenPort() {
-		return this.isTestNet ? TESTNET_DATA_LISTEN_PORT : MAINNET_DATA_LISTEN_PORT;
+	public int getDefaultQDNListenPort() {
+		return this.isTestNet ? TESTNET_QDN_LISTEN_PORT : MAINNET_QDN_LISTEN_PORT;
 	}
 
 	public String getBindAddress() {

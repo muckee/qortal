@@ -17,7 +17,7 @@ public class PeerRelayDataMessage extends Message {
 	public PeerRelayDataMessage(String relayHost, byte[] hash) {
 		super(MessageType.PEER_RELAY_DATA);
 
-		String fullHost = relayHost + ":12394";
+		String fullHost = relayHost + ":12394";  // @ToDo: Fix this
 		byte[] relayPeerHost = fullHost.getBytes(StandardCharsets.UTF_8);
 		ByteArrayOutputStream bytes = new ByteArrayOutputStream(hash.length + relayPeerHost.length);
 

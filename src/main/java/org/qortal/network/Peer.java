@@ -194,7 +194,7 @@ public class Peer {
         this.socketChannel = socketChannel;
         int port = socketChannel.socket().getPort();
 
-        if (port == 12394 || network == Peer.NETWORKDATA)
+        if (port == Settings.getInstance().getQDNListenPort() || network == Peer.NETWORKDATA)
             sharedSetup(Peer.NETWORKDATA);
         else
             sharedSetup(Peer.NETWORK);

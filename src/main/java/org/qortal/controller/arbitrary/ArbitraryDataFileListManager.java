@@ -38,6 +38,7 @@ public class ArbitraryDataFileListManager {
 
     private static ArbitraryDataFileListManager instance;
 
+    // @ToDo: Need to update this prior to release
     private static String MIN_PEER_VERSION_FOR_FILE_LIST_STATS = "3.2.0";
 
     /**
@@ -302,7 +303,7 @@ public class ArbitraryDataFileListManager {
 
         // Send our address as requestingPeer, to allow for potential direct connections with seeds/peers
         //String requestingPeer = NetworkData.getInstance().getOurExternalIpAddressAndPort();
-        String requestingPeer = Network.getInstance().getOurExternalIpAddress() + ":12394";
+        String requestingPeer = Network.getInstance().getOurExternalIpAddress() + ":" + Settings.getInstance().getQDNListenPort();
 
         // Build request
         Message getArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, missingHashes, now, 0, requestingPeer);
@@ -557,47 +558,51 @@ public class ArbitraryDataFileListManager {
                     }
                 }
 
+                boolean isBlocked = (arbitraryTransactionData == null || ListUtils.isNameBlocked(arbitraryTransactionData.getName()));
+                if (isBlocked) {
+                    LOGGER.info("User is Blocked - Will not fetch data");
+                    continue;
+                }
+
                 // Forwarding
                 if (isRelayRequest && Settings.getInstance().isRelayModeEnabled()) {
+                    Triple<String, Peer, Long> request = requestBySignature58.get(signature58);
+                    Peer requestingPeer = request.getB();
+                    if (requestingPeer != null) {
+                        Long requestTime = arbitraryDataFileListMessage.getRequestTime();
+                        Integer requestHops = arbitraryDataFileListMessage.getRequestHops();
 
-                    boolean isBlocked = (arbitraryTransactionData == null || ListUtils.isNameBlocked(arbitraryTransactionData.getName()));
-                    if (!isBlocked) {
-                        Triple<String, Peer, Long> request = requestBySignature58.get(signature58);
-                        Peer requestingPeer = request.getB();
-                        if (requestingPeer != null) {
-                            Long requestTime = arbitraryDataFileListMessage.getRequestTime();
-                            Integer requestHops = arbitraryDataFileListMessage.getRequestHops();
-
-                            // Add each hash to our local mapping so we know who to ask later
-                            Long now = NTP.getTime();
-                            for (byte[] hash : hashes) {
-                                String hash58 = Base58.encode(hash);
-                                ArbitraryRelayInfo relayInfo = new ArbitraryRelayInfo(hash58, signature58, peer, now, requestTime, requestHops);
-                                ArbitraryDataFileManager.getInstance().addToRelayMap(relayInfo);
-                            }
-
-                            // Bump requestHops if it exists
-                            if (requestHops != null) {
-                                requestHops++;
-                            }
-
-                            ArbitraryDataFileListMessage forwardArbitraryDataFileListMessage;
-
-                            // Remove optional parameters if the requesting peer doesn't support it yet
-                            // A message with less statistical data is better than no message at all
-                            if (!requestingPeer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
-                                forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes);
-                            } else {
-                                forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops,
-                                        arbitraryDataFileListMessage.getPeerAddress(), arbitraryDataFileListMessage.isRelayPossible());
-                            }
-                            forwardArbitraryDataFileListMessage.setId(message.getId());
-
-                            // Forward to requesting peer
-                            LOGGER.trace("Forwarding file list with {} hashes to requesting peer: {}", hashes.size(), requestingPeer);
-                            requestingPeer.sendMessage(forwardArbitraryDataFileListMessage);
+                        // Add each hash to our local mapping so we know who to ask later
+                        Long now = NTP.getTime();
+                        for (byte[] hash : hashes) {
+                            String hash58 = Base58.encode(hash);
+                            ArbitraryRelayInfo relayInfo = new ArbitraryRelayInfo(hash58, signature58, peer, now, requestTime, requestHops);
+                            ArbitraryDataFileManager.getInstance().addToRelayMap(relayInfo);
                         }
+
+                        // Bump requestHops if it exists
+                        if (requestHops != null) {
+                            requestHops++;
+                        }
+
+                        ArbitraryDataFileListMessage forwardArbitraryDataFileListMessage;
+
+                        // Remove optional parameters if the requesting peer doesn't support it yet
+                        // A message with less statistical data is better than no message at all
+                        if (!requestingPeer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
+                            forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes);
+                        } else {
+                            forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops,
+                                    arbitraryDataFileListMessage.getPeerAddress(), arbitraryDataFileListMessage.isRelayPossible());
+                        }
+                        forwardArbitraryDataFileListMessage.setId(message.getId());
+
+                        // Forward to requesting peer
+                        LOGGER.trace("Forwarding file list with {} hashes to requesting peer: {}", hashes.size(), requestingPeer);
+                        requestingPeer.sendMessage(forwardArbitraryDataFileListMessage);
                     }
+                } else {
+                    LOGGER.info ("QDN Data Relay Mode is Disabled / fetch - reserve");
                 }
             }
         } catch (Exception e) {
@@ -664,9 +669,9 @@ public class ArbitraryDataFileListManager {
                 String requestingPeer = getArbitraryDataFileListMessage.getRequestingPeer();
 
                 if (requestingPeer != null) {
-                    LOGGER.trace("Received hash list request with {} hashes from peer {} (requesting peer {}) for signature {}", hashCount, peer, requestingPeer, signature58);
+                    LOGGER.info("Received hash list request with {} hashes from peer {} (requesting peer {}) for signature {}", hashCount, peer, requestingPeer, signature58);
                 } else {
-                    LOGGER.trace("Received hash list request with {} hashes from peer {} for signature {}", hashCount, peer, signature58);
+                    LOGGER.info("Received hash list request with {} hashes from peer {} for signature {}", hashCount, peer, signature58);
                 }
 
                 signatureBySignature58.put(signature58, signature);
@@ -766,6 +771,7 @@ public class ArbitraryDataFileListManager {
 
                 // We should only respond if we have at least one hash
                 String requestingPeer = requestingPeerBySignature58.get(signature58);
+                LOGGER.info("Preparing our response to GetArbitraryDataFileList");
                 if (!hashes.isEmpty()) {
 
                     // Firstly we should keep track of the requesting peer, to allow for potential direct connections later
@@ -778,7 +784,7 @@ public class ArbitraryDataFileListManager {
                         arbitraryDataFileListRequests.put(message.getId(), newEntry);
                     }
 
-                    String ourAddress = Network.getInstance().getOurExternalIpAddress() + ":12394";
+                    String ourAddress = Network.getInstance().getOurExternalIpAddress() + ":" + Settings.getInstance().getQDNListenPort();
                     ArbitraryDataFileListMessage arbitraryDataFileListMessage;
 
                     // Remove optional parameters if the requesting peer doesn't support it yet
@@ -804,10 +810,15 @@ public class ArbitraryDataFileListManager {
                     }
 
                 }
-
-                // We may need to forward this request on
                 boolean isBlocked = (transactionData == null || ListUtils.isNameBlocked(transactionData.getName()));
-                if (Settings.getInstance().isRelayModeEnabled() && !isBlocked) {
+                if (isBlocked) {
+                    LOGGER.info("User is Blocked - Stop processing");
+                    continue;
+                }
+
+                LOGGER.info("We don't have hashes - Checking Relay Mode");
+                // We may need to forward this request on
+                if (Settings.getInstance().isRelayModeEnabled() ) {
                     // In relay mode - so ask our other peers if they have it
 
                     GetArbitraryDataFileListMessage getArbitraryDataFileListMessage = (GetArbitraryDataFileListMessage) message;
@@ -837,7 +848,14 @@ public class ArbitraryDataFileListManager {
                     } else {
                         // This relay request has timed out
                     }
+                } else {
+                    LOGGER.info("Relay (fetch-reserve) is disabled");
                 }
+                // @Ice - This is where we can put the relayInfoResponse Message
+                LOGGER.info("Sending information about peers that have the data");
+                  // We can safely increase MAX_HOPS because this will form a direct connection instead of a data relay
+                  // We only want to feed back the nodes that have the data
+                  //
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);

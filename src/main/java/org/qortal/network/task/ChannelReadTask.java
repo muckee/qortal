@@ -5,6 +5,7 @@ import org.apache.logging.log4j.Logger;
 import org.qortal.network.Network;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
+import org.qortal.settings.Settings;
 import org.qortal.utils.ExecuteProduceConsume.Task;
 
 import java.io.IOException;
@@ -35,7 +36,7 @@ public class ChannelReadTask implements Task {
         try {
 
             int port = ((InetSocketAddress) socketChannel.getLocalAddress()).getPort();
-            if(port == 12394)
+            if(port == Settings.getInstance().getQDNListenPort())
                 peer.setPeerType(Peer.NETWORKDATA);
 
             peer.readChannel();

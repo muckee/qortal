@@ -147,7 +147,7 @@ public class NetworkData {
     public void start() throws IOException, DataException {
         LOGGER.trace("Running start()");
         // Grab P2P port from settings
-        int listenPort = Settings.getInstance().getDataListenPort();
+        int listenPort = Settings.getInstance().getQDNListenPort();
 
         // Grab P2P bind addresses from settings
         List<String> bindAddresses = new ArrayList<>();
@@ -624,8 +624,6 @@ public class NetworkData {
 
                     if (nextSelectionKey.isWritable()) {
                         clearInterestOps(nextSelectionKey, SelectionKey.OP_WRITE);
-                        //LOGGER.info("Selector is Writable");
-                        // This is where we are passing the bad URI :22392 instead of 12394
 
                         Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
                         // Next two lines might be an options
@@ -766,8 +764,6 @@ public class NetworkData {
         for (Peer peer : this.getImmutableConnectedPeers()) {
             if (peer.getSocketChannel() == socketChannel) {
                 return peer;
-            } else {
-                LOGGER.info("Checking for match {} =/= {} ",peer.getSocketChannel(), socketChannel);
             }
         }
         // This is failing because its matching the wrong port!!!, not looking for DataNetwork some how....
@@ -775,27 +771,27 @@ public class NetworkData {
         return null;
     }
 
-    public Peer getPeerFromIP(SocketChannel socketChannel)  {
-
-        try {
-            SocketAddress remoteAddress = socketChannel.getRemoteAddress();
-            InetSocketAddress inet = (InetSocketAddress) remoteAddress;
-            String ip = inet.getAddress().getHostAddress();
-
-            for (Peer peer : this.getImmutableConnectedPeers()) {
-                SocketAddress pSocketAddress = peer.getSocketChannel().getRemoteAddress();
-                InetSocketAddress pint = (InetSocketAddress) pSocketAddress;
-                String pip = pint.getAddress().getHostAddress();
-                if (pip.equals(ip)) {
-                    return peer;
-                }
-            }
-        } catch (IOException e) {
-            LOGGER.warn("FAILED to get peer from IP address");
-            return null;
-        }
-        return null;
-    }
+//    public Peer getPeerFromIP(SocketChannel socketChannel)  {
+//
+//        try {
+//            SocketAddress remoteAddress = socketChannel.getRemoteAddress();
+//            InetSocketAddress inet = (InetSocketAddress) remoteAddress;
+//            String ip = inet.getAddress().getHostAddress();
+//
+//            for (Peer peer : this.getImmutableConnectedPeers()) {
+//                SocketAddress pSocketAddress = peer.getSocketChannel().getRemoteAddress();
+//                InetSocketAddress pint = (InetSocketAddress) pSocketAddress;
+//                String pip = pint.getAddress().getHostAddress();
+//                if (pip.equals(ip)) {
+//                    return peer;
+//                }
+//            }
+//        } catch (IOException e) {
+//            LOGGER.warn("FAILED to get peer from IP address");
+//            return null;
+//        }
+//        return null;
+//    }
 
     private void checkLongestConnection(Long now) {
         if (now == null || now < nextDisconnectionCheck) {
@@ -1456,7 +1452,7 @@ public class NetworkData {
 
         // We need the ip address only
         String remoteHost = p.getPeerData().getAddress().getHost();
-
+        int remoteHostQDNPort = (int) p.getPeerCapability("QDN");
         // if All Known Peers  already has this host. return;
         boolean alreadyKnown = allKnownPeers.stream()
                 .anyMatch(pd -> pd.getAddress().getHost().equals(remoteHost));
@@ -1464,7 +1460,7 @@ public class NetworkData {
             return;
 
         // Clean out values that were passed in
-        String target = remoteHost + ":12394";
+        String target = remoteHost + ":" + remoteHostQDNPort;
 
         PeerAddress pa = PeerAddress.fromString(target);
         PeerData pd = new PeerData(

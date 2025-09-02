@@ -249,7 +249,7 @@ public class Network {
         networkEPC.start();
 
         // Completed Setup for Network, Time to launch NetworkData for non-priority tasks
-        LOGGER.info("Starting second network (NetworkData) on port {}", Settings.getInstance().getDataListenPort());
+        LOGGER.info("Starting second network (NetworkData) on port {}", Settings.getInstance().getQDNListenPort());
         try {
             NetworkData.getInstance().start();
         } catch (IOException | DataException e) {
@@ -673,7 +673,7 @@ public class Network {
                         if (peer == null)
                             return null;
                         // Added in 5.10 to swap network
-//                        if (((InetSocketAddress) ((SocketChannel) socketChannel).getLocalAddress()).getPort() == 12394 ) {
+//                        if (((InetSocketAddress) ((SocketChannel) socketChannel).getLocalAddress()).getPort() == Settings.getInstance().getQDNListenPort() ) {
 //                            NetworkData.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);
 //
 //                            NetworkData.getInstance().clearInterestOps(nextSelectionKey, SelectionKey.OP_READ);
@@ -1176,7 +1176,7 @@ public class Network {
         if (peer.isOutbound()) {
 
             // Push to NetworkData if it makes sense
-            if ((Boolean) peer.getPeersCapabilities().getCapability("QDN"))
+            if ((int) peer.getPeersCapabilities().getCapability("QDN") > 0)
                 NetworkData.getInstance().addPeer(peer);
 
             try (Repository repository = RepositoryManager.getRepository()) {
