@@ -177,20 +177,27 @@ public class Peer {
 
     // Constructors
 
+    private Peer(int network, boolean outbound) {
+        this.peerType = network;
+        this.isOutbound = outbound;
+        this.sendQueue = new LinkedTransferQueue<>();
+        this.replyQueues = new ConcurrentHashMap<>();
+        this.pendingMessages = new LinkedBlockingQueue<>();
+    }
     /**
      * Construct unconnected, outbound Peer using socket address in peer data
      */
-    public Peer(PeerData peerData, int network) {
-        this.isOutbound = true;
+    public Peer(PeerData peerData, int network)  {
+        this(network, true);    // Peer is outbound
         this.peerData = peerData;
-        this.peerType = network;
     }
 
     /**
      * Construct Peer using existing, connected socket
      */
     public Peer(SocketChannel socketChannel, int network) throws IOException {
-        this.isOutbound = false;
+        this(network, false);  // Peer is inbound
+
         this.socketChannel = socketChannel;
         int port = socketChannel.socket().getPort();
 
@@ -483,9 +490,6 @@ public class Peer {
         else
             NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
         this.byteBuffer = null; // Defer allocation to when we need it, to save memory. Sorry GC!
-        this.sendQueue = new LinkedTransferQueue<>();
-        this.replyQueues = new ConcurrentHashMap<>();
-        this.pendingMessages = new LinkedBlockingQueue<>();
 
         Random random = new SecureRandom();
         this.ourChallenge = new byte[ChallengeMessage.CHALLENGE_LENGTH];

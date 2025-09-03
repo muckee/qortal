@@ -222,6 +222,7 @@ public class ArbitraryDataFileManager extends Thread {
             }
 
             Long now = NTP.getTime();
+
             ArbitraryDataFileRequestThread.getInstance().processFileHashes(now, responsesToProcess, this);
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);

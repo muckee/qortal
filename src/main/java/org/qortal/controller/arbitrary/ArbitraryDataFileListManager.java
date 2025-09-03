@@ -8,10 +8,12 @@ import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryDirectConnectionInfo;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
+import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.network.Network;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerAddress;
 import org.qortal.network.message.ArbitraryDataFileListMessage;
 import org.qortal.network.message.GetArbitraryDataFileListMessage;
 import org.qortal.network.message.Message;
@@ -71,7 +73,7 @@ public class ArbitraryDataFileListManager {
     /** Maximum number of seconds that a file list relay request is able to exist on the network */
     public static long RELAY_REQUEST_MAX_DURATION = 5000L;
     /** Maximum number of hops that a file list relay request is allowed to make */
-    public static int RELAY_REQUEST_MAX_HOPS = 4;
+    public static int RELAY_REQUEST_MAX_HOPS = 8; // was 4, thi is no longer Data, only metaData
 
     /** Minimum peer version to use relay */
     public static String RELAY_MIN_PEER_VERSION = "3.4.0";
@@ -535,7 +537,8 @@ public class ArbitraryDataFileListManager {
                 ArbitraryDataFileListMessage arbitraryDataFileListMessage = (ArbitraryDataFileListMessage) message;
 
                 Boolean isRelayRequest = isRelayRequestBySignature58.get(signature58);
-                if (!isRelayRequest || !Settings.getInstance().isRelayModeEnabled()) {
+                if (!isRelayRequest) {
+//                    if (!isRelayRequest || !Settings.getInstance().isRelayModeEnabled()) {
                     Long now = NTP.getTime();
 
                     // Keep track of the hashes this peer reports to have access to
@@ -545,9 +548,15 @@ public class ArbitraryDataFileListManager {
                         // Treat null request hops as 100, so that they are able to be sorted (and put to the end of the list)
                         int requestHops = arbitraryDataFileListMessage.getRequestHops() != null ? arbitraryDataFileListMessage.getRequestHops() : 100;
 
+                        String peerWithFilesString = arbitraryDataFileListMessage.getPeerAddress();
+                        PeerAddress pa = PeerAddress.fromString(peerWithFilesString); // HOST:PORT
+                        PeerData pd = new PeerData(pa,now, "INIT");
+                        Peer peerWithFiles = new Peer(pd, Peer.NETWORKDATA);
+
                         ArbitraryFileListResponseInfo responseInfo = new ArbitraryFileListResponseInfo(hash58, signature58,
-                                peer, now, arbitraryDataFileListMessage.getRequestTime(), requestHops);
-                        LOGGER.trace("Adding responseInfo to ArbDataFileManager peer: {} FileHash: {}", peer, hash58);
+                                peerWithFiles, now, arbitraryDataFileListMessage.getRequestTime(), requestHops);
+
+                        LOGGER.info("Adding responseInfo to ArbDataFileManager peer: {} FileHash: {}", peer, hash58);
                         ArbitraryDataFileManager.getInstance().addResponse(responseInfo);
                     }
 
@@ -565,10 +574,13 @@ public class ArbitraryDataFileListManager {
                 }
 
                 // Forwarding
-                if (isRelayRequest && Settings.getInstance().isRelayModeEnabled()) {
+                LOGGER.info("Status of isRelayRequest {}", isRelayRequest);
+                if (isRelayRequest) {
+                //if (isRelayRequest && Settings.getInstance().isRelayModeEnabled()) {
                     Triple<String, Peer, Long> request = requestBySignature58.get(signature58);
                     Peer requestingPeer = request.getB();
                     if (requestingPeer != null) {
+                        LOGGER.info("Requesting Peer is: {}", requestingPeer);
                         Long requestTime = arbitraryDataFileListMessage.getRequestTime();
                         Integer requestHops = arbitraryDataFileListMessage.getRequestHops();
 
@@ -589,21 +601,24 @@ public class ArbitraryDataFileListManager {
 
                         // Remove optional parameters if the requesting peer doesn't support it yet
                         // A message with less statistical data is better than no message at all
-                        if (!requestingPeer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
+                        /* if (!requestingPeer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
                             forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes);
-                        } else {
+                        } else {  LEGACY v3.2.0 code*/
                             forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops,
                                     arbitraryDataFileListMessage.getPeerAddress(), arbitraryDataFileListMessage.isRelayPossible());
-                        }
+                        //}
                         forwardArbitraryDataFileListMessage.setId(message.getId());
 
                         // Forward to requesting peer
                         LOGGER.trace("Forwarding file list with {} hashes to requesting peer: {}", hashes.size(), requestingPeer);
                         requestingPeer.sendMessage(forwardArbitraryDataFileListMessage);
                     }
-                } else {
-                    LOGGER.info ("QDN Data Relay Mode is Disabled / fetch - reserve");
                 }
+
+                /*else {
+                    LOGGER.info ("QDN Data Relay Mode is Disabled / fetch - reserve");
+                }*/
+
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
@@ -789,12 +804,13 @@ public class ArbitraryDataFileListManager {
 
                     // Remove optional parameters if the requesting peer doesn't support it yet
                     // A message with less statistical data is better than no message at all
+                    /*  We are way past v3.2.0, this check will always pass
                     if (!peer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
                         arbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes);
-                    } else {
+                    } else { */
                         arbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature,
                                 hashes, NTP.getTime(), 0, ourAddress, true);
-                    }
+                    //}
 
                     arbitraryDataFileListMessage.setId(message.getId());
 
@@ -818,7 +834,12 @@ public class ArbitraryDataFileListManager {
 
                 LOGGER.info("We don't have hashes - Checking Relay Mode");
                 // We may need to forward this request on
-                if (Settings.getInstance().isRelayModeEnabled() ) {
+                // @ToDo: COME BACK TO HERE
+                // Instead we always relay, but now we only send PeerInformation, not the actual file hashes from memory
+                // We don't need to check is Relay, because we made it here we will relay no mater what.
+
+
+                //if (Settings.getInstance().isRelayModeEnabled() ) {
                     // In relay mode - so ask our other peers if they have it
 
                     GetArbitraryDataFileListMessage getArbitraryDataFileListMessage = (GetArbitraryDataFileListMessage) message;
@@ -827,9 +848,9 @@ public class ArbitraryDataFileListManager {
                     int requestHops = getArbitraryDataFileListMessage.getRequestHops() + 1;
                     long totalRequestTime = now - requestTime;
 
-                    if (totalRequestTime < RELAY_REQUEST_MAX_DURATION) {
+                    if (totalRequestTime < RELAY_REQUEST_MAX_DURATION) { // 5 Seconds
                         // Relay request hasn't timed out yet, so can potentially be rebroadcast
-                        if (requestHops < RELAY_REQUEST_MAX_HOPS) {
+                        if (requestHops < RELAY_REQUEST_MAX_HOPS) { // 4 Hops
                             // Relay request hasn't reached the maximum number of hops yet, so can be rebroadcast
 
                             Message relayGetArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops, requestingPeer);
@@ -848,14 +869,10 @@ public class ArbitraryDataFileListManager {
                     } else {
                         // This relay request has timed out
                     }
-                } else {
-                    LOGGER.info("Relay (fetch-reserve) is disabled");
-                }
-                // @Ice - This is where we can put the relayInfoResponse Message
-                LOGGER.info("Sending information about peers that have the data");
-                  // We can safely increase MAX_HOPS because this will form a direct connection instead of a data relay
-                  // We only want to feed back the nodes that have the data
-                  //
+//                } else {
+//                    LOGGER.info("Relay (fetch-reserve) is disabled");
+//                }
+
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);

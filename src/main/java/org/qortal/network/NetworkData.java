@@ -9,7 +9,10 @@ import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
+import org.qortal.controller.arbitrary.ArbitraryDataFileManager;
+import org.qortal.controller.arbitrary.ArbitraryDataFileRequestThread;
 import org.qortal.crypto.Crypto;
+import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.message.*;
 import org.qortal.network.task.*;
@@ -757,6 +760,38 @@ public class NetworkData {
         this.onPeerReady(newPeer);
 
         return true;
+    }
+
+    public void connectPeerThenFetch(Peer newPeer, List<ArbitraryFileListResponseInfo> responseInfos) throws InterruptedException {
+        LOGGER.info("Starting connectThenFetch");
+        boolean success = connectPeer(newPeer);
+        if (success) { // Handshake ready to go
+
+            long MAX_TRY_TIME = 5000L;
+            Thread.sleep(100);
+            long processingTime = 1000;
+            // Need handshaking to complete, watch wait/timeout
+            boolean complete = false;
+            while (processingTime < MAX_TRY_TIME) {
+                if(connectedPeers.contains(newPeer)) {
+                    complete = true;
+                    break;
+                }
+                Thread.sleep(100);
+                processingTime += 100;
+
+            }
+            if (! complete ) {
+                LOGGER.info("Didn't connect in 5sec");
+                return;
+            }
+
+            // Forward request back to the ArbitraryDataFileRequestThread
+            for (ArbitraryFileListResponseInfo responseInfo : responseInfos) {
+                LOGGER.info("Sending Info back to file Manager");
+                ArbitraryDataFileManager.getInstance().addResponse(responseInfo);
+            }
+        }
     }
 
     public Peer getPeerFromChannel(SocketChannel socketChannel) {

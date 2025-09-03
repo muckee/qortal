@@ -205,6 +205,7 @@ public class PeerSendManager {
             return;
         }
 
+        LOGGER.info("Our Handshake Status is: {}", this.peer.getHandshakeStatus());
         lastUsed = System.currentTimeMillis();
         long fullQueueTime = lastUsed + 50;
         // @ToDo due to race conditions we have to snapshot, in Java v16 we can fix this

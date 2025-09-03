@@ -6,6 +6,7 @@ import org.qortal.controller.Controller;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 //import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
+import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerSendManagement;
 import org.qortal.network.PeerSendManager;
@@ -93,6 +94,7 @@ public class ArbitraryDataFileRequestThread {
             return;
         }
 
+        LOGGER.info("Processing File Hashes");
         Map<String, byte[]> signatureBySignature58 = new HashMap<>(responseInfos.size());
         Map<String, List<ArbitraryFileListResponseInfo>> responseInfoBySignature58 = new HashMap<>();
 
@@ -105,8 +107,7 @@ public class ArbitraryDataFileRequestThread {
             }
 
             Peer peer = responseInfo.getPeer();
-
-            // if relay timeout, then move on
+            LOGGER.info("Peer Object is {}", peer);
             if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null || peer == null) {
                 LOGGER.trace("TIMED OUT in ArbitraryDataFileRequestThread");
                 continue;
@@ -152,9 +153,28 @@ public class ArbitraryDataFileRequestThread {
         if( !arbitraryTransactionDataList.isEmpty() ) {
 //            long start = System.currentTimeMillis();
             Peer peer = null;
-            //LOGGER.info("List of files is not empty, starting to build message of: GetArbitraryDataFilesMessage ");
+            LOGGER.info("List of files is not empty, starting to build message of: GetArbitraryDataFilesMessage ");
             for(ArbitraryTransactionData data : arbitraryTransactionDataList ) {
                 String signature58 = Base58.encode(data.getSignature());
+
+                List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
+                // Check if we have a connection to this peer
+                peer = responseInfoBySignature58.get(signature58).get(0).getPeer();
+                if(!connectedPeers.contains(peer)) {
+                    // Send to new Thread to Connect
+                    NetworkData.getInstance().addPeer(peer);
+                    Peer finalPeer = peer;
+                    LOGGER.info("Starting New QDN Connection Thread");
+                    Runnable requestConnect = () -> {
+                        try {
+                            NetworkData.getInstance().connectPeerThenFetch(finalPeer, responseInfos);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                    };
+                    new Thread (requestConnect).start();
+                    break;
+                }
 
                 for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
                     peer = responseInfo.getPeer();
@@ -163,10 +183,12 @@ public class ArbitraryDataFileRequestThread {
                     byte[] fileHashBytes = Base58.decode(fileHash);
 
                     GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(data.getSignature(), fileHashBytes);
+                    // this.replyQueues is null, caused crash
                     int msgId = peer.addToReplyQueue();
                     message.setId(msgId);
 
                     LOGGER.trace("Adding hash {} to PeerSendManager send to {}", fileHash, peer);
+                    // We might not have a connection yet?
                     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);
                 }
 
@@ -184,22 +206,39 @@ public class ArbitraryDataFileRequestThread {
 //                    }
 //                }
 //                LOGGER.info("Completed Queueing message for send files to remote host");
-
-                // Legacy Fetch Loop - 1 Thread per file
-                for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
-                    LOGGER.trace("Starting Thread to get a file: {}", responseInfo.getHash58());
-                    Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
-                    this.executorByPeer
-                            .computeIfAbsent(
-                                responseInfo.getPeer().toString(),
-                                peerThreadPool -> Executors.newFixedThreadPool(
-                                    FETCHER_LIMIT_PER_PEER,
-                                    new NamedThreadFactory(FETCHER_THREAD_PREFIX + responseInfo.getPeer().toString(), NORM_PRIORITY)
+//                List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
+                // Check if we have a connection to this peer
+//                if(!connectedPeers.contains(peer)) {
+//                    // Send to new Thread to Connect
+//                    NetworkData.getInstance().addPeer(peer);
+//                    Peer finalPeer = peer;
+//                    LOGGER.info("Starting New QDN Connection Thread");
+//                    Runnable requestConnect = () -> {
+//                        try {
+//                            NetworkData.getInstance().connectPeerThenFetch(finalPeer, responseInfos);
+//                        } catch (InterruptedException e) {
+//                            throw new RuntimeException(e);
+//                        }
+//                    };
+//                    new Thread (requestConnect).start();
+//                } else {
+                    // May put inside a try instead, pending the connection above
+                    // Legacy Fetch Loop - 1 Thread per file
+                    for (ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
+                        LOGGER.trace("Starting Thread to get a file: {}", responseInfo.getHash58());
+                        Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
+                        this.executorByPeer
+                                .computeIfAbsent(
+                                        responseInfo.getPeer().toString(),
+                                        peerThreadPool -> Executors.newFixedThreadPool(
+                                                FETCHER_LIMIT_PER_PEER,
+                                                new NamedThreadFactory(FETCHER_THREAD_PREFIX + responseInfo.getPeer().toString(), NORM_PRIORITY)
+                                        )
                                 )
-                            )
-                            .execute(fetcher);
-                }
-                // End Legacy Fetch Loop
+                                .execute(fetcher);
+                    }
+                    // End Legacy Fetch Loop
+                //}
             }
 //            long timeLapse = System.currentTimeMillis() - start;
         }
@@ -218,6 +257,7 @@ public class ArbitraryDataFileRequestThread {
 //                LOGGER.debug("Peer {} version {} didn't fetch data file {} for signature {} due to relay timeout.", peer, peer.getPeersVersionString(), hash58, signature58);
 //                return;
 //            }
+
 
             arbitraryDataFileManager.fetchArbitraryDataFiles(
                 responseInfo.getPeer(),
