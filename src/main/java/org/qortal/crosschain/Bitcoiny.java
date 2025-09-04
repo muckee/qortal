@@ -21,8 +21,6 @@ import org.qortal.utils.Amounts;
 import org.qortal.utils.BitTwiddling;
 import org.qortal.utils.NTP;
 
-import java.time.Duration;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -225,79 +223,16 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	// TODO: don't return bitcoinj-based objects like TransactionOutput, use BitcoinyTransaction.Output instead
 	public List<TransactionOutput> getUnspentOutputs(String base58Address, boolean includeUnconfirmed) throws ForeignBlockchainException {
 
-		ExecutorService executor = Executors.newFixedThreadPool(5);
-
-		List<TransactionOutput> outputs = getUnspentOutputsWithExecutor(base58Address, includeUnconfirmed, executor);
-
-		// Shutdown the executor and wait for all tasks to complete
-		executor.shutdown();
-		try {
-			if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
-				executor.shutdownNow();
-			}
-		} catch (InterruptedException ex) {
-			executor.shutdownNow();
-			Thread.currentThread().interrupt();
-		}
-
-		return outputs;
-	}
-
-	/**
-	 * Get Unspent Outputs With Executor
-	 *
-	 * Get unspent outputs using an executor to get the outputs in parallel.
-	 *
-	 * @param base58Address the master foreign key for address generation
-	 * @param includeUnconfirmed true to include unconfirmed outputs, otherwise false
-	 * @param executor the executor to run the multi-threaded fetching
-	 *
-	 * @return the outputs
-	 *
-	 * @throws ForeignBlockchainException
-	 */
-	private List<TransactionOutput> getUnspentOutputsWithExecutor(String base58Address, boolean includeUnconfirmed, ExecutorService executor) throws ForeignBlockchainException {
-		List<Future<Optional<TransactionOutput>>> futures = getUnspentOutputsAsync(base58Address, includeUnconfirmed, executor);
-
-		List<TransactionOutput> outputs = new ArrayList<>(futures.size());
-
-		try {
-			for( Future<Optional<TransactionOutput>> future : futures) {
-
-				Optional<TransactionOutput> outputOptional = future.get();
-
-				if( outputOptional.isPresent() ) {
-					outputs.add(outputOptional.get());
-				}
-			}
-		} catch (InterruptedException | ExecutionException e) {
-			throw new ForeignBlockchainException(e.getMessage());
-		}
-		return outputs;
-	}
-
-	/**
-	 * Get Unspent Outputs Asynchronously
-	 *
-	 * Get unspent outputs using an executor to get the outputs in parallel.
-	 *
-	 * @param base58Address the master foreign key for address generation
-	 * @param includeUnconfirmed true to include unconfirmed outputs, otherwise false
-	 * @param executor the executor to run the multi-threaded fetching
-	 *
-	 * @return the outputs
-	 *
-	 * @throws ForeignBlockchainException
-	 */
-	private List<Future<Optional<TransactionOutput>>> getUnspentOutputsAsync(String base58Address, boolean includeUnconfirmed, ExecutorService executor) throws ForeignBlockchainException {
 		List<UnspentOutput> unspentOutputs = this.blockchainProvider.getUnspentOutputs(addressToScriptPubKey(base58Address), includeUnconfirmed);
 
-		List<Future<Optional<TransactionOutput>>> unspentTransactionOutputs = new ArrayList<>();
+		List<Optional<TransactionOutput>> unspentTransactionOutputs = new ArrayList<>();
 		for (UnspentOutput unspentOutput : unspentOutputs) {
-			unspentTransactionOutputs.add( executor.submit( () -> getTransactionOutput(unspentOutput)));
+			unspentTransactionOutputs.add( getTransactionOutput(unspentOutput));
 		}
 
-		return unspentTransactionOutputs;
+		return unspentTransactionOutputs.stream().filter(Optional::isPresent)
+				.map(Optional::get)
+				.collect(Collectors.toList());
 	}
 
 	/**
@@ -581,25 +516,19 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 		Set<String> walletAddresses = this.getWalletAddressesWithExecutor(key58, executor);
 
 		try {
-			List<Future<List<Future<Optional<TransactionOutput>>>>> addressOutputLists = new ArrayList<>();
+			List<TransactionOutput> unspentOutputs = new ArrayList<>();
 
 			// for ech wallet address, spawn a thread to fetch unspent outputs
 			for (String address : walletAddresses) {
-				addressOutputLists.add(executor.submit(() -> this.getUnspentOutputsAsync(address, true, executor)));
-			}
-
-			// collect address outputs as they are ready
-			for( Future<List<Future<Optional<TransactionOutput>>>> addressOutputs : addressOutputLists) {
-				allUnspentOutputs.addAll( addressOutputs.get() );
+				unspentOutputs.addAll(this.getUnspentOutputs(address, true));
 			}
 
 			// use the address outputs to sum up a balance
-			for (Future<Optional<TransactionOutput>> optionalFuture : allUnspentOutputs) {
-				Optional<TransactionOutput> transactionOutput = optionalFuture.get();
-				if (transactionOutput.isPresent() && !transactionOutput.get().isAvailableForSpending()) {
+			for (TransactionOutput unspentOutput : unspentOutputs) {
+				if (!unspentOutput.isAvailableForSpending()) {
 					continue;
 				}
-				balance += transactionOutput.get().getValue().value;
+				balance += unspentOutput.getValue().value;
 			}
 
 			// Shutdown the executor and wait for all tasks to complete
