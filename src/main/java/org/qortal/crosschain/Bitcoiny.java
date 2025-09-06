@@ -606,8 +606,9 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 
 		List<DeterministicKey> keys = new ArrayList<>(keyChain.getLeafKeys());
 
-		// ✅ Use shared executor
-		List<Future<Optional<BitcoinyTransaction>>> futures = new ArrayList<>();
+		// ✅ Use thread-safe list for futures
+		List<Future<Optional<BitcoinyTransaction>>> futures = Collections.synchronizedList(new ArrayList<>());
+
 
 		// ✅ Fetch keys with transaction checks
 		Set<String> keySet = processKeysWithTransactionFuturesIterative(blockchainExecutor, keys, keyChain, futures);
