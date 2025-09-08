@@ -539,7 +539,7 @@ public Long getWalletBalance(String key58) throws ForeignBlockchainException {
 		// Wait for all futures to complete
 		for (Future<List<TransactionOutput>> future : futures) {
 			
-				unspentOutputs.addAll(future.get()); // No timeout needed
+				unspentOutputs.addAll(future.get(10, TimeUnit.SECONDS)); // No timeout needed
 		
 		}
 
@@ -616,7 +616,7 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 		// ✅ Collect transactions from futures
 		Set<BitcoinyTransaction> walletTransactions = Collections.synchronizedSet(new HashSet<>());
 		for (Future<Optional<BitcoinyTransaction>> future : futures) {
-			Optional<BitcoinyTransaction> transactionOptional = future.get();
+			Optional<BitcoinyTransaction> transactionOptional = future.get(10, TimeUnit.SECONDS);
 
 			if (transactionOptional.isPresent()) {
 				BitcoinyTransaction transaction = transactionOptional.get();
@@ -1005,7 +1005,7 @@ private Set<String> processKeysIterative(ExecutorService executor, Deterministic
         // Wait for async results
         for (Future<Boolean> future : futures) {
             try {
-                if (future.get()) {
+                if (future.get(10, TimeUnit.SECONDS)) {
                     foundTxInBatch = true;
                 }
             } catch (Exception e) {
