@@ -545,7 +545,14 @@ public class Settings {
 	 */
 	private int rebuildArbitraryResourceCacheTaskPeriod = 24;
 
-	// Domain mapping
+	/**
+	 * Electrum Thread Count
+	 *
+	 * The number of threads ready to access Electrum servers for the supported foreign coins.
+	 */
+    private int electrumThreadCount = 12;
+
+    // Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
 		private Integer limit;
@@ -1393,5 +1400,9 @@ public class Settings {
 
 	public int getRebuildArbitraryResourceCacheTaskPeriod() {
 		return rebuildArbitraryResourceCacheTaskPeriod;
+	}
+
+	public int getElectrumThreadCount() {
+		return electrumThreadCount;
 	}
 }
