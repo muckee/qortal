@@ -217,10 +217,6 @@ public class ArbitraryDataFileManager extends Thread {
                 arbitraryDataFileHashResponses.clear();
             }
 
-            if (responsesToProcess.isEmpty()) {
-                return;
-            }
-
             Long now = NTP.getTime();
 
             ArbitraryDataFileRequestThread.getInstance().processFileHashes(now, responsesToProcess, this);

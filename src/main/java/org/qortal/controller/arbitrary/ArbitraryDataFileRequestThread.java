@@ -51,6 +51,8 @@ public class ArbitraryDataFileRequestThread {
 
     private ConcurrentHashMap<String, ExecutorService> executorByPeer = new ConcurrentHashMap<>();
 
+    private Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks = new HashMap<>();
+    private Map<Peer, Integer> pendingPeerTries = new HashMap<>();
     private ArbitraryDataFileRequestThread() {
         cleanupExecutorByPeerScheduler.scheduleAtFixedRate(this::cleanupExecutorsByPeer, 1, 1, TimeUnit.MINUTES);
     }
@@ -98,6 +100,36 @@ public class ArbitraryDataFileRequestThread {
         Map<String, byte[]> signatureBySignature58 = new HashMap<>(responseInfos.size());
         Map<String, List<ArbitraryFileListResponseInfo>> responseInfoBySignature58 = new HashMap<>();
 
+        List<Peer> completeConnectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+
+        // Remove any that have exceeded the count, increment others
+        for (Map.Entry<Peer, Integer> peerTimeLapse : pendingPeerTries.entrySet()) {
+            Peer peer = peerTimeLapse.getKey();
+            Integer elapsedSeconds = peerTimeLapse.getValue();
+
+            if (elapsedSeconds > 5 ) {  // stale, drop list and counter
+                pendingPeerTries.remove(peer);
+                pendingPeerAndChunks.remove(peer);
+            } else { // only need to increment
+                pendingPeerTries.replace(peer, elapsedSeconds++);
+            }
+        }
+
+        // If we have some held hashes waiting for a peer
+        if (!pendingPeerAndChunks.isEmpty()) {
+            for (Map.Entry<Peer, List<ArbitraryFileListResponseInfo>> peerWithInfos: pendingPeerAndChunks.entrySet()) {
+                Peer peer = peerWithInfos.getKey();
+                if (completeConnectedPeers.contains(peer)) {            // If the peer is now connected
+                    responseInfos.addAll(peerWithInfos.getValue());     // add all responseInfos for this peer to the list
+                    pendingPeerTries.remove(peer);
+                    pendingPeerAndChunks.remove(peer);
+                }
+            }
+        }
+
+        if (responseInfos.isEmpty())
+            return;
+
         for( ArbitraryFileListResponseInfo responseInfo : responseInfos) {
 
             if( responseInfo == null ) continue;
@@ -107,6 +139,26 @@ public class ArbitraryDataFileRequestThread {
             }
 
             Peer peer = responseInfo.getPeer();
+            // Check if the peer we want a chunk from is connected?
+
+
+            if(!completeConnectedPeers.contains(peer)) { // Peer is not connected
+                // put the response info into a queue tied to this peers connection completed
+                pendingPeerAndChunks
+                        .computeIfAbsent(peer, k -> new ArrayList<>())
+                        .add(responseInfo);
+                pendingPeerTries
+                        .computeIfAbsent(peer, k -> 0);
+
+
+                // Check if there is a pending connection
+                List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
+                if(!connectedPeers.contains(peer)) {  // In handshaking, not ready but started
+                    NetworkData.getInstance().connectPeer(peer);
+                }
+                continue;
+            }
+
             LOGGER.info("Peer Object is {}", peer);
             if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null || peer == null) {
                 LOGGER.trace("TIMED OUT in ArbitraryDataFileRequestThread");
@@ -132,7 +184,7 @@ public class ArbitraryDataFileRequestThread {
 
             // We want to process this file, store and map data to process later
             signatureBySignature58.put(responseInfo.getSignature58(), signature);
-            responseInfoBySignature58
+            responseInfoBySignature58 // Can contain different peers
                     .computeIfAbsent(responseInfo.getSignature58(), signature58 -> new ArrayList<>())
                     .add(responseInfo);
         }
@@ -154,25 +206,28 @@ public class ArbitraryDataFileRequestThread {
 //            long start = System.currentTimeMillis();
             Peer peer = null;
             LOGGER.info("List of files is not empty, starting to build message of: GetArbitraryDataFilesMessage ");
-            for(ArbitraryTransactionData data : arbitraryTransactionDataList ) {
+
+            for(ArbitraryTransactionData data : arbitraryTransactionDataList ) {  // a file
                 String signature58 = Base58.encode(data.getSignature());
 
-                List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
                 // Check if we have a connection to this peer
                 peer = responseInfoBySignature58.get(signature58).get(0).getPeer();
-                if(!connectedPeers.contains(peer)) {
-                    // Send to new Thread to Connect
+
+                if(!completeConnectedPeers.contains(peer)) {
+
                     NetworkData.getInstance().addPeer(peer);
+                    NetworkData.getInstance().forceConnectPeer(peer);
+                    LOGGER.info("Starting New QDN Connection request");
+                    /*
                     Peer finalPeer = peer;
-                    LOGGER.info("Starting New QDN Connection Thread");
                     Runnable requestConnect = () -> {
                         try {
-                            NetworkData.getInstance().connectPeerThenFetch(finalPeer, responseInfos);
+                            NetworkData.getInstance().connectPeerThenFetch(finalPeer, responseInfo);
                         } catch (InterruptedException e) {
                             throw new RuntimeException(e);
                         }
                     };
-                    new Thread (requestConnect).start();
+                    new Thread (requestConnect).start(); */
                     break;
                 }
 

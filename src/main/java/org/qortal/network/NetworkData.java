@@ -741,7 +741,7 @@ public class NetworkData {
     public boolean connectPeer(Peer newPeer) throws InterruptedException {
         // Also checked before creating PeerConnectTask
         if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers) {
-            LOGGER.info("Bad: size() > {} ", minOutboundPeers);
+            LOGGER.info("To Many Peers size() > {} ", minOutboundPeers);
             return false;
         }
 
@@ -762,7 +762,28 @@ public class NetworkData {
         return true;
     }
 
-    public void connectPeerThenFetch(Peer newPeer, List<ArbitraryFileListResponseInfo> responseInfos) throws InterruptedException {
+    /* Same as connectPeer except it ignores the max peer count */
+    public boolean forceConnectPeer(Peer newPeer) {
+
+        SocketChannel socketChannel = newPeer.connect(Peer.NETWORKDATA);
+        if (socketChannel == null) {
+            LOGGER.info("socketChannel == null");
+            return false;
+        }
+
+        if (Thread.currentThread().isInterrupted()) {
+            LOGGER.info("Thread is interuppted");
+            return false;
+        }
+
+        this.addConnectedPeer(newPeer);
+        this.onPeerReady(newPeer);
+
+        return true;
+    }
+
+    /*
+    public void connectPeerThenFetch(Peer newPeer, ArbitraryFileListResponseInfo responseInfo) throws InterruptedException {
         LOGGER.info("Starting connectThenFetch");
         boolean success = connectPeer(newPeer);
         if (success) { // Handshake ready to go
@@ -787,12 +808,19 @@ public class NetworkData {
             }
 
             // Forward request back to the ArbitraryDataFileRequestThread
-            for (ArbitraryFileListResponseInfo responseInfo : responseInfos) {
-                LOGGER.info("Sending Info back to file Manager");
-                ArbitraryDataFileManager.getInstance().addResponse(responseInfo);
-            }
+            //for (ArbitraryFileListResponseInfo responseInfo : responseInfos) {
+            LOGGER.info("Sending Info back to file Manager");
+            ArbitraryDataFileManager.getInstance().addResponse(responseInfo);
+            //}
+        } // If the handshake came back fail
+        else {
+            // @ToDo: This is a future code for if we failed because we were already connecting
+            // Verse could not connect, retry or just put the hashlist back on the stack
         }
+
     }
+
+     */
 
     public Peer getPeerFromChannel(SocketChannel socketChannel) {
         //LOGGER.info("Passed SocketChannel is: {} ", socketChannel.toString());
