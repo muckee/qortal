@@ -218,16 +218,6 @@ public class ArbitraryDataFileRequestThread {
                     NetworkData.getInstance().addPeer(peer);
                     NetworkData.getInstance().forceConnectPeer(peer);
                     LOGGER.info("Starting New QDN Connection request");
-                    /*
-                    Peer finalPeer = peer;
-                    Runnable requestConnect = () -> {
-                        try {
-                            NetworkData.getInstance().connectPeerThenFetch(finalPeer, responseInfo);
-                        } catch (InterruptedException e) {
-                            throw new RuntimeException(e);
-                        }
-                    };
-                    new Thread (requestConnect).start(); */
                     break;
                 }
 
@@ -243,7 +233,6 @@ public class ArbitraryDataFileRequestThread {
                     message.setId(msgId);
 
                     LOGGER.trace("Adding hash {} to PeerSendManager send to {}", fileHash, peer);
-                    // We might not have a connection yet?
                     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);
                 }
 

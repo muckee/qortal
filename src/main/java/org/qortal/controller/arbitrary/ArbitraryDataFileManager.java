@@ -162,6 +162,7 @@ public class ArbitraryDataFileManager extends Thread {
                 if (!arbitraryDataFileRequests.containsKey(Base58.encode(hash))) {
                     LOGGER.info("Requesting data file {} from peer {}", hash58, peer);
                     Long startTime = NTP.getTime();
+                    peer.QDNUse();
                     ArbitraryDataFile receivedArbitraryDataFile = fetchArbitraryDataFile(peer, arbitraryTransactionData, signature, hash);
                     Long endTime = NTP.getTime();
                     if (receivedArbitraryDataFile != null) {

@@ -113,6 +113,11 @@ public class Peer {
      */
     private Long lastPingSent = null;
 
+    /**
+     * Track last response of QDN assets to find nodes that have useful/maximum data
+     */
+    private Long lastValidUse = null;
+
     byte[] ourChallenge;
 
     private boolean syncInProgress = false;
@@ -120,7 +125,6 @@ public class Peer {
 
     /* Pending signature requests */
     private List<byte[]> pendingSignatureRequests = Collections.synchronizedList(new ArrayList<>());
-
 
     // Versioning
     public static final Pattern VERSION_PATTERN = Pattern.compile(Controller.VERSION_PREFIX
@@ -483,6 +487,7 @@ public class Peer {
 
     private void sharedSetup(int network) throws IOException {
         this.connectionTimestamp = NTP.getTime();
+        this.lastValidUse = NTP.getTime();
         this.socketChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
         this.socketChannel.configureBlocking(false);
         if (network == Peer.NETWORK)
@@ -1046,6 +1051,14 @@ public class Peer {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public void QDNUse() {
+        this.lastValidUse = NTP.getTime();
+    }
+
+    public long getLastQDNUse() {
+        return this.lastValidUse;
     }
 
     protected void startPings() {

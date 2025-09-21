@@ -9,10 +9,7 @@ import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
-import org.qortal.controller.arbitrary.ArbitraryDataFileManager;
-import org.qortal.controller.arbitrary.ArbitraryDataFileRequestThread;
 import org.qortal.crypto.Crypto;
-import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.message.*;
 import org.qortal.network.task.*;
@@ -29,7 +26,6 @@ import org.qortal.utils.NamedThreadFactory;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.SocketAddress;
 import java.net.StandardSocketOptions;
 import java.net.UnknownHostException;
 import java.nio.channels.*;
@@ -782,45 +778,6 @@ public class NetworkData {
         return true;
     }
 
-    /*
-    public void connectPeerThenFetch(Peer newPeer, ArbitraryFileListResponseInfo responseInfo) throws InterruptedException {
-        LOGGER.info("Starting connectThenFetch");
-        boolean success = connectPeer(newPeer);
-        if (success) { // Handshake ready to go
-
-            long MAX_TRY_TIME = 5000L;
-            Thread.sleep(100);
-            long processingTime = 1000;
-            // Need handshaking to complete, watch wait/timeout
-            boolean complete = false;
-            while (processingTime < MAX_TRY_TIME) {
-                if(connectedPeers.contains(newPeer)) {
-                    complete = true;
-                    break;
-                }
-                Thread.sleep(100);
-                processingTime += 100;
-
-            }
-            if (! complete ) {
-                LOGGER.info("Didn't connect in 5sec");
-                return;
-            }
-
-            // Forward request back to the ArbitraryDataFileRequestThread
-            //for (ArbitraryFileListResponseInfo responseInfo : responseInfos) {
-            LOGGER.info("Sending Info back to file Manager");
-            ArbitraryDataFileManager.getInstance().addResponse(responseInfo);
-            //}
-        } // If the handshake came back fail
-        else {
-            // @ToDo: This is a future code for if we failed because we were already connecting
-            // Verse could not connect, retry or just put the hashlist back on the stack
-        }
-
-    }
-
-     */
 
     public Peer getPeerFromChannel(SocketChannel socketChannel) {
         //LOGGER.info("Passed SocketChannel is: {} ", socketChannel.toString());
@@ -1554,131 +1511,28 @@ public class NetworkData {
             peer.disconnect(String.format("handshake timeout at %s", peer.getHandshakeStatus().name()));
         }
 
-        // Prune 'old' peers from repository...
-        // Pruning peers isn't critical so no need to block for a repository instance.
-        // @ToDo: We should not be writing to the repository
-//        try (Repository repository = RepositoryManager.tryRepository()) {
-//            if (repository == null) {
-//                LOGGER.warn("Unable to get repository connection : Network.prunePeers()");
-//                return;
-//            }
-//
-//            synchronized (this.allKnownPeers) {
-//                // Fetch all known peers
-//                List<PeerData> peers = new ArrayList<>(this.allKnownPeers);
-//
-//                // 'Old' peers:
-//                // We attempted to connect within the last day
-//                // but we last managed to connect over a week ago.
-//                Predicate<PeerData> isNotOldPeer = peerData -> {
-//                    if (peerData.getLastAttempted() == null
-//                            || peerData.getLastAttempted() < now - OLD_PEER_ATTEMPTED_PERIOD) {
-//                        return true;
-//                    }
-//
-//                    return peerData.getLastConnected() == null
-//                            || peerData.getLastConnected() > now - OLD_PEER_CONNECTION_PERIOD;
-//                };
-//
-//                // Disregard peers that are NOT 'old'
-//                peers.removeIf(isNotOldPeer);
-//
-//                // Don't consider already connected peers (simple address match)
-//                peers.removeIf(isConnectedPeer);
-//
-//                for (PeerData peerData : peers) {
-//                    LOGGER.debug("Deleting old peer {} from repository", peerData.getAddress().toString());
-//                    repository.getNetworkRepository().delete(peerData.getAddress());
-//
-//                    // Delete from known peer cache too
-//                    this.allKnownPeers.remove(peerData);
-//                }
-//
-//                repository.saveChanges();
-//            }
-//        }
+        // Prune 'old' peers from if we are over the count
+        int overCount = this.getImmutableHandshakedPeers().size() - Settings.getInstance().getMaxDataPeers();
+        if (overCount > 0) { // Too Many peers we need to trim some out
+            List<Peer> listDisconnectPeers = findOldPeers(overCount);
+            for (Peer disconnectPeer : listDisconnectPeers) {
+                disconnectPeer.disconnect("Over Max and Old");
+            }
+        }
      }
 
-//    public boolean mergePeers(String addedBy, long addedWhen, List<PeerAddress> peerAddresses) throws DataException {
-//        mergePeersLock.lock();
-//
-//        try (Repository repository = RepositoryManager.getRepository()) {
-//            return this.mergePeers(repository, addedBy, addedWhen, peerAddresses);
-//        } finally {
-//            mergePeersLock.unlock();
-//        }
-//    }
-
-//    private void opportunisticMergePeers(String addedBy, List<PeerAddress> peerAddresses) {
-//        final Long addedWhen = NTP.getTime();
-//        if (addedWhen == null) {
-//            return;
-//        }
-//
-//        // Serialize using lock to prevent repository deadlocks
-//        if (!mergePeersLock.tryLock()) {
-//            return;
-//        }
-//
-//        try {
-//            // Merging peers isn't critical so don't block for a repository instance.
-//            try (Repository repository = RepositoryManager.tryRepository()) {
-//                if (repository == null) {
-//                    LOGGER.warn("Unable to get repository connection : Network.opportunisticMergePeers()");
-//                    return;
-//                }
-//
-//                this.mergePeers(repository, addedBy, addedWhen, peerAddresses);
-//
-//            } catch (DataException e) {
-//                // Already logged by this.mergePeers()
-//            }
-//        } finally {
-//            mergePeersLock.unlock();
-//        }
-//    }
-
-//    private boolean mergePeers(Repository repository, String addedBy, long addedWhen, List<PeerAddress> peerAddresses)
-//            throws DataException {
-//        List<String> fixedNetwork = Settings.getInstance().getFixedNetwork();
-//        if (fixedNetwork != null && !fixedNetwork.isEmpty()) {
-//            return false;
-//        }
-//        List<PeerData> newPeers;
-//        synchronized (this.allKnownPeers) {
-//            for (PeerData knownPeerData : this.allKnownPeers) {
-//                // Filter out duplicates, without resolving via DNS
-//                Predicate<PeerAddress> isKnownAddress = peerAddress -> knownPeerData.getAddress().equals(peerAddress);
-//                peerAddresses.removeIf(isKnownAddress);
-//            }
-//
-//            if (peerAddresses.isEmpty()) {
-//                return false;
-//            }
-//
-//            // Add leftover peer addresses to known peers list
-//            newPeers = peerAddresses.stream()
-//                    .map(peerAddress -> new PeerData(peerAddress, addedWhen, addedBy))
-//                    .collect(Collectors.toList());
-//
-//            this.allKnownPeers.addAll(newPeers);
-//
-//            try {
-//                // Save new peers into database
-//                for (PeerData peerData : newPeers) {
-//                    LOGGER.info("Adding new peer {} to repository", peerData.getAddress());
-//                    repository.getNetworkRepository().save(peerData);
-//                }
-//
-//                repository.saveChanges();
-//            } catch (DataException e) {
-//                LOGGER.error("Repository issue while merging peers list from {}", addedBy, e);
-//                throw e;
-//            }
-//
-//            return true;
-//        }
-//    }
+    /**
+     * Returns the N peers with the lowest getLastQDNUse() values.
+     *
+     * @param num number of peers to return
+     * @return list of peers with lowest getLastQDNUse()
+     */
+     List<Peer> findOldPeers(int num) {
+        return this.getImmutableHandshakedPeers().stream()
+                .sorted(Comparator.comparingLong(Peer::getLastQDNUse))
+                .limit(num)
+                .collect(Collectors.toList());
+     }
 
     public void broadcast(Function<Peer, Message> peerMessageBuilder) {
         for (Peer peer : getImmutableHandshakedPeers()) {
