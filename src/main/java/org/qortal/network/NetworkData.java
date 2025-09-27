@@ -297,12 +297,6 @@ public class NetworkData {
                 .collect(Collectors.toList());
     }
 
-//    public List<Peer> getImmutableConnectedNonDataPeers() {
-//        return this.getImmutableConnectedPeers().stream()
-//                .filter(p -> !p.isDataPeer())
-//                .collect(Collectors.toList());
-//    }
-
     public void addConnectedPeer(Peer peer) {
         this.connectedPeers.add(peer); // thread safe thanks to synchronized list
         this.immutableConnectedPeers = List.copyOf(this.connectedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
@@ -669,7 +663,7 @@ public class NetworkData {
                 return null;
             }
         LOGGER.info("ConnectedPeers: {}, Handshaked Peers: {} ", immutableConnectedPeers.size(), immutableHandshakedPeers.size());
-
+        LOGGER.info("Out External IP is: {}", Network.getInstance().getOurExternalIpAddress());
         // Find an address to connect to
             List<PeerData> peers = this.getAllKnownPeers();
 

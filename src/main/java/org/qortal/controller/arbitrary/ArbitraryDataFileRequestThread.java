@@ -48,7 +48,7 @@ public class ArbitraryDataFileRequestThread {
 
     private static final Integer FETCHER_LIMIT_PER_PEER = Settings.getInstance().getMaxThreadsForMessageType(MessageType.GET_ARBITRARY_DATA_FILE);
     private static final String FETCHER_THREAD_PREFIX = "Arbitrary Data Fetcher ";
-
+    List<Peer> connectIssued = new ArrayList<>();
     private ConcurrentHashMap<String, ExecutorService> executorByPeer = new ConcurrentHashMap<>();
 
     private Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks = new HashMap<>();
@@ -96,7 +96,7 @@ public class ArbitraryDataFileRequestThread {
             return;
         }
 
-        LOGGER.info("Processing File Hashes");
+        //LOGGER.info("Processing File Hashes");
         Map<String, byte[]> signatureBySignature58 = new HashMap<>(responseInfos.size());
         Map<String, List<ArbitraryFileListResponseInfo>> responseInfoBySignature58 = new HashMap<>();
 
@@ -110,6 +110,7 @@ public class ArbitraryDataFileRequestThread {
             if (elapsedSeconds > 5 ) {  // stale, drop list and counter
                 pendingPeerTries.remove(peer);
                 pendingPeerAndChunks.remove(peer);
+                connectIssued.remove(peer);
             } else { // only need to increment
                 pendingPeerTries.replace(peer, elapsedSeconds++);
             }
@@ -123,12 +124,14 @@ public class ArbitraryDataFileRequestThread {
                     responseInfos.addAll(peerWithInfos.getValue());     // add all responseInfos for this peer to the list
                     pendingPeerTries.remove(peer);
                     pendingPeerAndChunks.remove(peer);
+                    connectIssued.remove(peer);
                 }
             }
         }
 
         if (responseInfos.isEmpty())
             return;
+
 
         for( ArbitraryFileListResponseInfo responseInfo : responseInfos) {
 
@@ -149,12 +152,17 @@ public class ArbitraryDataFileRequestThread {
                         .add(responseInfo);
                 pendingPeerTries
                         .computeIfAbsent(peer, k -> 0);
-
+                LOGGER.info("Adding to pendingPeerAndChunks : count={}", pendingPeerAndChunks.size());
 
                 // Check if there is a pending connection
                 List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
-                if(!connectedPeers.contains(peer)) {  // In handshaking, not ready but started
-                    NetworkData.getInstance().connectPeer(peer);
+                synchronized (connectIssued) {
+                    if (!connectedPeers.contains(peer) && !connectIssued.contains(peer)) {  // In handshaking, not ready but started
+                        LOGGER.info("Forcing Connect for QDN to: {}", peer);
+                        connectIssued.add(peer);
+                        NetworkData.getInstance().forceConnectPeer(peer);
+                        Thread.sleep(50);
+                    }
                 }
                 continue;
             }

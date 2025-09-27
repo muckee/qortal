@@ -513,13 +513,13 @@ public class Peer {
             this.socketChannel.socket().bind(new InetSocketAddress(bindAddr, 0));
             this.socketChannel.socket().connect(resolvedAddress, CONNECT_TIMEOUT);
         } catch (SocketTimeoutException e) {
-            LOGGER.trace("[{}] Connection timed out to peer {}", this.peerConnectionId, this);
+            LOGGER.info("[{}] Connection timed out to peer {}", this.peerConnectionId, this);
             return null;
         } catch (UnknownHostException e) {
-            LOGGER.trace("[{}] Connection failed to unresolved peer {}", this.peerConnectionId, this);
+            LOGGER.info("[{}] Connection failed to unresolved peer {}", this.peerConnectionId, this);
             return null;
         } catch (IOException e) {
-            LOGGER.trace("[{}] Connection failed to peer {}", this.peerConnectionId, this);
+            LOGGER.info("[{}] Connection failed to peer {}", this.peerConnectionId, this);
             return null;
         }
 

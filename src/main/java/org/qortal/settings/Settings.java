@@ -207,8 +207,8 @@ public class Settings {
 	private int minOutboundPeers = 32;
 	/** Maximum number of peer connections we allow. */
 	private int maxPeers = 64;
-	/** Number of slots to reserve for short-lived QDN data transfers */
-	private int maxDataPeers = 5;
+	/** Number of slots to reserve for QDN data transfers */
+	private int maxDataPeers = 64;
 	/** Maximum number of threads for network engine. */
 	private int maxNetworkThreadPoolSize = 512;
 	/** Maximum number of threads for network proof-of-work compute, used during handshaking. */

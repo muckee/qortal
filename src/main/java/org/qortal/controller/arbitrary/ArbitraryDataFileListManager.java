@@ -800,6 +800,7 @@ public class ArbitraryDataFileListManager {
                     }
 
                     String ourAddress = Network.getInstance().getOurExternalIpAddress() + ":" + Settings.getInstance().getQDNListenPort();
+                    LOGGER.info("We Think our external address is: {}", Network.getInstance().getOurExternalIpAddress());
                     ArbitraryDataFileListMessage arbitraryDataFileListMessage;
 
                     // Remove optional parameters if the requesting peer doesn't support it yet

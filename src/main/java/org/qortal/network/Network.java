@@ -249,7 +249,7 @@ public class Network {
         networkEPC.start();
 
         // Completed Setup for Network, Time to launch NetworkData for non-priority tasks
-        LOGGER.info("Starting second network (NetworkData) on port {}", Settings.getInstance().getQDNListenPort());
+        LOGGER.info("Starting second network (QDN) on port {}", Settings.getInstance().getQDNListenPort());
         try {
             NetworkData.getInstance().start();
         } catch (IOException | DataException e) {
@@ -1349,12 +1349,14 @@ public class Network {
 
     public void ourPeerAddressUpdated(String peerAddress) {
         if (peerAddress == null || peerAddress.isEmpty()) {
+            LOGGER.info("peer address was null or empty");
             return;
         }
 
         // Validate IP address
         String[] parts = peerAddress.split(":");
         if (parts.length != 2) {
+            LOGGER.info("Does not contain IP:PORT");
             return;
         }
         String host = parts[0];
@@ -1374,9 +1376,10 @@ public class Network {
 
         // Add to the list
         this.ourExternalIpAddressHistory.add(host);
-
+        LOGGER.info("We were told our address is: {}", host);
         // In the beginning we don't have 10 connections, so assume the first client tells the truth
-        if (Objects.equals(this.ourExternalIpAddress, "null")) {
+        if (this.ourExternalIpAddress == null) {
+
             this.ourExternalIpAddress = host;
             this.onExternalIpUpdate(host);
             return;
