@@ -23,6 +23,7 @@ import org.qortal.settings.Settings;
 import org.qortal.utils.ArbitraryTransactionUtils;
 import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
+import org.qortal.utils.Triple;
 
 import java.security.SecureRandom;
 import java.util.*;
@@ -60,6 +61,10 @@ public class ArbitraryDataFileManager extends Thread {
      * This allows for additional "burst" connections beyond existing limits.
      */
     private Map<String, Long> recentDataRequests = Collections.synchronizedMap(new HashMap<>());
+
+    // This needs to be a private class
+    //private Triple<Peer, Integer, List<ArbitraryFileListResponseInfo>> pendingPeerConnectionsWHashes = new
+    private final PendingPeersWithHashes pendingPeersWithHashes = new PendingPeersWithHashes();
 
     public static int MAX_FILE_HASH_RESPONSES = 1000;
 
@@ -214,15 +219,17 @@ public class ArbitraryDataFileManager extends Thread {
         try {
             List<ArbitraryFileListResponseInfo> responsesToProcess;
             synchronized (arbitraryDataFileHashResponseLock) {
+                if (arbitraryDataFileHashResponses.isEmpty()) {
+                    return; // nothing to process
+                }
                 responsesToProcess = new ArrayList<>(arbitraryDataFileHashResponses);
                 arbitraryDataFileHashResponses.clear();
             }
 
-            Long now = NTP.getTime();
-
+            long now = NTP.getTime();
             ArbitraryDataFileRequestThread.getInstance().processFileHashes(now, responsesToProcess, this);
         } catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
+            LOGGER.error("Error while processing responses: {} {}", e.getMessage(), e);
         }
     }
 
@@ -770,6 +777,7 @@ public class ArbitraryDataFileManager extends Thread {
         processDataFile(peer, hash, signature, message.getId());
     }
 
+
     /*  Original Good working Method
     public void onNetworkGetArbitraryDataFileMessage(Peer peer, Message message) {
         // Don't respond if QDN is disabled
@@ -844,7 +852,122 @@ public class ArbitraryDataFileManager extends Thread {
             throw new RuntimeException(e);
         }
     }
-
      */
 
+    /* Calls to SubClass */
+    Map<Peer, Integer> getPeerTimeOuts() {
+        return this.pendingPeersWithHashes.getTimeOuts();
+    }
+
+    Map<Peer, List<ArbitraryFileListResponseInfo>> getPendingPeerAndChunks() {
+        return this.pendingPeersWithHashes.getPendingPeersWithChunks();
+    }
+
+    void removePeerTimeOut(Peer peer) {
+        this.pendingPeersWithHashes.cleanOut(peer);
+    }
+
+    void incrementTimeOuts() {
+        this.pendingPeersWithHashes.incrementTimeOuts();
+    }
+
+    boolean pendingPeersAndChunks() {
+        return this.pendingPeersWithHashes.isPending();
+    }
+
+    void addResponseToPending(Peer peer, ArbitraryFileListResponseInfo ri) {
+        this.pendingPeersWithHashes.addPeerAndInfo(peer, ri);
+    }
+
+    boolean getIsConnectingPeer(Peer peer) {
+        return this.pendingPeersWithHashes.isConnecting(peer);
+    }
+
+    void setIsConnecting(Peer peer, boolean v) {
+        this.pendingPeersWithHashes.setConnecting(peer, v);
+    }
+
+    boolean isPendingPeer(Peer peer) {
+        return this.pendingPeersWithHashes.isPending(peer);
+    }
+
+    public static class PendingPeersWithHashes {
+        private final Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks;
+        private final Map<Peer, Integer> pendingPeerTries;
+        private final List<String> isConnectingPeers;
+        private final Object combinedLock = new Object();
+
+        public PendingPeersWithHashes() {
+            pendingPeerTries = new HashMap<>();
+            pendingPeerAndChunks = new HashMap<>();
+            isConnectingPeers = new ArrayList<>();
+        }
+
+        Map<Peer, Integer> getTimeOuts() {
+            synchronized (combinedLock) {
+                return new HashMap<>(this.pendingPeerTries);
+            }
+        }
+
+        // Snapshot of pendingPeerAndChunks (deep-ish copy of lists)
+        Map<Peer, List<ArbitraryFileListResponseInfo>> getPendingPeersWithChunks() {
+            synchronized (combinedLock) {
+                Map<Peer, List<ArbitraryFileListResponseInfo>> copy = new HashMap<>(this.pendingPeerAndChunks.size());
+                for (Map.Entry<Peer, List<ArbitraryFileListResponseInfo>> e : this.pendingPeerAndChunks.entrySet()) {
+                    // create a new List copy so callers can iterate safely
+                    copy.put(e.getKey(), new ArrayList<>(e.getValue()));
+                }
+                return copy;
+            }
+        }
+
+        void cleanOut(Peer peer) {
+            synchronized (combinedLock) {
+                this.pendingPeerTries.remove(peer);
+                this.pendingPeerAndChunks.remove(peer);
+            }
+        }
+
+        void incrementTimeOuts() {
+            synchronized (combinedLock) {
+                this.pendingPeerTries.replaceAll((key, value) -> value + 1);
+            }
+        }
+
+        boolean isPending() {
+            return !this.pendingPeerAndChunks.isEmpty();
+        }
+
+        boolean isPending(Peer peer) {
+            return this.pendingPeerAndChunks.containsKey(peer);
+        }
+
+        void addPeerAndInfo(Peer peer, ArbitraryFileListResponseInfo aflri) {
+            synchronized (combinedLock) {
+                this.pendingPeerTries.putIfAbsent(peer, 0);
+                pendingPeerAndChunks
+                        .computeIfAbsent(peer, k -> new ArrayList<>())
+                        .add(aflri);
+            }
+        }
+
+        void setConnecting(Peer peer, boolean v) {
+            synchronized (combinedLock) {
+                if (v) {
+                    isConnectingPeers.add(peer.getPeerData().getAddress().getHost());
+                }
+                else {
+                    try {
+                        isConnectingPeers.remove(peer.getPeerData().getAddress().getHost());
+                    } catch (Exception ignored) {
+
+                    }
+                }
+            }
+        }
+
+        boolean isConnecting(Peer peer) {
+            return isConnectingPeers.contains(peer.getPeerData().getAddress().getHost());
+        }
+    }
 }

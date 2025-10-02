@@ -23,17 +23,13 @@ import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 import org.qortal.utils.NamedThreadFactory;
 
-//import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
-//import java.util.Comparator;
 import java.util.HashMap;
-//import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-//import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -48,11 +44,8 @@ public class ArbitraryDataFileRequestThread {
 
     private static final Integer FETCHER_LIMIT_PER_PEER = Settings.getInstance().getMaxThreadsForMessageType(MessageType.GET_ARBITRARY_DATA_FILE);
     private static final String FETCHER_THREAD_PREFIX = "Arbitrary Data Fetcher ";
-    List<Peer> connectIssued = new ArrayList<>();
     private ConcurrentHashMap<String, ExecutorService> executorByPeer = new ConcurrentHashMap<>();
 
-    private Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks = new HashMap<>();
-    private Map<Peer, Integer> pendingPeerTries = new HashMap<>();
     private ArbitraryDataFileRequestThread() {
         cleanupExecutorByPeerScheduler.scheduleAtFixedRate(this::cleanupExecutorsByPeer, 1, 1, TimeUnit.MINUTES);
     }
@@ -96,42 +89,44 @@ public class ArbitraryDataFileRequestThread {
             return;
         }
 
-        //LOGGER.info("Processing File Hashes");
         Map<String, byte[]> signatureBySignature58 = new HashMap<>(responseInfos.size());
         Map<String, List<ArbitraryFileListResponseInfo>> responseInfoBySignature58 = new HashMap<>();
 
         List<Peer> completeConnectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
 
         // Remove any that have exceeded the count, increment others
-        for (Map.Entry<Peer, Integer> peerTimeLapse : pendingPeerTries.entrySet()) {
+        ArbitraryDataFileManager adfm = ArbitraryDataFileManager.getInstance();
+        for (Map.Entry<Peer, Integer> peerTimeLapse : adfm.getPeerTimeOuts().entrySet()) {
+
             Peer peer = peerTimeLapse.getKey();
             Integer elapsedSeconds = peerTimeLapse.getValue();
 
             if (elapsedSeconds > 5 ) {  // stale, drop list and counter
-                pendingPeerTries.remove(peer);
-                pendingPeerAndChunks.remove(peer);
-                connectIssued.remove(peer);
-            } else { // only need to increment
-                pendingPeerTries.replace(peer, elapsedSeconds++);
+                adfm.removePeerTimeOut(peer);
+                LOGGER.info("Removing Peer: {} for time out", peer);
             }
         }
 
+        adfm.incrementTimeOuts();
+
         // If we have some held hashes waiting for a peer
-        if (!pendingPeerAndChunks.isEmpty()) {
-            for (Map.Entry<Peer, List<ArbitraryFileListResponseInfo>> peerWithInfos: pendingPeerAndChunks.entrySet()) {
+        if (adfm.pendingPeersAndChunks()) {
+            for (Map.Entry<Peer, List<ArbitraryFileListResponseInfo>> peerWithInfos: adfm.getPendingPeerAndChunks().entrySet()) {
+
                 Peer peer = peerWithInfos.getKey();
+                // We need to check by IP here, and then put in the proper peer object
+                Peer connectedPeer = NetworkData.getPeerByIP(peer.getPeerData().getAddress().getHost());
                 if (completeConnectedPeers.contains(peer)) {            // If the peer is now connected
+                    LOGGER.info("We are adding responseInfos from the queue");
                     responseInfos.addAll(peerWithInfos.getValue());     // add all responseInfos for this peer to the list
-                    pendingPeerTries.remove(peer);
-                    pendingPeerAndChunks.remove(peer);
-                    connectIssued.remove(peer);
+                    adfm.removePeerTimeOut(peer);
+                    adfm.setIsConnecting(peer, false);
                 }
             }
         }
 
         if (responseInfos.isEmpty())
             return;
-
 
         for( ArbitraryFileListResponseInfo responseInfo : responseInfos) {
 
@@ -147,23 +142,24 @@ public class ArbitraryDataFileRequestThread {
 
             if(!completeConnectedPeers.contains(peer)) { // Peer is not connected
                 // put the response info into a queue tied to this peers connection completed
-                pendingPeerAndChunks
-                        .computeIfAbsent(peer, k -> new ArrayList<>())
-                        .add(responseInfo);
-                pendingPeerTries
-                        .computeIfAbsent(peer, k -> 0);
-                LOGGER.info("Adding to pendingPeerAndChunks : count={}", pendingPeerAndChunks.size());
+                adfm.addResponseToPending(peer, responseInfo);
+//                pendingPeerAndChunks
+//                        .computeIfAbsent(peer, k -> new ArrayList<>())
+//                        .add(responseInfo);
+//                pendingPeerTries
+//                        .computeIfAbsent(peer, k -> 0);
+                LOGGER.info("Adding to pendingPeerAndChunks : count=");
 
                 // Check if there is a pending connection
-                List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
-                synchronized (connectIssued) {
-                    if (!connectedPeers.contains(peer) && !connectIssued.contains(peer)) {  // In handshaking, not ready but started
+                //List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
+
+                // This next line doesnt ever trip because we are setting it just above.....
+                if (!adfm.getIsConnectingPeer(peer)) {  // If not tracking the peer in adfm
                         LOGGER.info("Forcing Connect for QDN to: {}", peer);
-                        connectIssued.add(peer);
+                        adfm.setIsConnecting(peer, true);
                         NetworkData.getInstance().forceConnectPeer(peer);
                         Thread.sleep(50);
                     }
-                }
                 continue;
             }
 

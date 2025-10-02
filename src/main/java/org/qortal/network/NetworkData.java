@@ -5,6 +5,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters;
+import org.eclipse.persistence.sessions.remote.corba.sun._CORBARemoteSessionControllerImplBase;
 import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
@@ -314,6 +315,13 @@ public class NetworkData {
         synchronized (this.selfPeers) {
             return new ArrayList<>(this.selfPeers);
         }
+    }
+
+    public Peer getPeerByIP(String host) {
+        return this.immutableHandshakedPeers.stream()
+                .filter(p -> p.getPeerData().getAddress().getHost().equals(host))
+                .findFirst()
+                .orElse(null);
     }
 
     public boolean requestDataFromPeer(String peerAddressString, byte[] signature) {
