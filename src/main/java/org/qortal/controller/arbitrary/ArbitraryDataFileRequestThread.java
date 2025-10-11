@@ -43,6 +43,8 @@ public class ArbitraryDataFileRequestThread {
     private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataFileRequestThread.class);
 
     private static final Integer FETCHER_LIMIT_PER_PEER = Settings.getInstance().getMaxThreadsForMessageType(MessageType.GET_ARBITRARY_DATA_FILE);
+    //ToDo: replace static int in next line with FETCHER_LIMIT CONST
+    private final ExecutorService masterFileFetcherPool = Executors.newFixedThreadPool(3);
     private static final String FETCHER_THREAD_PREFIX = "Arbitrary Data Fetcher ";
     private ConcurrentHashMap<String, ExecutorService> executorByPeer = new ConcurrentHashMap<>();
 
@@ -151,7 +153,8 @@ public class ArbitraryDataFileRequestThread {
 
             if (!foundConnectedPeer) {
                 Peer findPeer;
-                String peerHost = peer.toString().split(":")[0];
+
+                String peerHost = peer.getHostName();
                 // Connected later by relay request we should find it
                 findPeer = NetworkData.getInstance().getPeerByHostName(peerHost);
                 if(findPeer != null) {
@@ -173,7 +176,7 @@ public class ArbitraryDataFileRequestThread {
                 continue;
             }
 
-            LOGGER.info("Peer Object is {}", peer);
+            //LOGGER.info("Peer Object is {}", peer);
             if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null || peer == null) {
                 LOGGER.trace("TIMED OUT in ArbitraryDataFileRequestThread");
                 continue;
@@ -186,7 +189,6 @@ public class ArbitraryDataFileRequestThread {
                 //arbitraryDataFileManager.addResponse(responseInfo); // don't remove -> adding back, because it was removed already above
                 continue;
             }
-
 
             byte[] hash = Base58.decode(responseInfo.getHash58());
             byte[] signature = Base58.decode(responseInfo.getSignature58());
@@ -228,12 +230,13 @@ public class ArbitraryDataFileRequestThread {
                 peer = responseInfoBySignature58.get(signature58).get(0).getPeer();
 
                 // @ToDo: can this if ever be true, see checks above,
+                /*
                 if(!completeConnectedPeers.contains(peer)) {
                     NetworkData.getInstance().addPeer(peer);
                     NetworkData.getInstance().forceConnectPeer(peer);
                     LOGGER.info("Starting New QDN Connection request");
                     break;
-                }
+                } */
 
                 for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
                     peer = responseInfo.getPeer();
@@ -283,8 +286,9 @@ public class ArbitraryDataFileRequestThread {
 //                    };
 //                    new Thread (requestConnect).start();
 //                } else {
-                    // May put inside a try instead, pending the connection above
-                    // Legacy Fetch Loop - 1 Thread per file
+
+                    // Legacy Fetch Loop - 1 Thread per chunk
+                /*
                     for (ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
                         LOGGER.info("Starting Thread to get a file: {}", responseInfo.getHash58());
 
@@ -305,11 +309,38 @@ public class ArbitraryDataFileRequestThread {
                                         )
                                 )
                                 .execute(fetcher);
-                    }
+                    }*/
                     // End Legacy Fetch Loop
+                    // The new, simplified loop
+                    for (ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
+                        // This part is the same
+                        LOGGER.info("Starting Thread to get a file: {}", responseInfo.getHash58());
+
+                        Runnable fetcher = () -> {
+                            try {
+                                arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
+                            } finally {
+                                LOGGER.info("File fetcher thread for hash {} is exiting.", responseInfo.getHash58());
+                            }
+                        };
+                        this.masterFileFetcherPool.execute(fetcher);
+                    }
                 //}
             }
 //            long timeLapse = System.currentTimeMillis() - start;
+        }
+    }
+
+    public void shutdownFileFetcherPool() {
+        masterFileFetcherPool.shutdown(); // Stops accepting new tasks
+        try {
+            // Wait a reasonable amount of time (e.g., 15 seconds) for existing tasks to complete
+            if (!masterFileFetcherPool.awaitTermination(15, TimeUnit.SECONDS)) {
+                masterFileFetcherPool.shutdownNow(); // Cancel currently executing tasks
+            }
+        } catch (InterruptedException e) {
+            masterFileFetcherPool.shutdownNow(); // Cancel if interrupted while waiting
+            Thread.currentThread().interrupt();
         }
     }
 

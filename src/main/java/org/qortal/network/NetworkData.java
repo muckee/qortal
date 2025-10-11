@@ -1044,7 +1044,7 @@ public class NetworkData {
                 PeerAddress pa = prdm.getPeerAddress();
                 byte[] hash = prdm.getHash();
                 requestDataFromPeer(pa.toString(), hash);
-                return;
+                break;
             case ARBITRARY_DATA_FILE:
                 LOGGER.info("Processing ArbitraryDataFile Message");
                 ArbitraryDataFileMessage adfm = (ArbitraryDataFileMessage) message;
@@ -1058,7 +1058,7 @@ public class NetworkData {
 
                 // @ToDo: See if we can move this up into the if above
                 ArbitraryDataFileManager.getInstance().receivedArbitraryDataFile(peer, adf);
-                return;
+                break;
             default:
                 // Bump up to controller for possible action
                 Controller.getInstance().onNetworkMessage(peer, message);

@@ -996,7 +996,7 @@ public class ArbitraryDataFileManager extends Thread {
             synchronized (combinedLock) {
                 String peerKey = peer.toString();
                 this.pendingPeerTries.putIfAbsent(peerKey, 0);
-                LOGGER.info("Unique peer count is: {}", pendingPeerTries.size());
+                //LOGGER.info("Unique peer count is: {}", pendingPeerTries.size());
 
                 // 1. Get the current list for this peer, or create a new one
                 List<ArbitraryFileListResponseInfo> currentList = pendingPeerAndChunks
