@@ -392,6 +392,22 @@ public class Peer {
         }
     }
 
+    public String getHostName() {
+        // Get the string representation of the PeerAddress
+        String addressString = this.peerData.getAddress().toString();
+
+        // Use HostAndPort to parse and extract the host part
+        try {
+            HostAndPort hostAndPort = HostAndPort.fromString(addressString);
+            return hostAndPort.getHost();
+        } catch (IllegalArgumentException e) {
+            // This should ideally not happen if PeerAddress is correctly formed,
+            // but return the full string as a fallback
+            LOGGER.warn("[{}] Could not parse host/port from address string: {}", this.peerConnectionId, addressString);
+            return addressString;
+        }
+    }
+
     public byte[] getPeersChallenge() {
         synchronized (this.peerInfoLock) {
             return this.peersChallenge;
@@ -481,6 +497,44 @@ public class Peer {
     public String toString() {
         // Easier, and nicer output, than peer.getRemoteSocketAddress()
         return this.peerData.getAddress().toString();
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (other == this) {
+            return true;
+        }
+
+        if (!(other instanceof Peer)) {
+            return false;
+        }
+
+        Peer otherPeer = (Peer) other;
+
+        // Compare based on the host and port combination from peerData
+        // Peer.toString() returns this.peerData.getAddress().toString(),
+        // which represents the HostAndPort for comparison.
+
+        // Retrieve InetSocketAddress from this Peer's PeerData
+        InetSocketAddress thisAddress;
+        try {
+            thisAddress = this.peerData.getAddress().toSocketAddress();
+        } catch (UnknownHostException e) {
+            LOGGER.error("Could not resolve own address for equals comparison: {}", this.peerData.getAddress().toString());
+            return false;
+        }
+
+        // Retrieve InetSocketAddress from the other Peer's PeerData
+        InetSocketAddress otherAddress;
+        try {
+            otherAddress = otherPeer.peerData.getAddress().toSocketAddress();
+        } catch (UnknownHostException e) {
+            LOGGER.error("Could not resolve other peer's address for equals comparison: {}", otherPeer.peerData.getAddress().toString());
+            return false;
+        }
+
+        // Use the existing utility method for address comparison
+        return Peer.addressEquals(thisAddress, otherAddress);
     }
 
     // Processing
@@ -926,6 +980,7 @@ public class Peer {
                 Thread.sleep(10); // Process a little something else
             }
         } catch (InterruptedException e) {
+            LOGGER.info("Socket Status isOpen: {}", this.socketChannel.isOpen());
             throw new RuntimeException(e);
         }
 
@@ -945,6 +1000,7 @@ public class Peer {
                     Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
                 case Peer.NETWORKDATA:
+                    LOGGER.info("Setting WRITE FLAG on {}", this.toString());
                     NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
             }
@@ -953,6 +1009,7 @@ public class Peer {
         } catch (InterruptedException e) {
             // Send failure
             LOGGER.error("Interrupt Exception");
+            LOGGER.info(e.getMessage(), e);
             return false;
         } catch (MessageException e) {
             LOGGER.error(e.getMessage(), e);

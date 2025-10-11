@@ -52,7 +52,7 @@ public class ArbitraryDataFileManager extends Thread {
     // List to keep track of any arbitrary data file hash responses
     private final List<ArbitraryFileListResponseInfo> arbitraryDataFileHashResponses = Collections.synchronizedList(new ArrayList<>());
 
-     // List to keep track of peers potentially available for direct connections, based on recent requests
+    // List to keep track of peers potentially available for direct connections, based on recent requests
     private final List<ArbitraryDirectConnectionInfo> directConnectionInfo = Collections.synchronizedList(new ArrayList<>());
 
     /**
@@ -80,10 +80,10 @@ public class ArbitraryDataFileManager extends Thread {
     }
 
     private ArbitraryDataFileManager() {
-        this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate( this::processResponses, 60, 1, TimeUnit.SECONDS);
+        this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::processResponses, 60, 1, TimeUnit.SECONDS);
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60, 1, TimeUnit.SECONDS);
 
-       ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
+        ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
 
         cleaner.scheduleAtFixedRate(() -> {
             long idleCutoff = TimeUnit.MINUTES.toMillis(2);
@@ -171,16 +171,14 @@ public class ArbitraryDataFileManager extends Thread {
                     ArbitraryDataFile receivedArbitraryDataFile = fetchArbitraryDataFile(peer, arbitraryTransactionData, signature, hash);
                     Long endTime = NTP.getTime();
                     if (receivedArbitraryDataFile != null) {
-                        LOGGER.trace("Received data file {} from peer {}. Time taken: {} ms", receivedArbitraryDataFile.getHash58(), peer, (endTime-startTime));
+                        LOGGER.trace("Received data file {} from peer {}. Time taken: {} ms", receivedArbitraryDataFile.getHash58(), peer, (endTime - startTime));
                         receivedAtLeastOneFile = true;
-                    }
-                    else {
-                        LOGGER.trace("Peer {} didn't respond with data file {} for signature {}. Time taken: {} ms", peer, Base58.encode(hash), Base58.encode(signature), (endTime-startTime));
+                    } else {
+                        LOGGER.trace("Peer {} didn't respond with data file {} for signature {}. Time taken: {} ms", peer, Base58.encode(hash), Base58.encode(signature), (endTime - startTime));
                         // Stop asking for files from this peer
                         break;
                     }
-                }
-                else {
+                } else {
                     LOGGER.info("Already requesting data file {} for signature {} from peer {}", arbitraryDataFile, Base58.encode(signature), peer);
                 }
             }
@@ -208,7 +206,7 @@ public class ArbitraryDataFileManager extends Thread {
     // Scheduled executor service to process messages every second
     private final ScheduledExecutorService arbitraryDataFileHashResponseScheduler = Executors.newScheduledThreadPool(1);
 
-    public void addResponse( ArbitraryFileListResponseInfo responseInfo ) {
+    public void addResponse(ArbitraryFileListResponseInfo responseInfo) {
 
         synchronized (arbitraryDataFileHashResponseLock) {
             this.arbitraryDataFileHashResponses.add(responseInfo);
@@ -219,7 +217,7 @@ public class ArbitraryDataFileManager extends Thread {
         try {
             List<ArbitraryFileListResponseInfo> responsesToProcess;
             synchronized (arbitraryDataFileHashResponseLock) {
-                if (arbitraryDataFileHashResponses.isEmpty()) {
+                if (arbitraryDataFileHashResponses.isEmpty() && !pendingPeersAndChunks()) {
                     return; // nothing to process
                 }
                 responsesToProcess = new ArrayList<>(arbitraryDataFileHashResponses);
@@ -273,9 +271,10 @@ public class ArbitraryDataFileManager extends Thread {
                 arbitraryDataFileRequests.put(hash58, NTP.getTime());
                 Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
 
-                // @ToDo: The response is null....  Need to figure out the logic here
+                // @ToDo - This is where we are
                 Message response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
 
+                // This is where we need to start the break apart
                 arbitraryDataFileRequests.remove(hash58);
                 LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
 
@@ -318,6 +317,47 @@ public class ArbitraryDataFileManager extends Thread {
         }
 
         return arbitraryDataFile;
+    }
+
+    public void receivedArbitraryDataFile(Peer peer, ArbitraryDataFile adf) {
+
+        //ArbitraryDataFile existingFile = ArbitraryDataFile.fromHash(hash, signature);
+        //boolean fileAlreadyExists = existingFile.exists();
+        byte[] signature = adf.getSignature();
+
+        String hash58 = adf.getHash58();
+        byte[] hash = adf.getHash();
+
+        arbitraryDataFileRequests.remove(hash58);
+        LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
+
+        try {
+            adf.save();
+        } catch (DataException de) {
+            LOGGER.error("FAILED to write hash chunk to disk!");
+            return;
+        }
+
+        ArbitraryTransactionData arbitraryTransactionData = null;
+        // Fetch the transaction data
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            //arbitraryTransactionDataList.addAll(
+            //        ArbitraryTransactionUtils.fetchTransactionDataList(repository, new ArrayList<>(signatureBySignature58.values())));
+            arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
+        } catch (DataException e) {
+            LOGGER.warn("Unable to fetch transaction data from DB: {}", e.getMessage());
+        }
+
+        // If this is a metadata file then we need to update the cache
+        if (arbitraryTransactionData != null && arbitraryTransactionData.getMetadataHash() != null) {
+            if (Arrays.equals(arbitraryTransactionData.getMetadataHash(), hash)) {
+                ArbitraryDataCacheManager.getInstance().addToUpdateQueue(arbitraryTransactionData);
+            }
+        }
+
+        // We may need to remove the file list request, if we have all the files for this transaction
+        this.handleFileListRequests(signature);
+
     }
 
     private void fetchFileForRelay(Peer peer, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) throws DataException {
@@ -855,16 +895,20 @@ public class ArbitraryDataFileManager extends Thread {
      */
 
     /* Calls to SubClass */
-    Map<Peer, Integer> getPeerTimeOuts() {
+    Map<String, Integer> getPeerTimeOuts() {
         return this.pendingPeersWithHashes.getTimeOuts();
     }
 
-    Map<Peer, List<ArbitraryFileListResponseInfo>> getPendingPeerAndChunks() {
+    Map<String, List<ArbitraryFileListResponseInfo>> getPendingPeerAndChunks() {
         return this.pendingPeersWithHashes.getPendingPeersWithChunks();
     }
 
-    void removePeerTimeOut(Peer peer) {
+    void removePeerTimeOut(String peer) {
         this.pendingPeersWithHashes.cleanOut(peer);
+    }
+
+    void removePeerChunk(String peer, String hash58) {
+        this.pendingPeersWithHashes.removePeerChunk(peer, hash58);
     }
 
     void incrementTimeOuts() {
@@ -879,21 +923,21 @@ public class ArbitraryDataFileManager extends Thread {
         this.pendingPeersWithHashes.addPeerAndInfo(peer, ri);
     }
 
-    boolean getIsConnectingPeer(Peer peer) {
+    boolean getIsConnectingPeer(String peer) {
         return this.pendingPeersWithHashes.isConnecting(peer);
     }
 
-    void setIsConnecting(Peer peer, boolean v) {
+    void setIsConnecting(String peer, boolean v) {
         this.pendingPeersWithHashes.setConnecting(peer, v);
     }
 
-    boolean isPendingPeer(Peer peer) {
-        return this.pendingPeersWithHashes.isPending(peer);
-    }
-
     public static class PendingPeersWithHashes {
-        private final Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks;
-        private final Map<Peer, Integer> pendingPeerTries;
+        //private final Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks;
+        //private final Map<Peer, Integer> pendingPeerTries;
+        // All keys are in the format "Host:Port"
+        private final Map<String, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks;
+        private final Map<String, Integer> pendingPeerTries;
+
         private final List<String> isConnectingPeers;
         private final Object combinedLock = new Object();
 
@@ -903,17 +947,17 @@ public class ArbitraryDataFileManager extends Thread {
             isConnectingPeers = new ArrayList<>();
         }
 
-        Map<Peer, Integer> getTimeOuts() {
+        Map<String, Integer> getTimeOuts() {
             synchronized (combinedLock) {
                 return new HashMap<>(this.pendingPeerTries);
             }
         }
 
         // Snapshot of pendingPeerAndChunks (deep-ish copy of lists)
-        Map<Peer, List<ArbitraryFileListResponseInfo>> getPendingPeersWithChunks() {
+        Map<String, List<ArbitraryFileListResponseInfo>> getPendingPeersWithChunks() {
             synchronized (combinedLock) {
-                Map<Peer, List<ArbitraryFileListResponseInfo>> copy = new HashMap<>(this.pendingPeerAndChunks.size());
-                for (Map.Entry<Peer, List<ArbitraryFileListResponseInfo>> e : this.pendingPeerAndChunks.entrySet()) {
+                Map<String, List<ArbitraryFileListResponseInfo>> copy = new HashMap<>(this.pendingPeerAndChunks.size());
+                for (Map.Entry<String, List<ArbitraryFileListResponseInfo>> e : this.pendingPeerAndChunks.entrySet()) {
                     // create a new List copy so callers can iterate safely
                     copy.put(e.getKey(), new ArrayList<>(e.getValue()));
                 }
@@ -921,7 +965,7 @@ public class ArbitraryDataFileManager extends Thread {
             }
         }
 
-        void cleanOut(Peer peer) {
+        void cleanOut(String peer) {
             synchronized (combinedLock) {
                 this.pendingPeerTries.remove(peer);
                 this.pendingPeerAndChunks.remove(peer);
@@ -942,23 +986,61 @@ public class ArbitraryDataFileManager extends Thread {
             return this.pendingPeerAndChunks.containsKey(peer);
         }
 
-        void addPeerAndInfo(Peer peer, ArbitraryFileListResponseInfo aflri) {
-            synchronized (combinedLock) {
-                this.pendingPeerTries.putIfAbsent(peer, 0);
-                pendingPeerAndChunks
-                        .computeIfAbsent(peer, k -> new ArrayList<>())
-                        .add(aflri);
-            }
+        void removePeerChunk(String peer, String hash58){
+            // Find the specific hash and remove it from list
+            // if the list is empty remove PeerTimeOut if it hasn't expired
+            // setIsConnecting(false)
         }
 
-        void setConnecting(Peer peer, boolean v) {
+        void addPeerAndInfo(Peer peer, ArbitraryFileListResponseInfo aflri) {
+            synchronized (combinedLock) {
+                String peerKey = peer.toString();
+                this.pendingPeerTries.putIfAbsent(peerKey, 0);
+                LOGGER.info("Unique peer count is: {}", pendingPeerTries.size());
+
+                // 1. Get the current list for this peer, or create a new one
+                List<ArbitraryFileListResponseInfo> currentList = pendingPeerAndChunks
+                        .computeIfAbsent(peerKey, k -> new ArrayList<>());
+
+                // 2. Check if the hash58 is already in the list
+                boolean isDuplicate = currentList.stream()
+                        .anyMatch(existingAflri -> aflri.getHash58().equals(existingAflri.getHash58()));
+
+                // 3. Only add if it is not a duplicate
+                if (!isDuplicate) {
+                    currentList.add(aflri);
+                    LOGGER.info("ADDED unique AFLRI with hash {} for peer {}", aflri.getHash58(), peerKey);
+                } else {
+                    LOGGER.info("SKIPPED adding duplicate AFLRI with hash {} for peer {}", aflri.getHash58(), peerKey);
+                }
+
+            } // End of synchronized block
+        }
+
+        /* First Attempt
+        void addPeerAndInfo(Peer peer, ArbitraryFileListResponseInfo aflri) {
+            synchronized (combinedLock) {
+                this.pendingPeerTries.putIfAbsent(peer.toString(), 0);
+                LOGGER.info("Unique peer count is: {}", pendingPeerTries.size());
+                pendingPeerAndChunks
+                        .computeIfAbsent(peer.toString(), k -> new ArrayList<>())
+                        .add(aflri);
+                // @ToDo: only add aflri to the array if it does not exist
+                // Check aflri.getHash58() to determine if it exists
+            }
+
+            LOGGER.info("pendingPeerAndChucks has {} peers ", pendingPeerAndChunks.size());
+        }
+        */
+
+        void setConnecting(String peer, boolean v) {
             synchronized (combinedLock) {
                 if (v) {
-                    isConnectingPeers.add(peer.getPeerData().getAddress().getHost());
+                    isConnectingPeers.add(peer);
                 }
                 else {
                     try {
-                        isConnectingPeers.remove(peer.getPeerData().getAddress().getHost());
+                        isConnectingPeers.remove(peer);
                     } catch (Exception ignored) {
 
                     }
@@ -966,8 +1048,8 @@ public class ArbitraryDataFileManager extends Thread {
             }
         }
 
-        boolean isConnecting(Peer peer) {
-            return isConnectingPeers.contains(peer.getPeerData().getAddress().getHost());
+        boolean isConnecting(String peer) {
+            return isConnectingPeers.contains(peer);
         }
     }
 }

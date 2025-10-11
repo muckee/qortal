@@ -1451,7 +1451,6 @@ public class Network {
         return String.format("%s:%d", ipAddress, this.ourExternalPort);
     }
 
-
     // Peer-management calls
 
     public void noteToSelf(Peer peer) {

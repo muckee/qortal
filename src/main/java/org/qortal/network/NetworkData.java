@@ -10,6 +10,7 @@ import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
+import org.qortal.controller.arbitrary.ArbitraryDataFileManager;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.message.*;
@@ -317,9 +318,9 @@ public class NetworkData {
         }
     }
 
-    public Peer getPeerByIP(String host) {
+    public Peer getPeerByHostName(String host) {
         return this.immutableHandshakedPeers.stream()
-                .filter(p -> p.getPeerData().getAddress().getHost().equals(host))
+                .filter(p -> p.toString().equals(host))
                 .findFirst()
                 .orElse(null);
     }
@@ -1000,8 +1001,8 @@ public class NetworkData {
         if (maxThreadsForMessageType != null) {
             Integer threadCount = threadsPerMessageType.get(message.getType());
             if (threadCount != null && threadCount >= maxThreadsForMessageType) {
-                LOGGER.warn("Discarding {} message as there are already {} active threads", message.getType().name(), threadCount);
-                return;
+                LOGGER.warn("WOULD HAVE Discarding {} message as there are already {} active threads", message.getType().name(), threadCount);
+                //return;  //@ToDo : Hack around to bypass thread counting
             }
         }
 
@@ -1044,19 +1045,19 @@ public class NetworkData {
                 byte[] hash = prdm.getHash();
                 requestDataFromPeer(pa.toString(), hash);
                 return;
-            case ARBITRARY_DATA_FILE:  // Don't think this is being hit at all, look at stripping out
+            case ARBITRARY_DATA_FILE:
                 LOGGER.info("Processing ArbitraryDataFile Message");
                 ArbitraryDataFileMessage adfm = (ArbitraryDataFileMessage) message;
                 int msgId = adfm.getId();
-                byte[] fileSig = adfm.getSignature();
                 ArbitraryDataFile adf = adfm.getArbitraryDataFile();
 
                 // Peer has the replyQueue
                 if (peer.isExpectingMessage(msgId)) { // If we knew this was coming in
-                    // @toDo: This is where we are picking up
                     LOGGER.info("We were expecting: {}", msgId);
-                    //peer.gotSentFileHash(msgId, fileSig, adf);
                 }
+
+                // @ToDo: See if we can move this up into the if above
+                ArbitraryDataFileManager.getInstance().receivedArbitraryDataFile(peer, adf);
                 return;
             default:
                 // Bump up to controller for possible action

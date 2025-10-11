@@ -92,35 +92,42 @@ public class ArbitraryDataFileRequestThread {
         Map<String, byte[]> signatureBySignature58 = new HashMap<>(responseInfos.size());
         Map<String, List<ArbitraryFileListResponseInfo>> responseInfoBySignature58 = new HashMap<>();
 
+        // Used for directly connected peers, not remote/relay based
         List<Peer> completeConnectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
 
-        // Remove any that have exceeded the count, increment others
-        ArbitraryDataFileManager adfm = ArbitraryDataFileManager.getInstance();
-        for (Map.Entry<Peer, Integer> peerTimeLapse : adfm.getPeerTimeOuts().entrySet()) {
+        // Remove any pending direct connects that have exceeded the timeout, increment others
+        for (Map.Entry<String, Integer> peerTimeLapse : arbitraryDataFileManager.getPeerTimeOuts().entrySet()) {
 
-            Peer peer = peerTimeLapse.getKey();
+            String peer = peerTimeLapse.getKey();
             Integer elapsedSeconds = peerTimeLapse.getValue();
 
-            if (elapsedSeconds > 5 ) {  // stale, drop list and counter
-                adfm.removePeerTimeOut(peer);
-                LOGGER.info("Removing Peer: {} for time out", peer);
+            if (elapsedSeconds > 8 ) {  // stale, drop list and counter
+                arbitraryDataFileManager.removePeerTimeOut(peer);
+                LOGGER.info("Removing Peer: {} for time out greater than 8", peer.toString());
             }
         }
 
-        adfm.incrementTimeOuts();
+        // Add +1 to all peers pending connection
+        arbitraryDataFileManager.incrementTimeOuts();
 
-        // If we have some held hashes waiting for a peer
-        if (adfm.pendingPeersAndChunks()) {
-            for (Map.Entry<Peer, List<ArbitraryFileListResponseInfo>> peerWithInfos: adfm.getPendingPeerAndChunks().entrySet()) {
+        // If we have some held hashes waiting for a peer connection
+        LOGGER.info("Do we have pending chunks?: {}", arbitraryDataFileManager.pendingPeersAndChunks());
+        if (arbitraryDataFileManager.pendingPeersAndChunks()) {
+            for (Map.Entry<String, List<ArbitraryFileListResponseInfo>> peerWithInfos: arbitraryDataFileManager.getPendingPeerAndChunks().entrySet()) {
 
-                Peer peer = peerWithInfos.getKey();
-                // We need to check by IP here, and then put in the proper peer object
-                Peer connectedPeer = NetworkData.getPeerByIP(peer.getPeerData().getAddress().getHost());
-                if (completeConnectedPeers.contains(peer)) {            // If the peer is now connected
+                String peerString = peerWithInfos.getKey();
+                // We need to check by IP/Host here, and then put in the proper peer object
+
+                LOGGER.info("We are going to look for: {}",peerString);
+                Peer connectedPeer = NetworkData.getInstance().getPeerByHostName(peerString);
+                if (connectedPeer == null)
+                    LOGGER.info("WARN: connectedPeer is null, not connected");
+                //if (connectedPeer != null && completeConnectedPeers.contains(connectedPeer)) {            // If the peer is now connected
+                if (connectedPeer != null ) {            // If the peer is now connected
                     LOGGER.info("We are adding responseInfos from the queue");
                     responseInfos.addAll(peerWithInfos.getValue());     // add all responseInfos for this peer to the list
-                    adfm.removePeerTimeOut(peer);
-                    adfm.setIsConnecting(peer, false);
+                    arbitraryDataFileManager.removePeerTimeOut(peerString);
+                    arbitraryDataFileManager.setIsConnecting(peerString, false);
                 }
             }
         }
@@ -139,24 +146,27 @@ public class ArbitraryDataFileRequestThread {
             Peer peer = responseInfo.getPeer();
             // Check if the peer we want a chunk from is connected?
 
+            // If the Peer is directly connected the object will match
+            boolean foundConnectedPeer = completeConnectedPeers.contains(peer);
 
-            if(!completeConnectedPeers.contains(peer)) { // Peer is not connected
+            if (!foundConnectedPeer) {
+                Peer findPeer;
+                String peerHost = peer.toString().split(":")[0];
+                // Connected later by relay request we should find it
+                findPeer = NetworkData.getInstance().getPeerByHostName(peerHost);
+                if(findPeer != null) {
+                    peer = findPeer;
+                    foundConnectedPeer = true;
+                }
+            }
+
+            if(!foundConnectedPeer) { // Peer is not connected
                 // put the response info into a queue tied to this peers connection completed
-                adfm.addResponseToPending(peer, responseInfo);
-//                pendingPeerAndChunks
-//                        .computeIfAbsent(peer, k -> new ArrayList<>())
-//                        .add(responseInfo);
-//                pendingPeerTries
-//                        .computeIfAbsent(peer, k -> 0);
-                LOGGER.info("Adding to pendingPeerAndChunks : count=");
+                arbitraryDataFileManager.addResponseToPending(peer, responseInfo);
 
-                // Check if there is a pending connection
-                //List<Peer> connectedPeers = NetworkData.getInstance().getImmutableConnectedPeers();
-
-                // This next line doesnt ever trip because we are setting it just above.....
-                if (!adfm.getIsConnectingPeer(peer)) {  // If not tracking the peer in adfm
+                if (!arbitraryDataFileManager.getIsConnectingPeer(peer.toString())) {  // If not tracking the peer in adfm
                         LOGGER.info("Forcing Connect for QDN to: {}", peer);
-                        adfm.setIsConnecting(peer, true);
+                        arbitraryDataFileManager.setIsConnecting(peer.toString(), true);
                         NetworkData.getInstance().forceConnectPeer(peer);
                         Thread.sleep(50);
                     }
@@ -173,7 +183,7 @@ public class ArbitraryDataFileRequestThread {
             if (arbitraryDataFileManager.arbitraryDataFileRequests.containsKey(responseInfo.getHash58())) {
                 // Already requesting - leave this attempt for later
                 // @ToDo : don't think this next statement is true, this is why we are queueing up multiple requests for the same thing
-                arbitraryDataFileManager.addResponse(responseInfo); // don't remove -> adding back, beacause it was removed already above
+                //arbitraryDataFileManager.addResponse(responseInfo); // don't remove -> adding back, because it was removed already above
                 continue;
             }
 
@@ -217,8 +227,8 @@ public class ArbitraryDataFileRequestThread {
                 // Check if we have a connection to this peer
                 peer = responseInfoBySignature58.get(signature58).get(0).getPeer();
 
+                // @ToDo: can this if ever be true, see checks above,
                 if(!completeConnectedPeers.contains(peer)) {
-
                     NetworkData.getInstance().addPeer(peer);
                     NetworkData.getInstance().forceConnectPeer(peer);
                     LOGGER.info("Starting New QDN Connection request");
@@ -227,6 +237,9 @@ public class ArbitraryDataFileRequestThread {
 
                 for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
                     peer = responseInfo.getPeer();
+                    if (!completeConnectedPeers.contains(peer)) {
+                        peer = NetworkData.getInstance().getPeerByHostName(peer.getHostName());
+                    }
                     String fileHash = responseInfo.getHash58();
 
                     byte[] fileHashBytes = Base58.decode(fileHash);
@@ -273,8 +286,16 @@ public class ArbitraryDataFileRequestThread {
                     // May put inside a try instead, pending the connection above
                     // Legacy Fetch Loop - 1 Thread per file
                     for (ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
-                        LOGGER.trace("Starting Thread to get a file: {}", responseInfo.getHash58());
-                        Runnable fetcher = () -> arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
+                        LOGGER.info("Starting Thread to get a file: {}", responseInfo.getHash58());
+
+                        Runnable fetcher = () -> {
+                            try {
+                                arbitraryDataFileFetcher(arbitraryDataFileManager, responseInfo, data);
+                            } finally {
+                                LOGGER.info("File fetcher thread for hash {} is exiting.", responseInfo.getHash58());
+                            }
+                        };
+
                         this.executorByPeer
                                 .computeIfAbsent(
                                         responseInfo.getPeer().toString(),
@@ -306,9 +327,11 @@ public class ArbitraryDataFileRequestThread {
 //                return;
 //            }
 
-
+            // Before we just passed responseInfo.getPeer() which might not be the connected object
+            // Instead get it from the NetworkData Object
             arbitraryDataFileManager.fetchArbitraryDataFiles(
-                responseInfo.getPeer(),
+                //responseInfo.getPeer(),
+                NetworkData.getInstance().getPeerByHostName(responseInfo.getPeer().getHostName()),
                 arbitraryTransactionData.getSignature(),
                 arbitraryTransactionData,
                 Arrays.asList(Base58.decode(responseInfo.getHash58()))
