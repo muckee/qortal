@@ -558,7 +558,7 @@ public class Settings {
 	 * The Host Monitor is a thread that runs in the background. It crawls through the QDN data directory to monitor
 	 * what is in there. If set to false, then it will not run.
 	 */
-    private  boolean hostMonitorEnabled = true;
+    private  boolean hostMonitorEnabled = false;
 
     // Domain mapping
 	public static class ThreadLimit {
