@@ -78,7 +78,6 @@ public class Bitcoin extends Bitcoiny {
 					new Server("electrum.bitrefill.com", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.brainshome.de", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.emzy.de", Server.ConnectionType.SSL, 50002),
-					new Server("electrum.kcicom.net", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.kendigisland.xyz", Server.ConnectionType.SSL, 50002),
 					new Server("electrum.thomasfischbach.de", Server.ConnectionType.SSL, 50002),
 					new Server("electrum-btc.leblancnet.us", Server.ConnectionType.SSL, 50002),
