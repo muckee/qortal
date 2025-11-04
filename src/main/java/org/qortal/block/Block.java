@@ -456,19 +456,17 @@ public class Block {
 				// new v5.1.0, don't fail (25 blocks before payout) when isSingleNodeTestnet == true
 				if (Settings.getInstance().isSingleNodeTestnet()) {
 					Integer nonce = new Random().nextInt(500000);
-					if (Settings.getInstance().isSingleNodeTestnet()) {
-						byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
-						byte[] signature = Qortal25519Extras.signForAggregation(minter.getPrivateKey(), timestampBytes);
-						byte[] publicKey = minter.getPublicKey();
-						OnlineAccountData me = new OnlineAccountData(
-								NTP.getTime(),
-								signature,
-								publicKey,
-								nonce);
-						onlineAccounts.add(me);	// safe to add because isEmpty
-					}
+					byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
+					byte[] signature = Qortal25519Extras.signForAggregation(minter.getPrivateKey(), timestampBytes);
+					byte[] publicKey = minter.getPublicKey();
+					OnlineAccountData me = new OnlineAccountData(
+							NTP.getTime(),
+							signature,
+							publicKey,
+							nonce);
+					onlineAccounts.add(me);	// safe to add because isEmpty
 				} else {
-					LOGGER.debug("No online accounts - not even our own?");
+					LOGGER.error("No online accounts - not even our own?; We will fail to Mint!");
 					return null;
 				}
 			}
