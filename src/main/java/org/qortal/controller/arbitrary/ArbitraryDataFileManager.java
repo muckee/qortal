@@ -151,7 +151,10 @@ public class ArbitraryDataFileManager extends Thread {
                                            byte[] signature,
                                            ArbitraryTransactionData arbitraryTransactionData,
                                            List<byte[]> hashes) throws DataException {
-
+        if (peer == null) {
+            LOGGER.info("Received a NULL peer, dropping back");
+            return false;
+        }
         // Load data file(s)
         ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(arbitraryTransactionData);
         boolean receivedAtLeastOneFile = false;
@@ -167,6 +170,7 @@ public class ArbitraryDataFileManager extends Thread {
                 if (!arbitraryDataFileRequests.containsKey(Base58.encode(hash))) {
                     LOGGER.info("Requesting data file {} from peer {}", hash58, peer);
                     Long startTime = NTP.getTime();
+                    // peer == null, why? or how
                     peer.QDNUse();
                     ArbitraryDataFile receivedArbitraryDataFile = fetchArbitraryDataFile(peer, arbitraryTransactionData, signature, hash);
                     Long endTime = NTP.getTime();
@@ -226,7 +230,12 @@ public class ArbitraryDataFileManager extends Thread {
 
             long now = NTP.getTime();
             ArbitraryDataFileRequestThread.getInstance().processFileHashes(now, responsesToProcess, this);
-        } catch (Exception e) {
+        } catch (InterruptedException e) {
+            LOGGER.error("InterruptedException: {}", e.getMessage());
+        } catch (MessageException e) {
+            LOGGER.error("MessageException: {}", e.getMessage());
+        }
+        catch (Exception e) {
             LOGGER.error("Error while processing responses: {} {}", e.getMessage(), e);
         }
     }

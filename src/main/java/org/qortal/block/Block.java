@@ -1251,10 +1251,11 @@ public class Block {
 		// Remove those already validated & cached by online accounts manager - no need to re-validate them
 		OnlineAccountsManager.getInstance().removeKnown(onlineAccounts, onlineTimestamp);
 
-		// Validate the rest
-		for (OnlineAccountData onlineAccount : onlineAccounts)
-			if (!OnlineAccountsManager.getInstance().verifyMemoryPoW(onlineAccount, null))
-				return ValidationResult.ONLINE_ACCOUNT_NONCE_INCORRECT;
+		// Validate the rest : v5.1.0 Added enhanced speed processing for SingleTestNet Node
+		if(!Settings.getInstance().isSingleNodeTestnet())
+			for (OnlineAccountData onlineAccount : onlineAccounts)
+				if (!OnlineAccountsManager.getInstance().verifyMemoryPoW(onlineAccount, null))
+					return ValidationResult.ONLINE_ACCOUNT_NONCE_INCORRECT;
 
 		// Cache the valid online accounts as they will likely be needed for the next block
 		OnlineAccountsManager.getInstance().addBlocksOnlineAccounts(onlineAccounts, onlineTimestamp);
