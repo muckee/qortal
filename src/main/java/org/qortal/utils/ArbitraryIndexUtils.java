@@ -13,6 +13,7 @@ import org.qortal.arbitrary.ArbitraryDataReader;
 import org.qortal.arbitrary.exception.MissingDataException;
 import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
+import org.qortal.controller.arbitrary.ArbitraryTransactionDataHashWrapper;
 import org.qortal.data.arbitrary.ArbitraryDataIndex;
 import org.qortal.data.arbitrary.ArbitraryDataIndexDetail;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
@@ -92,31 +93,53 @@ public class ArbitraryIndexUtils {
 
             List<ArbitraryDataIndexDetail> indexDetails = new ArrayList<>();
 
-            LOGGER.debug("processing index resource data: count = " + indexResources.size());
+            LOGGER.info("processing index resource data: count = " + indexResources.size());
+
+            Map<ArbitraryTransactionDataHashWrapper, IndexCache.IndexResourceDetails> indexResourceDetailsByHashWrapper
+                    = instance.getIndexResourceDetailsByHashWrapper();
 
             // process all index resources
             for( ArbitraryResourceData indexResource : indexResources ) {
 
-                try {
-                    LOGGER.debug("processing index resource: name = " + indexResource.name + ", identifier = " + indexResource.identifier);
-                    String json = ArbitraryIndexUtils.getJson(indexResource.name, indexResource.identifier);
+                // get hash wrapper for this index, so we can access it from or store it to a hash map
+                ArbitraryTransactionDataHashWrapper hashWrapper
+                        = new ArbitraryTransactionDataHashWrapper(Service.JSON.value, indexResource.name, indexResource.identifier);
 
-                    // map the JSON string to a list of Java objects
-                    List<ArbitraryDataIndex> indices = OBJECT_MAPPER.readValue(json, new TypeReference<List<ArbitraryDataIndex>>() {});
+                IndexCache.IndexResourceDetails indexResourceDetails = indexResourceDetailsByHashWrapper.get(hashWrapper);
 
-                    LOGGER.debug("processed indices = " + indices);
+                // if the details are already available and they were read with the updated resource, then use them
+                if( indexResourceDetails != null && detailsAreUpdatedToResource(indexResource, indexResourceDetails)) {
+                   indexDetails.addAll(indexResourceDetails.indexDetails);
+                }
+                // if the details are not available or updated, then read them in and add them to the map
+                else {
+                    try {
+                        LOGGER.debug("processing index resource: name = " + indexResource.name + ", identifier = " + indexResource.identifier);
+                        String json = ArbitraryIndexUtils.getJson(indexResource.name, indexResource.identifier);
 
-                    // rank and create index detail for each index in this index resource
-                    for( int rank = 1; rank <= indices.size(); rank++ ) {
+                        // map the JSON string to a list of Java objects
+                        List<ArbitraryDataIndex> indices = OBJECT_MAPPER.readValue(json, new TypeReference<List<ArbitraryDataIndex>>() {
+                        });
 
-                        indexDetails.add( new ArbitraryDataIndexDetail(indexResource.name, rank, indices.get(rank - 1), indexResource.identifier ));
+                        LOGGER.debug("processed indices = " + indices);
+
+                        List<ArbitraryDataIndexDetail> newIndexDetails = new ArrayList<>(indices.size());
+
+                        // rank and create index detail for each index in this index resource
+                        for (int rank = 1; rank <= indices.size(); rank++) {
+
+                            newIndexDetails.add(new ArbitraryDataIndexDetail(indexResource.name, rank, indices.get(rank - 1), indexResource.identifier));
+                        }
+
+                        indexDetails.addAll(newIndexDetails);
+                        indexResourceDetailsByHashWrapper.put(hashWrapper, new IndexCache.IndexResourceDetails(indexResource, newIndexDetails));
+                    } catch (MissingDataException e) {
+                        LOGGER.warn(e.getMessage());
+                    } catch (InvalidFormatException e) {
+                        LOGGER.debug("invalid format, skipping: " + indexResource);
+                    } catch (UnrecognizedPropertyException e) {
+                        LOGGER.debug("unrecognized property, skipping " + indexResource);
                     }
-                } catch (MissingDataException e) {
-                    LOGGER.warn( e.getMessage() );
-                } catch (InvalidFormatException e) {
-                   LOGGER.debug("invalid format, skipping: " + indexResource);
-                } catch (UnrecognizedPropertyException e) {
-                    LOGGER.debug("unrecognized property, skipping " + indexResource);
                 }
             }
 
@@ -158,6 +181,25 @@ public class ArbitraryIndexUtils {
                 IndexCache.getInstance().getIndicesByIssuer().putAll(indicesByIssuer);
             }
         }
+    }
+
+    /**
+     * Are Resource Details Updated?
+     *
+     * @param indexResource the resource to use as a comparative reference
+     * @param indexResourceDetails the resource details
+     *
+     * @return true if the details are updated, otherwise false
+     */
+    private static boolean detailsAreUpdatedToResource(ArbitraryResourceData indexResource, IndexCache.IndexResourceDetails indexResourceDetails) {
+        // if the index resource has not been updated, then assume the details are the latest update
+        if( indexResource.updated == null ) return true;
+
+        // if the index resource has been updated and details have been updated and the details are updated to or later than the index resource,
+        // then assume the details are the latest update
+        if( indexResourceDetails.resource.updated != null && indexResourceDetails.resource.updated >= indexResource.updated ) return true;
+
+        return false;
     }
 
     private static Timer buildTimer( final String name, int priorityRequested) {

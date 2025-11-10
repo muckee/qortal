@@ -518,9 +518,9 @@ public class Settings {
 	/**
 	 * Arbitrary Indexing Priority
 	 *
-	 * The thread priority when indexing arbirary resources.
+	 * The thread priority when indexing arbitrary resources.
 	 */
-    private int arbitraryIndexingPriority = 5;
+    private int arbitraryIndexingPriority = 1;
 
 	/**
 	 * Arbitrary Indexing Frequency (In Minutes)
