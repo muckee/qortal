@@ -49,10 +49,6 @@ public class NetworkData {
     // How long before retrying after a connection failure, in milliseconds.
     private static final long CONNECT_FAILURE_BACKOFF = 5 * 60 * 1000L; // ms
 
-    // How long between informational broadcasts to all connected peers, in milliseconds.
-
-    //private static final long BROADCAST_INTERVAL = 30 * 1000L; // ms
-
     // Maximum time since last successful connection for peer info to be propagated, in milliseconds.
     private static final long RECENT_CONNECTION_THRESHOLD = 24 * 60 * 60 * 1000L; // ms
 
@@ -86,19 +82,16 @@ public class NetworkData {
     private final List<PeerData> allKnownPeers = new ArrayList<>();
 
     /**
-     * Maintain two lists for each subset of peers:
+     * Maintain a list for each subset of peers:
      * - A synchronizedList, to be modified when peers are added/removed
-     * - An immutable List, which is rebuilt automatically to mirror the synchronized list, and is then served to consumers
-     * This allows for thread safety without having to synchronize every time a thread requests a peer list
      */
     private final List<Peer> connectedPeers = Collections.synchronizedList(new ArrayList<>());
-    private List<Peer> immutableConnectedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
-
     private final List<Peer> handshakedPeers = Collections.synchronizedList(new ArrayList<>());
-    private List<Peer> immutableHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
-
     private final List<Peer> outboundHandshakedPeers = Collections.synchronizedList(new ArrayList<>());
-    private List<Peer> immutableOutboundHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
+
+//    private List<Peer> immutableConnectedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
+//    private List<Peer> immutableHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
+//    private List<Peer> immutableOutboundHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
 
     //  Count threads per message type in order to enforce limits
     private final Map<MessageType, Integer> threadsPerMessageType = Collections.synchronizedMap(new HashMap<>());
@@ -289,27 +282,29 @@ public class NetworkData {
         }
     }
 
-    public List<Peer> getImmutableConnectedPeers() {
-        return this.immutableConnectedPeers;
+    public PeerList getImmutableConnectedPeers() {
+        return new PeerList(this.connectedPeers);
     }
+//    public List<Peer> getImmutableConnectedPeers() {
+//        return this.immutableConnectedPeers;
+//    }
 
-    public List<Peer> getImmutableConnectedDataPeers() {
-        return this.getImmutableConnectedPeers().stream()
-                .filter(p -> p.isDataPeer())
-                .collect(Collectors.toList());
-    }
+//    public List<Peer> getImmutableConnectedDataPeers() {
+//        return this.getImmutableConnectedPeers().stream()
+//                .filter(p -> p.isDataPeer())
+//                .collect(Collectors.toList());
+//    }
 
     public void addConnectedPeer(Peer peer) {
         this.connectedPeers.add(peer); // thread safe thanks to synchronized list
-        this.immutableConnectedPeers = List.copyOf(this.connectedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
+        //this.immutableConnectedPeers = List.copyOf(this.connectedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
     }
 
     public void removeConnectedPeer(Peer peer) {
         // Firstly remove from handshaked peers
         this.removeHandshakedPeer(peer);
-
         this.connectedPeers.remove(peer); // thread safe thanks to synchronized list
-        this.immutableConnectedPeers = List.copyOf(this.connectedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
+        //this.immutableConnectedPeers = List.copyOf(this.connectedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
     }
 
     public List<PeerAddress> getSelfPeers() {
@@ -318,11 +313,40 @@ public class NetworkData {
         }
     }
 
-    public Peer getPeerByHostName(String host) {
-        return this.immutableHandshakedPeers.stream()
-                .filter(p -> p.toString().equals(host))
-                .findFirst()
-                .orElse(null);
+    // Return a Peer Object by the Hostname/IP address only, no port reference
+    // host can be ipv4 address or fqdn
+    // If it accidentally contains the whole string "ip:port" strip the :port portion
+
+    // Shouldnt need this anymore because we can use PeerList classe and methods
+
+//    public Peer getPeerByHostName(String host) {
+//        // Get the snapshot PeerList
+//        PeerList handshakedPeers = this.getImmutableHandshakedPeers();
+//
+//        // Create a dummy PeerAddress object using the host part for lookup
+//        // The PeerList.get(PeerAddress pa) method automatically extracts the host/IP
+//        // and performs a fast map lookup.
+//        PeerAddress lookupAddress = PeerAddress.fromString(host);
+//
+//        return handshakedPeers.get(lookupAddress);
+//    }
+
+//    public Peer getPeerByHostName(String host) {
+//        String finalHost = host.split(":", 2)[0];               // If it contains :port at the end we need to strip that off
+//        return this.immutableHandshakedPeers.stream()
+//                .filter(p -> p.getHostName().equals(finalHost))
+//                .findFirst()
+//                .orElse(null);
+//    }
+
+    public Peer getPeerByPeerData(PeerData pd) {
+        PeerList handshakedSnapshot = this.getImmutableHandshakedPeers();
+        return handshakedSnapshot.get(pd);
+    }
+
+    public Peer getPeerByPeerAddress(PeerAddress pa) {
+        PeerList handshakedSnapshot = this.getImmutableHandshakedPeers();
+        return handshakedSnapshot.get(pa);
     }
 
     public boolean requestDataFromPeer(String peerAddressString, byte[] signature) {
@@ -353,15 +377,20 @@ public class NetworkData {
 //            }
 
             // Check if we're already connected to and handshaked with this peer
-            Peer connectedPeer = this.getImmutableConnectedPeers().stream()
-                        .filter(p -> p.getPeerData().getAddress().equals(peerAddress))
-                        .findFirst()
-                        .orElse(null);
+//            Peer connectedPeer = this.getImmutableConnectedPeers().stream()
+//                        .filter(p -> p.getPeerData().getAddress().equals(peerAddress))
+//                        .findFirst()
+//                        .orElse(null);
+
+            PeerList connectedSnapshot = this.getImmutableConnectedPeers();
+            Peer connectedPeer = connectedSnapshot.get(peerAddress);
 
             boolean isConnected = (connectedPeer != null);
 
-            boolean isHandshaked = this.getImmutableHandshakedPeers().stream()
-                    .anyMatch(p -> p.getPeerData().getAddress().equals(peerAddress));
+            //boolean isHandshaked = this.getImmutableHandshakedPeers().stream()
+            //        .anyMatch(p -> p.getPeerData().getAddress().equals(peerAddress));
+
+            boolean isHandshaked = this.getImmutableHandshakedPeers().contains(peerAddress);
 
             if (isConnected && isHandshaked) {
                 // Already connected
@@ -403,13 +432,17 @@ public class NetworkData {
     /**
      * Returns list of connected peers that have completed handshaking.
      */
-    public List<Peer> getImmutableHandshakedPeers() {
-        return this.immutableHandshakedPeers;
+    public PeerList getImmutableHandshakedPeers() {
+        // A new PeerList is created as a snapshot every time this is called
+        return new PeerList(this.handshakedPeers);
     }
+    //public List<Peer> getImmutableHandshakedPeers() {
+    //    return this.immutableHandshakedPeers;
+    //}
 
     public void addHandshakedPeer(Peer peer) {
         this.handshakedPeers.add(peer); // thread safe thanks to synchronized list
-        this.immutableHandshakedPeers = List.copyOf(this.handshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
+        //this.immutableHandshakedPeers = List.copyOf(this.handshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
 
         // Also add to outbound handshaked peers cache
         if (peer.isOutbound()) {
@@ -419,7 +452,7 @@ public class NetworkData {
 
     public void removeHandshakedPeer(Peer peer) {
         this.handshakedPeers.remove(peer); // thread safe thanks to synchronized list
-        this.immutableHandshakedPeers = List.copyOf(this.handshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
+        //this.immutableHandshakedPeers = List.copyOf(this.handshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
 
         // Also remove from outbound handshaked peers cache
         if (peer.isOutbound()) {
@@ -430,16 +463,20 @@ public class NetworkData {
     /**
      * Returns list of peers we connected to that have completed handshaking.
      */
-    public List<Peer> getImmutableOutboundHandshakedPeers() {
-        return this.immutableOutboundHandshakedPeers;
+    public PeerList getImmutableOutboundHandshakedPeers() {
+        // A new PeerList is created as a snapshot every time this is called
+        return new PeerList(this.outboundHandshakedPeers);
     }
+//    public List<Peer> getImmutableOutboundHandshakedPeers() {
+//        return this.immutableOutboundHandshakedPeers;
+//    }
 
     public void addOutboundHandshakedPeer(Peer peer) {
         if (!peer.isOutbound()) {
             return;
         }
         this.outboundHandshakedPeers.add(peer); // thread safe thanks to synchronized list
-        this.immutableOutboundHandshakedPeers = List.copyOf(this.outboundHandshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
+        //this.immutableOutboundHandshakedPeers = List.copyOf(this.outboundHandshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
     }
 
     public void removeOutboundHandshakedPeer(Peer peer) {
@@ -447,7 +484,7 @@ public class NetworkData {
             return;
         }
         this.outboundHandshakedPeers.remove(peer); // thread safe thanks to synchronized list
-        this.immutableOutboundHandshakedPeers = List.copyOf(this.outboundHandshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
+        //this.immutableOutboundHandshakedPeers = List.copyOf(this.outboundHandshakedPeers); // also thread safe thanks to synchronized collection's toArray() being fed to List.of(array)
     }
 
     /**
@@ -609,10 +646,6 @@ public class NetworkData {
                 LOGGER.trace("Thread {}, nextSelectionKey {}", Thread.currentThread().getId(), nextSelectionKey);
 
                 SelectableChannel socketChannel = nextSelectionKey.channel();
-//                if (((SocketChannel)socketChannel).getRemoteAddress().toString().contains("22392")) {
-//                    LOGGER.warn("Got NETWORK port on NETWORKDATA");
-//                    nextSelectionKey.
-//                }
 
                 try {
                     if (nextSelectionKey.isReadable()) {
@@ -671,7 +704,7 @@ public class NetworkData {
             if(getAllKnownPeers().isEmpty()) {
                 return null;
             }
-        LOGGER.info("ConnectedPeers: {}, Handshaked Peers: {} ", immutableConnectedPeers.size(), immutableHandshakedPeers.size());
+        LOGGER.info("ConnectedPeers: {}, Handshaked Peers: {} ", getImmutableConnectedPeers().size(), getImmutableHandshakedPeers().size());
         LOGGER.info("Out External IP is: {}", Network.getInstance().getOurExternalIpAddress());
         // Find an address to connect to
             List<PeerData> peers = this.getAllKnownPeers();
@@ -1503,8 +1536,10 @@ public class NetworkData {
         }
 
         // Disconnect peers that are stuck during handshake
-        // Needs a mutable copy of the unmodifiableList
-        List<Peer> handshakePeers = new ArrayList<>(this.getImmutableConnectedPeers());
+        // Get the PeerList snapshot and create a mutable copy (ArrayList) of its contents.
+        // We use .stream().collect(Collectors.toList()) to create the mutable List<Peer>.
+        List<Peer> handshakePeers = this.getImmutableConnectedPeers().stream()
+                .collect(Collectors.toList());
 
         // Disregard peers that have completed handshake or only connected recently
         handshakePeers.removeIf(peer -> peer.getHandshakeStatus() == Handshake.COMPLETED
@@ -1515,6 +1550,7 @@ public class NetworkData {
         }
 
         // Prune 'old' peers from if we are over the count
+        // getImmutableHandshakedPeers().size() works fine as PeerList has a size() method.
         int overCount = this.getImmutableHandshakedPeers().size() - Settings.getInstance().getMaxDataPeers();
         if (overCount > 0) { // Too Many peers we need to trim some out
             List<Peer> listDisconnectPeers = findOldPeers(overCount);
@@ -1522,7 +1558,7 @@ public class NetworkData {
                 disconnectPeer.disconnect("Over Max and Old");
             }
         }
-     }
+    }
 
     /**
      * Returns the N peers with the lowest getLastQDNUse() values.
