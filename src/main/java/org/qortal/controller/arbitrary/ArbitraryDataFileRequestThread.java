@@ -44,7 +44,8 @@ public class ArbitraryDataFileRequestThread {
 
     private static final Integer FETCHER_LIMIT_PER_PEER = Settings.getInstance().getMaxThreadsForMessageType(MessageType.GET_ARBITRARY_DATA_FILE);
     //ToDo: replace static int in next line with FETCHER_LIMIT CONST
-    private final ExecutorService masterFileFetcherPool = Executors.newFixedThreadPool(3);
+    // The defined value of 20 is based on a 100mb connection processing 20 file chunks in a second
+    private final ExecutorService masterFileFetcherPool = Executors.newFixedThreadPool(20);
     private static final String FETCHER_THREAD_PREFIX = "Arbitrary Data Fetcher ";
     private ConcurrentHashMap<String, ExecutorService> executorByPeer = new ConcurrentHashMap<>();
 
@@ -122,6 +123,7 @@ public class ArbitraryDataFileRequestThread {
 
                 LOGGER.info("We are going to look for: {}",peerString);
                 Peer connectedPeer = NetworkData.getInstance().getPeerByHostName(peerString);
+
                 if (connectedPeer == null)
                     LOGGER.info("WARN: connectedPeer is null, not connected");
                 //if (connectedPeer != null && completeConnectedPeers.contains(connectedPeer)) {            // If the peer is now connected
@@ -149,9 +151,11 @@ public class ArbitraryDataFileRequestThread {
             // Check if the peer we want a chunk from is connected?
 
             // If the Peer is directly connected the object will match
+            // This might be a bad match as well......  need to search not .contains......
             boolean foundConnectedPeer = completeConnectedPeers.contains(peer);
 
             if (!foundConnectedPeer) {
+                LOGGER.debug("We did not find a directly connected peer for : {}", peer);
                 Peer findPeer;
 
                 String peerHost = peer.getHostName();
@@ -175,8 +179,7 @@ public class ArbitraryDataFileRequestThread {
                     }
                 continue;
             }
-
-            //LOGGER.info("Peer Object is {}", peer);
+            
             if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null || peer == null) {
                 LOGGER.trace("TIMED OUT in ArbitraryDataFileRequestThread");
                 continue;
@@ -195,6 +198,7 @@ public class ArbitraryDataFileRequestThread {
 
             // check for null
             if (signature == null || hash == null || peer == null) {
+                LOGGER.debug("Signature was null or hash was null or peer was null");
                 continue;
             }
 
@@ -220,14 +224,14 @@ public class ArbitraryDataFileRequestThread {
 
         if( !arbitraryTransactionDataList.isEmpty() ) {
 //            long start = System.currentTimeMillis();
-            Peer peer = null;
+            //Peer peer = null;
             LOGGER.info("List of files is not empty, starting to build message of: GetArbitraryDataFilesMessage ");
 
             for(ArbitraryTransactionData data : arbitraryTransactionDataList ) {  // a file
                 String signature58 = Base58.encode(data.getSignature());
 
                 // Check if we have a connection to this peer
-                peer = responseInfoBySignature58.get(signature58).get(0).getPeer();
+                //peer = responseInfoBySignature58.get(signature58).get(0).getPeer();
 
                 // @ToDo: can this if ever be true, see checks above,
                 /*
@@ -239,10 +243,16 @@ public class ArbitraryDataFileRequestThread {
                 } */
 
                 for( ArbitraryFileListResponseInfo responseInfo : responseInfoBySignature58.get(signature58)) {
-                    peer = responseInfo.getPeer();
+                    Peer peer = responseInfo.getPeer();
+                    LOGGER.debug("ResponseInfo peer: {}", peer);
+                    // This logic need to be updated to get the peer by IP/Hostname, not by checking for a logical match
                     if (!completeConnectedPeers.contains(peer)) {
-                        peer = NetworkData.getInstance().getPeerByHostName(peer.getHostName());
+                        LOGGER.debug("CompleteConnectedPeers did not contain peer: {}", peer);
+                        LOGGER.debug("We are going to look for: {}", peer.getHostName());
+                        peer = NetworkData.getInstance().getPeerByHostName(peer.getHostName());  // Takes a string and returns a peer
+                        LOGGER.debug("We set peer to: {}", peer);
                     }
+
                     String fileHash = responseInfo.getHash58();
 
                     byte[] fileHashBytes = Base58.decode(fileHash);
@@ -252,7 +262,7 @@ public class ArbitraryDataFileRequestThread {
                     int msgId = peer.addToReplyQueue();
                     message.setId(msgId);
 
-                    LOGGER.trace("Adding hash {} to PeerSendManager send to {}", fileHash, peer);
+                    LOGGER.debug("Adding hash {} to PeerSendManager send to {}", fileHash, peer);
                     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);
                 }
 
@@ -360,9 +370,13 @@ public class ArbitraryDataFileRequestThread {
 
             // Before we just passed responseInfo.getPeer() which might not be the connected object
             // Instead get it from the NetworkData Object
+            // This is where it's breaking, we need the proper peer
+            LOGGER.info("We are going to try and find : {}", responseInfo.getPeer().getHostName());
+            LOGGER.info("If the line above is empty look here: {}", responseInfo.getPeer());
+            LOGGER.info("Returned result will be: {}", responseInfo.getPeer().getHostName());
             arbitraryDataFileManager.fetchArbitraryDataFiles(
-                //responseInfo.getPeer(),
-                NetworkData.getInstance().getPeerByHostName(responseInfo.getPeer().getHostName()),
+                //NetworkData.getInstance().getPeerByHostName(responseInfo.getPeer().getHostName()),
+                NetworkData.getInstance().getPeerByPeerData(responseInfo.getPeer().getPeerData()),
                 arbitraryTransactionData.getSignature(),
                 arbitraryTransactionData,
                 Arrays.asList(Base58.decode(responseInfo.getHash58()))
