@@ -236,7 +236,7 @@ public class ArbitraryDataFileManager extends Thread {
             LOGGER.error("MessageException: {}", e.getMessage());
         }
         catch (Exception e) {
-            LOGGER.error("Error while processing responses: {} {}", e.getMessage(), e);
+            LOGGER.error("Error while processing responses: {}", e.getMessage(), e);
         }
     }
 
@@ -283,7 +283,6 @@ public class ArbitraryDataFileManager extends Thread {
                 // @ToDo - This is where we are
                 Message response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
 
-                // This is where we need to start the break apart
                 arbitraryDataFileRequests.remove(hash58);
                 LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
 
@@ -733,7 +732,7 @@ public class ArbitraryDataFileManager extends Thread {
             ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromHash(hash, sig);
             ArbitraryRelayInfo relayInfo = this.getOptimalRelayInfoEntryForHash(hash58);
             if (arbitraryDataFile.exists()) {
-                LOGGER.info("Hash {} exists, queueing send file", hash58);
+                LOGGER.trace("Hash {} exists, queueing send file to {}", hash58, peer);
 
                 // We can serve the file directly as we already have it
                 ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(sig, arbitraryDataFile);
