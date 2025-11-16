@@ -88,7 +88,7 @@ public class ChannelAcceptTask implements Task {
         int maxRegularPeers = maxPeers - maxDataPeers;
 
         // Next, obtain the current state
-        int connectedDataPeerCount = datanetwork.getImmutableConnectedDataPeers().size();
+        int connectedDataPeerCount = datanetwork.getImmutableConnectedPeers().size();
         int connectedRegularPeerCount = Network.getInstance().getImmutableConnectedNonDataPeers().size();
 
         // Check if the incoming connection should be considered a data or regular peer
