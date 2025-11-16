@@ -894,6 +894,10 @@ public class Peer {
      * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
      */
     public boolean sendMessageWithTimeout(Message message, int timeout) {
+        if (this.socketChannel == null ) {
+            LOGGER.warn("sendMessageWithTimeout : peer.socketChannel was null");
+            return false;
+        }
         if (!this.socketChannel.isOpen()) {
             LOGGER.info("SocketChannel was not open; returning false");
             return false;
