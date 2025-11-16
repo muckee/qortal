@@ -10,10 +10,7 @@ import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
 import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
-import org.qortal.network.Network;
-import org.qortal.network.NetworkData;
-import org.qortal.network.Peer;
-import org.qortal.network.PeerAddress;
+import org.qortal.network.*;
 import org.qortal.network.message.ArbitraryDataFileListMessage;
 import org.qortal.network.message.GetArbitraryDataFileListMessage;
 import org.qortal.network.message.Message;
@@ -289,7 +286,7 @@ public class ArbitraryDataFileListManager {
         }
         this.addToSignatureRequests(signature58, true, false);
 
-        List<Peer> handshakedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+        PeerList handshakedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
         List<byte[]> missingHashes = null;
 
         // Find hashes that we are missing
