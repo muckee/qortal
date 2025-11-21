@@ -10,6 +10,7 @@ import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerList;
 import org.qortal.network.message.ArbitraryMetadataMessage;
 import org.qortal.network.message.GetArbitraryMetadataMessage;
 import org.qortal.network.message.Message;
@@ -154,7 +155,7 @@ public class ArbitraryMetadataManager {
         }
         this.addToSignatureRequests(signature58, true, false);
 
-        List<Peer> handshakedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+        PeerList handshakedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
         LOGGER.debug(String.format("Sending metadata request for signature %s to %d peers...", signature58, handshakedPeers.size()));
 
         // Build request

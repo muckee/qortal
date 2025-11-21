@@ -1,6 +1,5 @@
 package org.qortal.network;
 
-import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -69,7 +68,9 @@ public class PeerSendManager {
         this.peer = peer;
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r);
-            t.setName("PeerSendManager-" + peer.getResolvedAddress().getHostString() + "-" + threadCount.getAndIncrement());
+            //t.setName("PeerSendManager-" + peer.getResolvedAddress().getHostString() + "-" + threadCount.getAndIncrement());
+            LOGGER.trace("Starting new thread: {}", peer.toString());
+            t.setName("PeerSendManager-" + peer.toString() + "-" + threadCount.getAndIncrement());
             return t;
         });
         start();
@@ -102,7 +103,6 @@ public class PeerSendManager {
         executor.submit(() -> {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-
                     TimedMessage timedMessage = queue.take();  // This is a blocking operation
                     if (System.currentTimeMillis() > timedMessage.getExpectedStartTime()) {
                         LOGGER.info("Dropped stale message ({}ms old to peer: {})", timedMessage.message.getId(), peer.toString());
@@ -155,7 +155,7 @@ public class PeerSendManager {
                         }
                     }
 
-                    Thread.sleep(25); // small throttle, was 50MS
+                    //Thread.sleep(25); // small throttle, was 50MS
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     LOGGER.error("ERROR - Caught InterruptedException");
@@ -214,7 +214,6 @@ public class PeerSendManager {
             TimedMessage lastQueueElement = (TimedMessage) arr[arr.length - 1];
             fullQueueTime = lastQueueElement.getExpectedFinishTime();
         }
-
 
         TimedMessage newTimedMessage = new TimedMessage(message,
                 fullQueueTime,

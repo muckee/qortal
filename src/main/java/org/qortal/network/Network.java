@@ -87,6 +87,7 @@ public class Network {
 
     public static final int MAX_SIGNATURES_PER_REPLY = 500;
     public static final int MAX_BLOCK_SUMMARIES_PER_REPLY = 500;
+    public static final int MAX_BLOCKS_PER_REPLY = 200;
 
     private static final long DISCONNECTION_CHECK_INTERVAL = 20 * 1000L; // milliseconds
 

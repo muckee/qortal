@@ -62,6 +62,11 @@ public class Peer {
      */
     private static final int PING_INTERVAL = 20_000; // ms
 
+    /**
+     * Maximum time to wait for a peer to respond with blocks (ms)
+     */
+    public static final int FETCH_BLOCKS_TIMEOUT = 10000;
+
     private volatile boolean isStopping = false;
 
     private SocketChannel socketChannel = null;
