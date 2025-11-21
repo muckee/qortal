@@ -49,8 +49,6 @@ public enum Handshake {
 			int peerType = helloMessage.getPeerType();
 			peer.setPeerType(peerType);
 
-			// Make a note of the senderPeerAddress, as this should be our public IP
-			// @ToDo: Probably change this to if(NETWORK) do, DATA not needed
 			switch(peerType) {
 				case Peer.NETWORK:
 					Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
@@ -82,7 +80,13 @@ public enum Handshake {
 
 			peer.setPeersConnectionTimestamp(peersConnectionTimestamp);
 			peer.setPeersVersion(versionString, version);
-			peer.setPeersCapabilities(helloMessage.getCapabilities());
+
+            // ToDo: Only send if the other end is compatible, or set to null and we can handle in the serializer.
+			if(peer.isAtLeastVersion("5.5.0")) {
+                peer.setPeersCapabilities(helloMessage.getCapabilities());
+            } else {
+                peer.setPeersCapabilities(null);
+            }
 
 			// Ensure the peer is running at least the version specified in MIN_PEER_VERSION
 			if (!peer.isAtLeastVersion(MIN_PEER_VERSION)) {
@@ -98,7 +102,7 @@ public enum Handshake {
 					return null;
 				}
 			}
-			LOGGER.info("INBOUND - FINISHED PROCESSING HELLO, ready for CHALLENGE on {}", peer.getPeerType());
+			LOGGER.debug("INBOUND - FINISHED PROCESSING HELLO, ready for CHALLENGE on {}", peer.getPeerType());
 			return CHALLENGE;
 		}
 
@@ -108,20 +112,23 @@ public enum Handshake {
 			long timestamp = NTP.getTime();
 			String senderPeerAddress = peer.getPeerData().getAddress().toString();
 
-			// Added in v5.1.0 to include capabilities enabled
-			Map<String, Object> capabilities = new HashMap<>();
-			if (Settings.getInstance().isQdnEnabled()) {
-				capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
-			}
-			else {
-				capabilities.put("QDN", 0);
-			}
+            // Added in v5.5.0 to include capabilities enabled
+            Map<String, Object> capabilities = new HashMap<>();
+			if(peer.isAtLeastVersion("5.5.0")) {
+                if (Settings.getInstance().isQdnEnabled()) {
+                    capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
+                } else {
+                    capabilities.put("QDN", 0);
+                }
+            } else {
+                capabilities = null;
+            }
 
 			Message helloMessage = new HelloMessage(timestamp, versionString, senderPeerAddress, capabilities, peer.getPeerType());
 
 			if (!peer.sendMessage(helloMessage))
 				peer.disconnect("failed to send HELLO");
-			LOGGER.info("OUTBOUND - FINISHED sending HELLO: Network {}", peer.getPeerType());
+			LOGGER.debug("OUTBOUND - FINISHED sending HELLO: Network {}", peer.getPeerType());
 		}
 	},
 	CHALLENGE(MessageType.CHALLENGE) {

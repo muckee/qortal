@@ -30,7 +30,11 @@ public class HelloMessage extends Message {
 			Serialization.serializeSizedString(bytes, versionString);
 			Serialization.serializeSizedString(bytes, senderPeerAddress);
 			bytes.write(ByteBuffer.allocate(4).putInt(peerType).array());
-			Serialization.serializeMap(bytes, caps);
+
+            // New in version 5.5.0, only send if the remote was properly identified
+            if (caps != null) {
+                Serialization.serializeMap(bytes, caps);
+            }
 		} catch (IOException e) {
 			throw new AssertionError("IOException shouldn't occur with ByteArrayOutputStream");
 		}
@@ -82,7 +86,9 @@ public class HelloMessage extends Message {
 			peerType = byteBuffer.getInt();
 			if (byteBuffer.hasRemaining()) {
 				capabilities = Serialization.deserializeMap(byteBuffer);
-			}
+			} else {
+                capabilities = null;  // Set to null to represent an older version client connection
+            }
 		} catch (TransformationException e) {
 			throw new MessageException(e.getMessage(), e);
 		} catch (IOException e) {
