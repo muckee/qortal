@@ -114,14 +114,10 @@ public enum Handshake {
 
             // Added in v5.5.0 to include capabilities enabled
             Map<String, Object> capabilities = new HashMap<>();
-			if(peer.isAtLeastVersion("5.5.0")) {
-                if (Settings.getInstance().isQdnEnabled()) {
-                    capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
-                } else {
-                    capabilities.put("QDN", 0);
-                }
+            if (Settings.getInstance().isQdnEnabled()) {
+                capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
             } else {
-                capabilities = null;
+                capabilities.put("QDN", 0);
             }
 
 			Message helloMessage = new HelloMessage(timestamp, versionString, senderPeerAddress, capabilities, peer.getPeerType());

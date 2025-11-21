@@ -1,6 +1,7 @@
 package org.qortal.network.message;
 
 import com.google.common.primitives.Longs;
+import org.qortal.controller.Controller;
 import org.qortal.network.Peer;
 import org.qortal.network.helper.PeerCapabilities;
 import org.qortal.transform.TransformationException;
@@ -11,6 +12,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class HelloMessage extends Message {
 
@@ -82,12 +85,14 @@ public class HelloMessage extends Message {
 			if (byteBuffer.hasRemaining()) {
 				senderPeerAddress = Serialization.deserializeSizedString(byteBuffer, 255);
 			}
-			// @ToDo: Above is always true because of min peer version, decode capabilities
-			peerType = byteBuffer.getInt();
-			if (byteBuffer.hasRemaining()) {
-				capabilities = Serialization.deserializeMap(byteBuffer);
-			} else {
-                capabilities = null;  // Set to null to represent an older version client connection
+			// Below only exists in v5.5.0 and great
+            if(isAtleastVersion("5.5.0", versionString)) {
+                peerType = byteBuffer.getInt();
+                if (byteBuffer.hasRemaining()) {
+                    capabilities = Serialization.deserializeMap(byteBuffer);
+                } else {
+                    capabilities = null;  // Set to null to represent an older version client connection
+                }
             }
 		} catch (TransformationException e) {
 			throw new MessageException(e.getMessage(), e);
@@ -97,5 +102,40 @@ public class HelloMessage extends Message {
 
         return new HelloMessage(id, timestamp, versionString, senderPeerAddress, new PeerCapabilities(capabilities), peerType);
 	}
+
+    public static final Pattern VERSION_PATTERN = Pattern.compile(Controller.VERSION_PREFIX
+            + "(\\d{1,3})\\.(\\d{1,5})\\.(\\d{1,5})");
+
+    private static boolean isAtleastVersion(String minVer, String ver) {
+        // Add the version prefix
+        String minVersionString = Controller.VERSION_PREFIX + minVer;
+        String versionString = Controller.VERSION_PREFIX + ver;
+
+        Matcher matcher1 = VERSION_PATTERN.matcher(minVersionString);
+        Matcher matcher2 = VERSION_PATTERN.matcher(versionString);
+
+        if (!matcher1.lookingAt() || !matcher2.lookingAt()) {
+            return false;
+        }
+
+        // We're expecting 3 positive shorts, so we can convert 1.2.3 into 0x0100020003
+        long minVersion = 0;
+        long version = 0;
+        for (int g = 1; g <= 3; ++g) {
+            long value1 = Long.parseLong(matcher1.group(g));
+            long value2 = Long.parseLong(matcher2.group(g));
+
+            if (value1 < 0 || value1 > Short.MAX_VALUE || value2 < 0 || value2 > Short.MAX_VALUE) {
+                return false;
+            }
+
+            minVersion <<= 16;
+            version <<= 16;
+            minVersion |= value1;
+            version |= value2;
+        }
+
+        return version >= minVersion;
+    }
 
 }

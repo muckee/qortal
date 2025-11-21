@@ -6,7 +6,6 @@ import org.qortal.transform.block.BlockTransformer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
 
 public class GetBlocksMessage extends Message {
@@ -47,7 +46,6 @@ public class GetBlocksMessage extends Message {
         return new GetBlocksMessage(id, parentSignature, numberRequested);
     }
 
-    @Override
     protected byte[] toData() {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();

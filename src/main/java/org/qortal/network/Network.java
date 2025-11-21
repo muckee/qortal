@@ -1177,7 +1177,7 @@ public class Network {
         if (peer.isOutbound()) {
 
             // Push to NetworkData if new enough peer & enabled
-            if (peer.getPeersCapabilities() != null && (int) peer.getPeersCapabilities().getCapability("QDN") > 0)
+            if (peer.getPeersCapabilities().getCapability("QDN") != null && (int) peer.getPeersCapabilities().getCapability("QDN") > 0)
                 NetworkData.getInstance().addPeer(peer);
 
             try (Repository repository = RepositoryManager.getRepository()) {

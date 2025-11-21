@@ -1594,17 +1594,20 @@ public class Synchronizer extends Thread {
                                                  Peer peer, int peerHeight, List<BlockSummaryData> peerBlockSummaries) throws InterruptedException, DataException {
 
         final BlockData ourLatestBlockData = repository.getBlockRepository().getLastBlock();
-        if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && ourLatestBlockData.isTrimmed())
+        if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && ourLatestBlockData.isTrimmed()) {
+            LOGGER.info("HELL YES WE ARE FAST SYNCING");
             // This peer supports syncing multiple blocks at once via GetBlocksMessage, and it is enabled in the settings
             return this.applyNewBlocksUsingFastSync(repository, commonBlockData, ourInitialHeight, peer, peerHeight, peerBlockSummaries);
-        else
+        }
+        else {
             // Older peer version, or fast sync is disabled in the settings - use slow sync
             return this.applyNewBlocksUsingSlowSync(repository, commonBlockData, ourInitialHeight, peer, peerHeight, peerBlockSummaries);
+        }
     }
 
     private SynchronizationResult applyNewBlocksUsingFastSync(Repository repository, BlockData commonBlockData, int ourInitialHeight,
                                                               Peer peer, int peerHeight, List<BlockSummaryData> peerBlockSummaries) throws InterruptedException, DataException {
-        LOGGER.debug(String.format("Fetching new blocks from peer %s using fast sync", peer));
+        LOGGER.info(String.format("Fetching new blocks from peer %s using fast sync", peer));
 
         final int commonBlockHeight = commonBlockData.getHeight();
         final byte[] commonBlockSig = commonBlockData.getSignature();
@@ -1691,7 +1694,7 @@ public class Synchronizer extends Thread {
 
     private SynchronizationResult applyNewBlocksUsingSlowSync(Repository repository, BlockData commonBlockData, int ourInitialHeight,
                                                               Peer peer, int peerHeight, List<BlockSummaryData> peerBlockSummaries) throws InterruptedException, DataException {
-        LOGGER.debug(String.format("Fetching new blocks from peer %s using slow sync", peer));
+        LOGGER.info(String.format("Fetching new blocks from peer %s using slow sync", peer));
 
         final int commonBlockHeight = commonBlockData.getHeight();
         final byte[] commonBlockSig = commonBlockData.getSignature();
