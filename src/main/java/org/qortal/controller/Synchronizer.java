@@ -1596,9 +1596,12 @@ public class Synchronizer extends Thread {
         final BlockData ourLatestBlockData = repository.getBlockRepository().getLastBlock();
         LOGGER.info("isFastSyncEnabled: {}", Settings.getInstance().isFastSyncEnabled());
         LOGGER.info("Is {} >= {}, : {}", peer.getPeersVersion(), PEER_VERSION_550, peer.getPeersVersion() >= PEER_VERSION_550);
-        LOGGER.info("Is ourLatestBlockData Trimmed: {}", ourLatestBlockData.isTrimmed());
-        if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && ourLatestBlockData.isTrimmed()) {
-            LOGGER.info("HELL YES WE ARE FAST SYNCING");
+        //LOGGER.info("Is ourLatestBlockData Trimmed: {}", ourLatestBlockData.isTrimmed());
+        int blocksBehind = peerHeight - ourInitialHeight;
+        if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && blocksBehind >= MAXIMUM_REQUEST_SIZE) {
+        //if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && ourLatestBlockData.isTrimmed()) {
+
+                LOGGER.info("HELL YES WE ARE FAST SYNCING");
             // This peer supports syncing multiple blocks at once via GetBlocksMessage, and it is enabled in the settings
             return this.applyNewBlocksUsingFastSync(repository, commonBlockData, ourInitialHeight, peer, peerHeight, peerBlockSummaries);
         }
@@ -1630,14 +1633,15 @@ public class Synchronizer extends Thread {
 
             int numberRequested = Math.min(maxBatchHeight - ourHeight, maxBlocksPerRequest);
 
-            LOGGER.trace(String.format("Fetching %d blocks after height %d, sig %.8s from %s", numberRequested, ourHeight, Base58.encode(latestPeerSignature), peer));
+            LOGGER.info(String.format("Fetching %d blocks after height %d, sig %.8s from %s", numberRequested, ourHeight, Base58.encode(latestPeerSignature), peer));
             List<Block> blocks = this.fetchBlocks(repository, peer, latestPeerSignature, numberRequested);
             if (blocks == null || blocks.isEmpty()) {
                 LOGGER.info(String.format("Peer %s failed to respond with more blocks after height %d, sig %.8s", peer,
                         ourHeight, Base58.encode(latestPeerSignature)));
                 return SynchronizationResult.NO_REPLY;
             }
-            LOGGER.trace(String.format("Received %d blocks after height %d, sig %.8s from %s", blocks.size(), ourHeight, Base58.encode(latestPeerSignature), peer));
+
+            LOGGER.info(String.format("Received %d blocks after height %d, sig %.8s from %s", blocks.size(), ourHeight, Base58.encode(latestPeerSignature), peer));
 
             for (Block newBlock : blocks) {
                 ++ourHeight;
@@ -1680,7 +1684,7 @@ public class Synchronizer extends Thread {
 
                 newBlock.process();
 
-                LOGGER.trace(String.format("Processed block height %d, sig %.8s", newBlock.getBlockData().getHeight(), Base58.encode(newBlock.getBlockData().getSignature())));
+                LOGGER.info(String.format("Processed block height %d, sig %.8s", newBlock.getBlockData().getHeight(), Base58.encode(newBlock.getBlockData().getSignature())));
 
                 repository.saveChanges();
 
@@ -1689,9 +1693,7 @@ public class Synchronizer extends Thread {
                 // Update latestPeerSignature so that subsequent batches start requesting from the correct block
                 latestPeerSignature = newBlock.getSignature();
             }
-
         }
-
         return SynchronizationResult.OK;
     }
 
