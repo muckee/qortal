@@ -1594,6 +1594,9 @@ public class Synchronizer extends Thread {
                                                  Peer peer, int peerHeight, List<BlockSummaryData> peerBlockSummaries) throws InterruptedException, DataException {
 
         final BlockData ourLatestBlockData = repository.getBlockRepository().getLastBlock();
+        LOGGER.info("isFastSyncEnabled: {}", Settings.getInstance().isFastSyncEnabled());
+        LOGGER.info("Is {} >= {}, : {}", peer.getPeersVersion(), PEER_VERSION_550, peer.getPeersVersion() >= PEER_VERSION_550);
+        LOGGER.info("Is ourLatestBlockData Trimmed: {}", ourLatestBlockData.isTrimmed());
         if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && ourLatestBlockData.isTrimmed()) {
             LOGGER.info("HELL YES WE ARE FAST SYNCING");
             // This peer supports syncing multiple blocks at once via GetBlocksMessage, and it is enabled in the settings
@@ -1846,15 +1849,19 @@ public class Synchronizer extends Thread {
 	}
 
     private List<Block> fetchBlocks(Repository repository, Peer peer, byte[] parentSignature, int numberRequested) throws InterruptedException {
+        LOGGER.info("Building GetBlocksMessage with parentSignature: {}, numberRequested: {}", parentSignature, numberRequested);
         Message getBlocksMessage = new GetBlocksMessage(parentSignature, numberRequested);
 
         Message message = peer.getResponseWithTimeout(getBlocksMessage, FETCH_BLOCKS_TIMEOUT);
         if (message == null || message.getType() != MessageType.BLOCKS) {
+            LOGGER.info("Is MSG null? : {}", message == null);
+            LOGGER.info("Caught NULL #1");
             return null;
         }
 
         BlocksMessage blocksMessage = (BlocksMessage) message;
         if (blocksMessage == null || blocksMessage.getBlocks() == null) {
+            LOGGER.info("Caught NULL #2");
             return null;
         }
 

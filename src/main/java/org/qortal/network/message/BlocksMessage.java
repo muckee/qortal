@@ -22,7 +22,32 @@ public class BlocksMessage extends Message {
     private List<Block> blocks;
 
     public BlocksMessage(List<Block> blocks) {
-        this(-1, blocks);
+        super(MessageType.BLOCKS);
+
+        this.blocks = blocks;
+
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+            bytes.write(Ints.toByteArray(this.blocks.size()));
+
+            for (Block block : this.blocks) {
+                bytes.write(Ints.toByteArray(block.getBlockData().getHeight()));
+                bytes.write(BlockTransformer.toBytesV2(block));
+            }
+            LOGGER.trace(String.format("Total length of %d blocks is %d bytes", this.blocks.size(), bytes.size()));
+
+            this.dataBytes = bytes.toByteArray();
+        } catch (IOException | TransformationException e) {
+            this.dataBytes = null;
+            this.checksumBytes = null;
+            return;
+        }
+
+        if (this.dataBytes.length > 0)
+            this.checksumBytes = Message.generateChecksum(this.dataBytes);
+        else
+            this.checksumBytes = null;
     }
 
     private BlocksMessage(int id, List<Block> blocks) {
@@ -60,24 +85,6 @@ public class BlocksMessage extends Message {
         }
 
         return new BlocksMessage(id, blocks);
-    }
-
-    protected byte[] toData() {
-        try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-
-            bytes.write(Ints.toByteArray(this.blocks.size()));
-
-            for (Block block : this.blocks) {
-                bytes.write(Ints.toByteArray(block.getBlockData().getHeight()));
-                bytes.write(BlockTransformer.toBytesV2(block));
-            }
-            LOGGER.trace(String.format("Total length of %d blocks is %d bytes", this.blocks.size(), bytes.size()));
-
-            return bytes.toByteArray();
-        } catch (IOException | TransformationException e) {
-            return null;
-        }
     }
 
 }

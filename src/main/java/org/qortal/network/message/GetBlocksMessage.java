@@ -12,11 +12,33 @@ public class GetBlocksMessage extends Message {
 
     private static final int BLOCK_SIGNATURE_LENGTH = BlockTransformer.BLOCK_SIGNATURE_LENGTH;
 
-    private byte[] parentSignature;
-    private int numberRequested;
+    private final byte[] parentSignature;
+    private final int numberRequested;
 
     public GetBlocksMessage(byte[] parentSignature, int numberRequested) {
-        this(-1, parentSignature, numberRequested);
+        super(MessageType.GET_BLOCKS);
+
+        this.parentSignature = parentSignature;
+        this.numberRequested = numberRequested;
+
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+            bytes.write(this.parentSignature);
+
+            bytes.write(Ints.toByteArray(this.numberRequested));
+
+            this.dataBytes = bytes.toByteArray();
+        } catch (IOException e) {
+            this.dataBytes = null;
+            this.checksumBytes = null;
+            return;
+        }
+
+        if (this.dataBytes.length > 0)
+            this.checksumBytes = Message.generateChecksum(this.dataBytes);
+        else
+            this.checksumBytes = null;
     }
 
     private GetBlocksMessage(int id, byte[] parentSignature, int numberRequested) {
@@ -44,20 +66,6 @@ public class GetBlocksMessage extends Message {
         int numberRequested = bytes.getInt();
 
         return new GetBlocksMessage(id, parentSignature, numberRequested);
-    }
-
-    protected byte[] toData() {
-        try {
-            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-
-            bytes.write(this.parentSignature);
-
-            bytes.write(Ints.toByteArray(this.numberRequested));
-
-            return bytes.toByteArray();
-        } catch (IOException e) {
-            return null;
-        }
     }
 
 }
