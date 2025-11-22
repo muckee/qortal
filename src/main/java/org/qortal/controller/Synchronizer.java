@@ -1492,11 +1492,10 @@ public class Synchronizer extends Thread {
     private SynchronizationResult applyNewBlocks(Repository repository, BlockData commonBlockData, int ourInitialHeight,
                                                  Peer peer, int peerHeight, List<BlockSummaryData> peerBlockSummaries) throws InterruptedException, DataException {
 
-        final BlockData ourLatestBlockData = repository.getBlockRepository().getLastBlock();
+        //final BlockData ourLatestBlockData = repository.getBlockRepository().getLastBlock();
 
         int blocksBehind = peerHeight - ourInitialHeight;
         if (Settings.getInstance().isFastSyncEnabled() && peer.getPeersVersion() >= PEER_VERSION_550 && blocksBehind >= MAXIMUM_REQUEST_SIZE) {
-
             // This peer supports syncing multiple blocks at once via GetBlocksMessage, and it is enabled in the settings
             return this.applyNewBlocksUsingFastSync(repository, commonBlockData, ourInitialHeight, peer, peerHeight, peerBlockSummaries);
         }
@@ -1763,19 +1762,17 @@ public class Synchronizer extends Thread {
 	}
 
     private List<Block> fetchBlocks(Repository repository, Peer peer, byte[] parentSignature, int numberRequested) throws InterruptedException {
-        LOGGER.info("Building GetBlocksMessage with parentSignature: {}, numberRequested: {}", parentSignature, numberRequested);
+        LOGGER.trace("Building GetBlocksMessage with parentSignature: {}, numberRequested: {}", parentSignature, numberRequested);
         Message getBlocksMessage = new GetBlocksMessage(parentSignature, numberRequested);
 
         Message message = peer.getResponseWithTimeout(getBlocksMessage, FETCH_BLOCKS_TIMEOUT);
         if (message == null || message.getType() != MessageType.BLOCKS) {
-            LOGGER.info("Is MSG null? : {}", message == null);
-            LOGGER.info("Caught NULL #1");
+            LOGGER.warn("Received a null BLOCKS payload from {}", peer);
             return null;
         }
 
         BlocksMessage blocksMessage = (BlocksMessage) message;
         if (blocksMessage == null || blocksMessage.getBlocks() == null) {
-            LOGGER.info("Caught NULL #2");
             return null;
         }
 
