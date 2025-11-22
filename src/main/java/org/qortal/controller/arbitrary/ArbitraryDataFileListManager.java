@@ -298,7 +298,7 @@ public class ArbitraryDataFileListManager {
         }
         int hashCount = missingHashes != null ? missingHashes.size() : 0;
 
-        LOGGER.debug(String.format("Sending data file list request for signature %s with %d hashes to %d peers...", signature58, hashCount, handshakedPeers.size()));
+        LOGGER.info(String.format("Sending data file list request for signature %s with %d hashes to %d peers...", signature58, hashCount, handshakedPeers.size()));
 
         // Send our address as requestingPeer, to allow for potential direct connections with seeds/peers
         //String requestingPeer = NetworkData.getInstance().getOurExternalIpAddressAndPort();
@@ -355,7 +355,7 @@ public class ArbitraryDataFileListManager {
         }
 
         int hashCount = 0;
-        LOGGER.debug(String.format("Sending data file list request for signature %s with %d hashes to peer %s...", signature58, hashCount, peer));
+        LOGGER.info(String.format("Sending data file list request for signature %s with %d hashes to peer %s...", signature58, hashCount, peer));
 
         // Build request
         // Use a time in the past, so that the recipient peer doesn't try and relay it
@@ -462,7 +462,7 @@ public class ArbitraryDataFileListManager {
 
                 ArbitraryDataFileListMessage arbitraryDataFileListMessage = (ArbitraryDataFileListMessage) message;
 
-                LOGGER.debug("Received hash list from peer {} with {} hashes", peer, arbitraryDataFileListMessage.getHashes().size());
+                LOGGER.info("Received hash list from peer {} with {} hashes", peer, arbitraryDataFileListMessage.getHashes().size());
 
                 if (LOGGER.isDebugEnabled() && arbitraryDataFileListMessage.getRequestTime() != null) {
                     long totalRequestTime = NTP.getTime() - arbitraryDataFileListMessage.getRequestTime();

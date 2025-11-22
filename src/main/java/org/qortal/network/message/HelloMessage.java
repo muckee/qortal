@@ -1,6 +1,9 @@
 package org.qortal.network.message;
 
 import com.google.common.primitives.Longs;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.qortal.arbitrary.ArbitraryDataBuilder;
 import org.qortal.controller.Controller;
 import org.qortal.network.Peer;
 import org.qortal.network.helper.PeerCapabilities;
@@ -22,6 +25,8 @@ public class HelloMessage extends Message {
 	private String senderPeerAddress;
 	private PeerCapabilities capabilities = new PeerCapabilities();
 	private int peerType = 0;
+
+    private static final Logger LOGGER = LogManager.getLogger(HelloMessage.class);
 
 	// Added in V5.1 to include capabilities exchange
 	public HelloMessage(long timestamp, String versionString, String senderPeerAddress, Map<String, Object> caps, int peerType) {
@@ -85,14 +90,18 @@ public class HelloMessage extends Message {
 			if (byteBuffer.hasRemaining()) {
 				senderPeerAddress = Serialization.deserializeSizedString(byteBuffer, 255);
 			}
+
 			// Below only exists in v5.5.0 and great
             if(isAtleastVersion("5.5.0", versionString)) {
+                LOGGER.info("Peer reported at v5.5.0");
                 peerType = byteBuffer.getInt();
                 if (byteBuffer.hasRemaining()) {
                     capabilities = Serialization.deserializeMap(byteBuffer);
                 } else {
                     capabilities = null;  // Set to null to represent an older version client connection
                 }
+            } else {
+                capabilities = null;
             }
 		} catch (TransformationException e) {
 			throw new MessageException(e.getMessage(), e);

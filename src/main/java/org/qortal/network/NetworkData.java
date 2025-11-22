@@ -1175,7 +1175,7 @@ public class NetworkData {
 //    }
 
     protected void onHandshakeCompleted(Peer peer) {
-        LOGGER.debug("[{}] Handshake completed with peer {} on {}", peer.getPeerConnectionId(), peer,
+        LOGGER.info("[{}] Handshake completed with peer {} on {}", peer.getPeerConnectionId(), peer,
                 peer.getPeersVersionString());
 
         // Are we already connected to this peer?
@@ -1454,10 +1454,6 @@ public class NetworkData {
         synchronized (this.allKnownPeers) {
             this.allKnownPeers.removeIf(peerData -> peerData.getAddress().equals(peerAddress));
 
-//            try (Repository repository = RepositoryManager.getRepository()) {
-//                numDeleted = repository.getNetworkRepository().delete(peerAddress);
-//                repository.saveChanges();
-//            }
         }
 
         disconnectPeer(peerAddress);
