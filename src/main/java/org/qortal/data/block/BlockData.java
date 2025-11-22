@@ -237,9 +237,7 @@ public class BlockData implements Serializable {
 		long currentTrimmableTimestamp = NTP.getTime() - Settings.getInstance().getAtStatesMaxLifetime();
 		long blockTimestamp = this.getTimestamp();
 
-        LOGGER.info("blockTimestamp: {} < onlineAccountSignaturesTrimmedTimestamp {} : {}", blockTimestamp, onlineAccountSignaturesTrimmedTimestamp,blockTimestamp < onlineAccountSignaturesTrimmedTimestamp);
-        LOGGER.info("blockTimestamp: {} < currentTrimmableTimestamp {} : {}", blockTimestamp, currentTrimmableTimestamp, blockTimestamp < currentTrimmableTimestamp);
-		return blockTimestamp < onlineAccountSignaturesTrimmedTimestamp && blockTimestamp < currentTrimmableTimestamp;
+        return blockTimestamp < onlineAccountSignaturesTrimmedTimestamp && blockTimestamp < currentTrimmableTimestamp;
 	}
 
 	public String getMinterAddressFromPublicKey() {

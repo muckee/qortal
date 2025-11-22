@@ -78,7 +78,7 @@ public class BlocksMessage extends Message {
                 blocks.add(block);
 
             } catch (TransformationException e) {
-                LOGGER.info(String.format("Received garbled BLOCKS message: %s", e.getMessage()));
+                LOGGER.warn(String.format("Received garbled BLOCKS message: %s", e.getMessage()));
                 return null;
             }
 
