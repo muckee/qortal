@@ -1504,7 +1504,11 @@ public class NetworkData {
 
         // We need the ip address only
         String remoteHost = p.getPeerData().getAddress().getHost();
-        int remoteHostQDNPort = (int) p.getPeerCapability("QDN");
+        int remoteHostQDNPort = 12394; // 12394
+        // ToDo: Maybe need to check this for old peers
+        //if(p.getPeersVersion() >= 0x050005000000L)
+        remoteHostQDNPort = (int) p.getPeerCapability("QDN");
+
         // if All Known Peers  already has this host. return;
         boolean alreadyKnown = allKnownPeers.stream()
                 .anyMatch(pd -> pd.getAddress().getHost().equals(remoteHost));

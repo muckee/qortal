@@ -6,6 +6,7 @@ import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.Handshake;
 import org.qortal.network.Peer;
+import org.qortal.network.helper.PeerCapabilities;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -38,7 +39,9 @@ public class ConnectedPeer {
     public UUID connectionId;
 
     @Schema(description = "Capabilities as an array of single-entry key:value maps")
-    public List<Map<String, Object>> capabilities;
+    //public Map<String, Object>[] capabilities;
+    //public List<Map<String, Object>> capabilities;
+    public PeerCapabilities capabilities;
 
     public String age;
     public Boolean isTooDivergent;
@@ -62,10 +65,22 @@ public class ConnectedPeer {
         this.nodeId = peer.getPeersNodeId();
         this.connectionId = peer.getPeerConnectionId();
 
-        if (peer.getPeersCapabilities().size() > 0) {
-            capabilities = peer.getPeersCapabilities().getPeerCapabilitesListMap();
-        }
 
+        if (peer.getPeersCapabilities().size() > 0) {
+//            capabilities = peer.getPeersCapabilities()
+//                    .getPeerCapabilities()
+//                    .entrySet()
+//                    .stream()
+//                    .map(entry -> {
+//                        Map<String, Object> cap = new LinkedHashMap<>();
+//                        cap.put(entry.getKey(), entry.getValue());
+//                        return cap;
+//                    })
+//                    .toArray(Map[]::new);
+
+            capabilities = peer.getPeersCapabilities();
+            //.getPeerCapabilitesListMap();
+        }
         if (peer.getConnectionEstablishedTime() > 0) {
             long age = (System.currentTimeMillis() - peer.getConnectionEstablishedTime());
             long minutes = TimeUnit.MILLISECONDS.toMinutes(age);

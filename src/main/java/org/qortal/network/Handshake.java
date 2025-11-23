@@ -82,11 +82,12 @@ public enum Handshake {
 			peer.setPeersVersion(versionString, version);
 
             // ToDo: Only send if the other end is compatible, or set to null and we can handle in the serializer.
-			if(peer.isAtLeastVersion("5.5.0")) {
+			LOGGER.info("is peer atleast v5.5.0 : {}", peer.isAtLeastVersion("5.5.0"));
+            //if(peer.isAtLeastVersion("5.5.0")) {
                 peer.setPeersCapabilities(helloMessage.getCapabilities());
-            } else {
-                peer.setPeersCapabilities(null);
-            }
+            //} else {
+            //    peer.setPeersCapabilities(null);
+            //}
 
 			// Ensure the peer is running at least the version specified in MIN_PEER_VERSION
 			if (!peer.isAtLeastVersion(MIN_PEER_VERSION)) {
@@ -114,13 +115,15 @@ public enum Handshake {
 
             // Added in v5.5.0 to include capabilities enabled
             Map<String, Object> capabilities = new HashMap<>();
-            if (peer.getPeersCapabilities() != null ) {
+            // This here did not send back if the orginator did not send it.....
+            //if (peer.getPeersCapabilities() != null ) {
+            LOGGER.info("Is peer.getPeerCapabilities null? : {} ", peer.getPeersCapabilities() == null);
                 if (Settings.getInstance().isQdnEnabled()) {
                     capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
                 } else {
                     capabilities.put("QDN", 0);
                 }
-            }
+            //}
 			Message helloMessage = new HelloMessage(timestamp, versionString, senderPeerAddress, capabilities, peer.getPeerType());
 
 			if (!peer.sendMessage(helloMessage))

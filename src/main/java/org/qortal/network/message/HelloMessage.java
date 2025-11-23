@@ -40,9 +40,11 @@ public class HelloMessage extends Message {
 			bytes.write(ByteBuffer.allocate(4).putInt(peerType).array());
 
             // New in version 5.5.0, only send if the remote was properly identified
-            if (caps != null) {
+            LOGGER.info("Is caps null?: {}", caps == null);
+            //if (caps != null) {
                 Serialization.serializeMap(bytes, caps);
-            }
+            //}
+
 		} catch (IOException e) {
 			throw new AssertionError("IOException shouldn't occur with ByteArrayOutputStream");
 		}
@@ -84,25 +86,27 @@ public class HelloMessage extends Message {
 		int peerType = Peer.NETWORK;
 		Map<String, Object> capabilities = new HashMap<>();
 		try {
-			versionString = Serialization.deserializeSizedString(byteBuffer, 255);
+            versionString = Serialization.deserializeSizedString(byteBuffer, 255);
 
-			// Sender peer address added in v3.0, so is an optional field. Older versions won't send it.
-			if (byteBuffer.hasRemaining()) {
-				senderPeerAddress = Serialization.deserializeSizedString(byteBuffer, 255);
-			}
+            // Sender peer address added in v3.0, so is an optional field. Older versions won't send it.
+            if (byteBuffer.hasRemaining()) {
+                senderPeerAddress = Serialization.deserializeSizedString(byteBuffer, 255);
+            }
 
-			// Below only exists in v5.5.0 and great
+            // Below only exists in v5.5.0 and great
             if(isAtleastVersion("5.5.0", versionString)) {
                 LOGGER.info("Peer reported at v5.5.0");
+            }
                 peerType = byteBuffer.getInt();
                 if (byteBuffer.hasRemaining()) {
                     capabilities = Serialization.deserializeMap(byteBuffer);
-                } else {
-                    capabilities = null;  // Set to null to represent an older version client connection
                 }
-            } else {
-                capabilities = null;
-            }
+                //else {
+                //    capabilities = null;  // Set to null to represent an older version client connection
+                //}
+            //} else {
+            //    capabilities = null;
+            //}
 		} catch (TransformationException e) {
 			throw new MessageException(e.getMessage(), e);
 		} catch (IOException e) {
