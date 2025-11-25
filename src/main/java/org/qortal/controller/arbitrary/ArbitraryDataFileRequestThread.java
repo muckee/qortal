@@ -380,7 +380,7 @@ public class ArbitraryDataFileRequestThread {
                     NetworkData.getInstance().getPeerByPeerData(responseInfo.getPeer().getPeerData()),
                     arbitraryTransactionData.getSignature(),
                     arbitraryTransactionData,
-                    Arrays.asList(Base58.decode(responseInfo.getHash58()))
+                    Arrays.asList(Base58.decode(responseInfo.getHash58())), responseInfo
             );
         } catch (DataException e) {
             LOGGER.warn("Unable to process file hashes: {}", e.getMessage());

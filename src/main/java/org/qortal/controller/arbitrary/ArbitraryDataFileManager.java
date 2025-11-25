@@ -151,7 +151,7 @@ public class ArbitraryDataFileManager extends Thread {
     public boolean fetchArbitraryDataFiles(Peer peer,
                                            byte[] signature,
                                            ArbitraryTransactionData arbitraryTransactionData,
-                                           List<byte[]> hashes) throws DataException {
+                                           List<byte[]> hashes, ArbitraryFileListResponseInfo responseInfo) throws DataException {
         if (peer == null) {
             LOGGER.info("Received a NULL peer, dropping back");
             return false;

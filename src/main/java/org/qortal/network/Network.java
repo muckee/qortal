@@ -789,18 +789,7 @@ public class Network {
             return null;
         }
 
-        // Pick random peer
-        int peerIndex = new Random().nextInt(peers.size());
-
-        // Pick candidate
-        PeerData peerData = peers.get(peerIndex);
-        Peer newPeer = new Peer(peerData, Peer.NETWORK);
-        newPeer.setIsDataPeer(false);
-
-        // Update connection attempt info
-        peerData.setLastAttempted(now);
-
-        return newPeer;
+        // unreachable fallback removed
     }
 
     public boolean connectPeer(Peer newPeer) throws InterruptedException {
