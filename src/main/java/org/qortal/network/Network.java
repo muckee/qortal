@@ -730,40 +730,38 @@ public class Network {
     }
 
     private Peer getConnectablePeer(final Long now) throws InterruptedException {
+        // Find an address to connect to
+        List<PeerData> peers = this.getAllKnownPeers();
+
         try (Repository repository = RepositoryManager.tryRepository()) {
             if (repository == null) {
                 LOGGER.warn("Unable to get repository connection : Network.getConnectablePeer()");
                 return null;
             }
-            
+        
             LOGGER.trace("ConnectedPeers: {}, Handshaked Peers: {} ", immutableConnectedPeers.size(), immutableHandshakedPeers.size());
-
-            // Find an address to connect to
-            List<PeerData> peers = this.getAllKnownPeers();
-        // Find an address to connect to
-        List<PeerData> peers = this.getAllKnownPeers();
-
-        // Don't consider peers with recent connection failures
-        final long lastAttemptedThreshold = now - CONNECT_FAILURE_BACKOFF;
-        peers.removeIf(peerData -> peerData.getLastAttempted() != null
+                
+            // Don't consider peers with recent connection failures
+            final long lastAttemptedThreshold = now - CONNECT_FAILURE_BACKOFF;
+            peers.removeIf(peerData -> peerData.getLastAttempted() != null
                 && (peerData.getLastConnected() == null
                 || peerData.getLastConnected() < peerData.getLastAttempted())
                 && peerData.getLastAttempted() > lastAttemptedThreshold);
 
-        // Don't consider peers that we know loop back to ourself
-        synchronized (this.selfPeers) {
-            peers.removeIf(isSelfPeer);
-        }
+            // Don't consider peers that we know loop back to ourself
+            synchronized (this.selfPeers) {
+                peers.removeIf(isSelfPeer);
+            }
 
-        // Don't consider already connected peers (simple address match)
-        peers.removeIf(isConnectedPeer);
+            // Don't consider already connected peers (simple address match)
+            peers.removeIf(isConnectedPeer);
 
-        // Don't consider already connected peers (resolved address match)
-        // Disabled because this might be too slow if we end up waiting a long time for hostnames to resolve via DNS
-        // Which is ok because duplicate connections to the same peer are handled during handshaking
-        // peers.removeIf(isResolvedAsConnectedPeer);
+            // Don't consider already connected peers (resolved address match)
+            // Disabled because this might be too slow if we end up waiting a long time for hostnames to resolve via DNS
+            // Which is ok because duplicate connections to the same peer are handled during handshaking
+            // peers.removeIf(isResolvedAsConnectedPeer);
 
-        this.checkLongestConnection(now);
+            this.checkLongestConnection(now);
 
             // Any left?
             if (peers.isEmpty()) {
@@ -796,7 +794,7 @@ public class Network {
 
         // Pick candidate
         PeerData peerData = peers.get(peerIndex);
-        Peer newPeer = new Peer(peerData);
+        Peer newPeer = new Peer(peerData, Peer.NETWORK);
         newPeer.setIsDataPeer(false);
 
         // Update connection attempt info
