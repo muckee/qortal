@@ -33,6 +33,9 @@ public enum Handshake {
 	HELLO(MessageType.HELLO) {
 		@Override
 		public Handshake onMessage(Peer peer, Message message) {
+            if (message.getType() == MessageType.HELLO_V2)
+                return HELLO_V2.onMessage(peer, message);
+
 			HelloMessage helloMessage = (HelloMessage) message;
 
 			long peersConnectionTimestamp = helloMessage.getTimestamp();
@@ -175,8 +178,20 @@ public enum Handshake {
                 LOGGER.info("INBOUND - FINISHED PROCESSING HELLO_V2, ready for CHALLENGE on {}", peer.getPeerType());
                 if (peer.isOutbound() && peer.notSentHelloV2) {
                     peer.notSentHelloV2 = false;
-                    LOGGER.info("Setting Handshake status to HELLO_V2");
-                    return HELLO_V2;
+                    LOGGER.info("Sending HELLO_V2");
+                    String ourVersionString = Controller.getInstance().getVersionString();
+                    long timestamp = NTP.getTime();
+                    String senderPeerAddress = peer.getPeerData().getAddress().toString();
+                    Map<String, Object> capabilities = new HashMap<>();
+                    if (Settings.getInstance().isQdnEnabled()) {
+                        capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
+                    } else {
+                        capabilities.put("QDN", 0);
+                    }
+
+                    Message outBoundHello = new HelloMessageV2(timestamp, ourVersionString, senderPeerAddress, capabilities, peer.getPeerType());
+                    if(!peer.sendMessage(outBoundHello))
+                        peer.disconnect("Hellov2 Failure");
                 }
                 return CHALLENGE;
         }

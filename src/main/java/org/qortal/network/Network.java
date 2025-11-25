@@ -1039,6 +1039,7 @@ public class Network {
                 break;
 
             case HELLO:
+            case HELLO_V2:
             case CHALLENGE:
             case RESPONSE:
                 LOGGER.debug("[{}] Unexpected handshaking message {} from peer {}", peer.getPeerConnectionId(),
