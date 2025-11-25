@@ -1064,6 +1064,7 @@ public class NetworkData {
         switch (message.getType()) {
 
             case HELLO:
+            case HELLO_V2:
             case CHALLENGE:
             case RESPONSE:
                 LOGGER.debug("[{}] Unexpected handshaking message {} from peer {}", peer.getPeerConnectionId(),
@@ -1111,17 +1112,23 @@ public class NetworkData {
     private void onHandshakingMessage(Peer peer, Message message, Handshake handshakeStatus) {
         try {
             // Still handshaking
-            LOGGER.trace("[NetworkData: {}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
+            LOGGER.info("[NetworkData: {}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
                     handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer);
 
             // Check message type is as expected
-            if (handshakeStatus.expectedMessageType != null
-                    && message.getType() != handshakeStatus.expectedMessageType) {
-                LOGGER.warn("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
-                        message.getType().name(), peer, handshakeStatus.expectedMessageType);
-                peer.disconnect("unexpected message");
-                return;
-            }
+			boolean unexpectedMessage = handshakeStatus.expectedMessageType != null
+					&& message.getType() != handshakeStatus.expectedMessageType;
+
+			if (handshakeStatus == Handshake.HELLO && (message.getType() == MessageType.HELLO || message.getType() == MessageType.HELLO_V2)) {
+				unexpectedMessage = false;
+			}
+
+			if (unexpectedMessage) {
+				LOGGER.warn("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
+						message.getType().name(), peer, handshakeStatus.expectedMessageType);
+				peer.disconnect("unexpected message");
+				return;
+			}
 
             Handshake newHandshakeStatus = handshakeStatus.onMessage(peer, message);
 

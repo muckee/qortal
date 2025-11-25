@@ -33,99 +33,30 @@ public enum Handshake {
 	HELLO(MessageType.HELLO) {
 		@Override
 		public Handshake onMessage(Peer peer, Message message) {
-			HelloMessage helloMessage = (HelloMessage) message;
-
-			long peersConnectionTimestamp = helloMessage.getTimestamp();
-			long now = NTP.getTime();
-
-			long timestampDelta = Math.abs(peersConnectionTimestamp - now);
-			if (timestampDelta > MAX_TIMESTAMP_DELTA) {
-				LOGGER.debug(() -> String.format("Peer %s HELLO timestamp %d too divergent (± %d > %d) from ours %d",
-						peer, peersConnectionTimestamp, timestampDelta, MAX_TIMESTAMP_DELTA, now));
-				return null;
+			if (message.getType() == MessageType.HELLO_V2) {
+				return processHelloV2Message(peer, (HelloV2Message) message);
 			}
-
-			// Setup the Peer based on the HELLO message
-			int peerType = helloMessage.getPeerType();
-			peer.setPeerType(peerType);
-
-			switch(peerType) {
-				case Peer.NETWORK:
-					Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
-					break;
-				case Peer.NETWORKDATA:
-					NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
-					break;
-			}
-
-			String versionString = helloMessage.getVersionString();
-
-			Matcher matcher = peer.VERSION_PATTERN.matcher(versionString);
-			if (!matcher.lookingAt()) {
-				LOGGER.debug(() -> String.format("Peer %s sent invalid HELLO version string '%s'", peer, versionString));
-				return null;
-			}
-
-			// We're expecting 3 positive shorts, so we can convert 1.2.3 into 0x000100020003
-			long version = 0;
-			for (int g = 1; g <= 3; ++g) {
-				long value = Long.parseLong(matcher.group(g));
-
-				if (value < 0 || value > Short.MAX_VALUE)
-					return null;
-
-				version <<= 16;
-				version |= value;
-			}
-
-			peer.setPeersConnectionTimestamp(peersConnectionTimestamp);
-			peer.setPeersVersion(versionString, version);
-
-            // ToDo: Only send if the other end is compatible, or set to null and we can handle in the serializer.
-			if(peer.isAtLeastVersion("5.5.0")) {
-                peer.setPeersCapabilities(helloMessage.getCapabilities());
-            } else {
-                peer.setPeersCapabilities(null);
-            }
-
-			// Ensure the peer is running at least the version specified in MIN_PEER_VERSION
-			if (!peer.isAtLeastVersion(MIN_PEER_VERSION)) {
-				LOGGER.debug(String.format("Ignoring peer %s because it is on an old version (%s)", peer, versionString));
-				return null;
-			}
-
-			if (!Settings.getInstance().getAllowConnectionsWithOlderPeerVersions()) {
-				// Ensure the peer is running at least the minimum version allowed for connections
-				final String minPeerVersion = Settings.getInstance().getMinPeerVersion();
-				if (!peer.isAtLeastVersion(minPeerVersion)) {
-					LOGGER.debug(String.format("Ignoring peer %s because it is on an old version (%s)", peer, versionString));
-					return null;
-				}
-			}
-			LOGGER.debug("INBOUND - FINISHED PROCESSING HELLO, ready for CHALLENGE on {}", peer.getPeerType());
-			return CHALLENGE;
+			return processHelloMessage(peer, (HelloMessage) message);
 		}
 
 		@Override
 		public void action(Peer peer) {
-			String versionString = Controller.getInstance().getVersionString();
-			long timestamp = NTP.getTime();
-			String senderPeerAddress = peer.getPeerData().getAddress().toString();
+			boolean sendHelloV2 = peer.isAwaitingHelloV2Response() && peer.isAtLeastVersion(HELLO_V2_MIN_VERSION);
+			if (!sendHello(peer, sendHelloV2)) {
+				return;
+			}
+			LOGGER.debug("OUTBOUND - FINISHED sending {}: Network {}", sendHelloV2 ? "HELLO_V2" : "HELLO", peer.getPeerType());
+		}
+	},
+	HELLO_V2(MessageType.HELLO_V2) {
+		@Override
+		public Handshake onMessage(Peer peer, Message message) {
+			return processHelloV2Message(peer, (HelloV2Message) message);
+		}
 
-            // Added in v5.5.0 to include capabilities enabled
-            Map<String, Object> capabilities = new HashMap<>();
-            if (peer.getPeersCapabilities() != null ) {
-                if (Settings.getInstance().isQdnEnabled()) {
-                    capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
-                } else {
-                    capabilities.put("QDN", 0);
-                }
-            }
-			Message helloMessage = new HelloMessage(timestamp, versionString, senderPeerAddress, capabilities, peer.getPeerType());
-
-			if (!peer.sendMessage(helloMessage))
-				peer.disconnect("failed to send HELLO");
-			LOGGER.debug("OUTBOUND - FINISHED sending HELLO: Network {}", peer.getPeerType());
+		@Override
+		public void action(Peer peer) {
+			// No additional messages to send from this state
 		}
 	},
 	CHALLENGE(MessageType.CHALLENGE) {
@@ -316,8 +247,7 @@ public enum Handshake {
 
 	private static final long PEER_VERSION_131 = 0x0100030001L;
 
-	/** Minimum peer version that we are allowed to communicate with */
-	private static final String MIN_PEER_VERSION = "5.1.0";
+	private static final String HELLO_V2_MIN_VERSION = "5.5.0";
 
 	private static final int POW_BUFFER_SIZE_PRE_131 = 8 * 1024 * 1024; // bytes
 	private static final int POW_DIFFICULTY_PRE_131 = 8; // leading zero bits
@@ -340,4 +270,154 @@ public enum Handshake {
 
 	public abstract void action(Peer peer);
 
+	private static boolean sendHello(Peer peer, boolean useHelloV2) {
+		String versionString = Controller.getInstance().getVersionString();
+		long timestamp = NTP.getTime();
+		String senderPeerAddress = peer.getPeerData().getAddress().toString();
+
+		Map<String, Object> capabilities = null;
+		if (useHelloV2) {
+			capabilities = new HashMap<>();
+			if (Settings.getInstance().isQdnEnabled()) {
+				capabilities.put("QDN", Settings.getInstance().getQDNListenPort());
+			} else {
+				capabilities.put("QDN", 0);
+			}
+		}
+
+		Message helloMessage = useHelloV2
+				? new HelloV2Message(timestamp, versionString, senderPeerAddress, capabilities, peer.getPeerType())
+				: new HelloMessage(timestamp, versionString, senderPeerAddress);
+
+		if (!peer.sendMessage(helloMessage)) {
+			peer.disconnect("failed to send HELLO");
+			return false;
+		}
+
+		return true;
+	}
+
+	private static Handshake processHelloMessage(Peer peer, HelloMessage helloMessage) {
+		long peersConnectionTimestamp = helloMessage.getTimestamp();
+		long now = NTP.getTime();
+
+		long timestampDelta = Math.abs(peersConnectionTimestamp - now);
+		if (timestampDelta > MAX_TIMESTAMP_DELTA) {
+			LOGGER.debug(() -> String.format("Peer %s HELLO timestamp %d too divergent (± %d > %d) from ours %d",
+					peer, peersConnectionTimestamp, timestampDelta, MAX_TIMESTAMP_DELTA, now));
+			return null;
+		}
+
+		switch (peer.getPeerType()) {
+			case Peer.NETWORK:
+				Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+				break;
+			case Peer.NETWORKDATA:
+				NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+				break;
+		}
+
+		String versionString = helloMessage.getVersionString();
+
+		Matcher matcher = peer.VERSION_PATTERN.matcher(versionString);
+		if (!matcher.lookingAt()) {
+			LOGGER.debug(() -> String.format("Peer %s sent invalid HELLO version string '%s'", peer, versionString));
+			return null;
+		}
+
+		long version = 0;
+		for (int g = 1; g <= 3; ++g) {
+			long value = Long.parseLong(matcher.group(g));
+
+			if (value < 0 || value > Short.MAX_VALUE)
+				return null;
+
+			version <<= 16;
+			version |= value;
+		}
+
+		peer.setPeersConnectionTimestamp(peersConnectionTimestamp);
+		peer.setPeersVersion(versionString, version);
+		peer.setPeersCapabilities(null);
+
+		if (!Settings.getInstance().getAllowConnectionsWithOlderPeerVersions()) {
+			final String minPeerVersion = Settings.getInstance().getMinPeerVersion();
+			if (!peer.isAtLeastVersion(minPeerVersion)) {
+				LOGGER.debug(String.format("Ignoring peer %s because it is on an old version (%s)", peer, versionString));
+				return null;
+			}
+		}
+
+		if (peer.isAtLeastVersion(HELLO_V2_MIN_VERSION) && !peer.isOutbound()) {
+			peer.setAwaitingHelloV2Response(true);
+			return HELLO_V2;
+		}
+
+		LOGGER.debug("INBOUND - FINISHED PROCESSING HELLO, ready for CHALLENGE on {}", peer.getPeerType());
+		return CHALLENGE;
+	}
+
+	private static Handshake processHelloV2Message(Peer peer, HelloV2Message helloMessage) {
+		long peersConnectionTimestamp = helloMessage.getTimestamp();
+		long now = NTP.getTime();
+
+		long timestampDelta = Math.abs(peersConnectionTimestamp - now);
+		if (timestampDelta > MAX_TIMESTAMP_DELTA) {
+			LOGGER.debug(() -> String.format("Peer %s HELLO timestamp %d too divergent (± %d > %d) from ours %d",
+					peer, peersConnectionTimestamp, timestampDelta, MAX_TIMESTAMP_DELTA, now));
+			return null;
+		}
+
+		int peerType = helloMessage.getPeerType();
+		peer.setPeerType(peerType);
+
+		switch (peerType) {
+			case Peer.NETWORK:
+				Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+				break;
+			case Peer.NETWORKDATA:
+				NetworkData.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
+				break;
+		}
+
+		String versionString = helloMessage.getVersionString();
+
+		Matcher matcher = peer.VERSION_PATTERN.matcher(versionString);
+		if (!matcher.lookingAt()) {
+			LOGGER.debug(() -> String.format("Peer %s sent invalid HELLO version string '%s'", peer, versionString));
+			return null;
+		}
+
+		long version = 0;
+		for (int g = 1; g <= 3; ++g) {
+			long value = Long.parseLong(matcher.group(g));
+
+			if (value < 0 || value > Short.MAX_VALUE)
+				return null;
+
+			version <<= 16;
+			version |= value;
+		}
+
+		peer.setPeersConnectionTimestamp(peersConnectionTimestamp);
+		peer.setPeersVersion(versionString, version);
+		peer.setPeersCapabilities(helloMessage.getCapabilities());
+		peer.setAwaitingHelloV2Response(false);
+
+		if (!Settings.getInstance().getAllowConnectionsWithOlderPeerVersions()) {
+			final String minPeerVersion = Settings.getInstance().getMinPeerVersion();
+			if (!peer.isAtLeastVersion(minPeerVersion)) {
+				LOGGER.debug(String.format("Ignoring peer %s because it is on an old version (%s)", peer, versionString));
+				return null;
+			}
+		}
+
+		if (peer.isOutbound()) {
+			if (!sendHello(peer, true)) {
+				return null;
+			}
+		}
+
+		return CHALLENGE;
+	}
 }

@@ -9,6 +9,7 @@ import org.qortal.network.Peer;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
+import java.util.stream.Collectors;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -37,8 +38,8 @@ public class ConnectedPeer {
     public Long lastBlockTimestamp;
     public UUID connectionId;
 
-    @Schema(description = "Capabilities as an array of single-entry key:value maps")
-    public List<Map<String, Object>> capabilities;
+    @Schema(description = "Capabilities as an array of key/value objects")
+    public List<Capability> capabilities;
 
     public String age;
     public Boolean isTooDivergent;
@@ -62,8 +63,10 @@ public class ConnectedPeer {
         this.nodeId = peer.getPeersNodeId();
         this.connectionId = peer.getPeerConnectionId();
 
-        if (peer.getPeersCapabilities().size() > 0) {
-            capabilities = peer.getPeersCapabilities().getPeerCapabilitesListMap();
+        if (peer.getPeersCapabilities() != null && peer.getPeersCapabilities().size() > 0) {
+            capabilities = peer.getPeersCapabilities().getPeerCapabilities().entrySet().stream()
+                    .map(entry -> new Capability(entry.getKey(), entry.getValue()))
+                    .collect(Collectors.toList());
         }
 
         if (peer.getConnectionEstablishedTime() > 0) {
@@ -87,6 +90,19 @@ public class ConnectedPeer {
         // Only include isTooDivergent decision if we've had the opportunity to request block summaries this peer
         if (peer.getLastTooDivergentTime() != null) {
             this.isTooDivergent = Controller.wasRecentlyTooDivergent.test(peer);
+        }
+    }
+
+    public static class Capability {
+        public String key;
+        public Object value;
+
+        public Capability(String key, Object value) {
+            this.key = key;
+            this.value = value;
+        }
+
+        public Capability() {
         }
     }
 

@@ -16,6 +16,7 @@ public enum MessageType {
     GOODBYE(1, GoodbyeMessage::fromByteBuffer),
     CHALLENGE(2, ChallengeMessage::fromByteBuffer),
     RESPONSE(3, ResponseMessage::fromByteBuffer),
+    HELLO_V2(4, HelloV2Message::fromByteBuffer),
 
     // Status / notifications
     HEIGHT_V2(10, HeightV2Message::fromByteBuffer),
