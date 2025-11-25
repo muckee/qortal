@@ -10,6 +10,7 @@ import org.qortal.network.helper.PeerCapabilities;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
@@ -39,9 +40,12 @@ public class ConnectedPeer {
     public UUID connectionId;
 
     @Schema(description = "Capabilities as an array of single-entry key:value maps")
+    @XmlJavaTypeAdapter(MapAdapter.class)
+    public Map capabilities;
+
+    //public PeerCapabilities capabilities;
     //public Map<String, Object>[] capabilities;
     //public List<Map<String, Object>> capabilities;
-    public PeerCapabilities capabilities;
 
     public String age;
     public Boolean isTooDivergent;
@@ -65,22 +69,15 @@ public class ConnectedPeer {
         this.nodeId = peer.getPeersNodeId();
         this.connectionId = peer.getPeerConnectionId();
 
-
-        if (peer.getPeersCapabilities().size() > 0) {
-//            capabilities = peer.getPeersCapabilities()
-//                    .getPeerCapabilities()
-//                    .entrySet()
-//                    .stream()
-//                    .map(entry -> {
-//                        Map<String, Object> cap = new LinkedHashMap<>();
-//                        cap.put(entry.getKey(), entry.getValue());
-//                        return cap;
-//                    })
-//                    .toArray(Map[]::new);
-
-            capabilities = peer.getPeersCapabilities();
-            //.getPeerCapabilitesListMap();
+        PeerCapabilities peerCapabilities = peer.getPeersCapabilities();
+        if (peerCapabilities.size() > 0) {
+            // Assuming peer.getPeersCapabilities() returns a PeerCapabilities object
+            // and PeerCapabilities.getPeerCapabilities() returns the internal Map<String, Object>
+            //this.capabilities = peerCapabilities.getPeerCapabilities();
+            //capabilities = peer.getPeersCapabilities();
+            this.capabilities = peerCapabilities.getPeerCapabilities();
         }
+
         if (peer.getConnectionEstablishedTime() > 0) {
             long age = (System.currentTimeMillis() - peer.getConnectionEstablishedTime());
             long minutes = TimeUnit.MILLISECONDS.toMinutes(age);

@@ -1,9 +1,8 @@
 package org.qortal.network.helper;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlRootElement;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +17,7 @@ import java.util.stream.Collectors;
  * @author Ice
  * @since v5.1.0
  */
+@XmlRootElement(name = "capabilities")
 @XmlAccessorType(XmlAccessType.FIELD)
 public class PeerCapabilities {
 
@@ -58,7 +58,6 @@ public class PeerCapabilities {
      *
      * @return a map of capability names to values
      */
-    @JsonProperty
     public Map<String, Object> getPeerCapabilities() {
         return capabilities;
     }
@@ -82,7 +81,6 @@ public class PeerCapabilities {
      *
      * @return a list of maps representing individual capabilities
      */
-    @JsonProperty
     public List<Map<String, Object>> getPeerCapabilitesListMap() {
         return capabilities.entrySet().stream()
                 .map(entry -> {

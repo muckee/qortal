@@ -184,6 +184,7 @@ public class Peer {
     private final Map<MessageType, MessageStats> receivedMessageStats = new ConcurrentHashMap<>();
     private final Map<MessageType, MessageStats> sentMessageStats = new ConcurrentHashMap<>();
 
+    public boolean notSentHelloV2 = true;
     // Constructors
 
     private Peer(int network, boolean outbound) {

@@ -1072,14 +1072,27 @@ public class Network {
             LOGGER.trace("[{}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
                     handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer);
 
+            boolean unexpectedMessage = false;
             // Check message type is as expected
             if (handshakeStatus.expectedMessageType != null
                     && message.getType() != handshakeStatus.expectedMessageType) {
-                LOGGER.debug("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
+                unexpectedMessage = true;
+            }
+
+            if (handshakeStatus == Handshake.HELLO &&
+                    (message.getType() == MessageType.HELLO || message.getType() == MessageType.HELLO_V2) )
+                unexpectedMessage = false;
+
+            if(handshakeStatus == Handshake.CHALLENGE && message.getType() == MessageType.HELLO_V2)
+                unexpectedMessage = false;
+
+            if (unexpectedMessage) {
+                LOGGER.info("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
                         message.getType().name(), peer, handshakeStatus.expectedMessageType);
                 peer.disconnect("unexpected message");
                 return;
             }
+
 
             Handshake newHandshakeStatus = handshakeStatus.onMessage(peer, message);
 
@@ -1100,11 +1113,6 @@ public class Network {
             }
             peer.setHandshakeStatus(newHandshakeStatus);
 
-//            if (peer.getPeerType() == Peer.NETWORKDATA) {
-//                // Need to pull it out as it should not be in here accept for the START/HELLO prior to exchange
-//                this.removeConnectedPeer(peer);
-//                LOGGER.info("Removed peer {} - Handshake {} from Network, type is {}",peer.getPeersNodeId(), peer.getHandshakeStatus(), peer.getPeerType());
-//            }
 
             if (newHandshakeStatus == Handshake.COMPLETED) {
                 this.onHandshakeCompleted(peer);

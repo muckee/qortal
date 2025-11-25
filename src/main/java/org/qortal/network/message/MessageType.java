@@ -13,9 +13,10 @@ public enum MessageType {
 
     // Handshaking
     HELLO(0, HelloMessage::fromByteBuffer),
-    GOODBYE(1, GoodbyeMessage::fromByteBuffer),
-    CHALLENGE(2, ChallengeMessage::fromByteBuffer),
-    RESPONSE(3, ResponseMessage::fromByteBuffer),
+    HELLO_V2(1, HelloMessageV2::fromByteBuffer),
+    GOODBYE(2, GoodbyeMessage::fromByteBuffer),
+    CHALLENGE(3, ChallengeMessage::fromByteBuffer),
+    RESPONSE(4, ResponseMessage::fromByteBuffer),
 
     // Status / notifications
     HEIGHT_V2(10, HeightV2Message::fromByteBuffer),
