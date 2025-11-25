@@ -1070,36 +1070,31 @@ public class Network {
     private void onHandshakingMessage(Peer peer, Message message, Handshake handshakeStatus) {
         try {
             // Still handshaking
-            LOGGER.trace("[{}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
-                    handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer);
+            LOGGER.info("[{}] Handshake status {}, message {} from peer {} isOutbound {}", peer.getPeerConnectionId(),
+                    handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer, peer.isOutbound());
 
-            boolean unexpectedMessage = false;
+  
             // Check message type is as expected
-            if (handshakeStatus.expectedMessageType != null
-                    && message.getType() != handshakeStatus.expectedMessageType) {
-                unexpectedMessage = true;
-            }
+			boolean unexpectedMessage = handshakeStatus.expectedMessageType != null
+					&& message.getType() != handshakeStatus.expectedMessageType;
 
-            if (handshakeStatus == Handshake.HELLO &&
-                    (message.getType() == MessageType.HELLO || message.getType() == MessageType.HELLO_V2) )
-                unexpectedMessage = false;
+			if (handshakeStatus == Handshake.HELLO && (message.getType() == MessageType.HELLO || message.getType() == MessageType.HELLO_V2)) {
+				unexpectedMessage = false;
+			}
 
-            if(handshakeStatus == Handshake.CHALLENGE && message.getType() == MessageType.HELLO_V2)
-                unexpectedMessage = false;
-
-            if (unexpectedMessage) {
-                LOGGER.info("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
-                        message.getType().name(), peer, handshakeStatus.expectedMessageType);
-                peer.disconnect("unexpected message");
-                return;
-            }
+			if (unexpectedMessage) {
+				LOGGER.debug("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
+						message.getType().name(), peer, handshakeStatus.expectedMessageType);
+				peer.disconnect("unexpected message");
+				return;
+			}
 
 
             Handshake newHandshakeStatus = handshakeStatus.onMessage(peer, message);
 
             if (newHandshakeStatus == null) {
                 // Handshake failure
-                LOGGER.debug("[{}] Handshake failure with peer {} message {}", peer.getPeerConnectionId(), peer,
+                LOGGER.info("[{}] Handshake failure with peer {} message {}", peer.getPeerConnectionId(), peer,
                         message.getType().name());
                 peer.disconnect("handshake failure");
                 return;

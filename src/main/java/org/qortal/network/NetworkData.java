@@ -1112,29 +1112,23 @@ public class NetworkData {
     private void onHandshakingMessage(Peer peer, Message message, Handshake handshakeStatus) {
         try {
             // Still handshaking
-            LOGGER.trace("[NetworkData: {}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
+            LOGGER.info("[NetworkData: {}] Handshake status {}, message {} from peer {}", peer.getPeerConnectionId(),
                     handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer);
 
-            boolean unexpectedMessage = false;
             // Check message type is as expected
-            if (handshakeStatus.expectedMessageType != null
-                    && message.getType() != handshakeStatus.expectedMessageType) {
-                unexpectedMessage = true;
-            }
+			boolean unexpectedMessage = handshakeStatus.expectedMessageType != null
+					&& message.getType() != handshakeStatus.expectedMessageType;
 
-            if (handshakeStatus == Handshake.HELLO &&
-                    (message.getType() == MessageType.HELLO || message.getType() == MessageType.HELLO_V2) )
-                unexpectedMessage = false;
+			if (handshakeStatus == Handshake.HELLO && (message.getType() == MessageType.HELLO || message.getType() == MessageType.HELLO_V2)) {
+				unexpectedMessage = false;
+			}
 
-            if(handshakeStatus == Handshake.CHALLENGE && message.getType() == MessageType.HELLO_V2)
-                unexpectedMessage = false;
-
-            if (unexpectedMessage) {
-                LOGGER.info("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
-                        message.getType().name(), peer, handshakeStatus.expectedMessageType);
-                peer.disconnect("unexpected message");
-                return;
-            }
+			if (unexpectedMessage) {
+				LOGGER.warn("[{}] Unexpected {} message from {}, expected {}", peer.getPeerConnectionId(),
+						message.getType().name(), peer, handshakeStatus.expectedMessageType);
+				peer.disconnect("unexpected message");
+				return;
+			}
 
 
             Handshake newHandshakeStatus = handshakeStatus.onMessage(peer, message);
