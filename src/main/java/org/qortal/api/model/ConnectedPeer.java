@@ -6,6 +6,7 @@ import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.Handshake;
 import org.qortal.network.Peer;
+import org.qortal.network.helper.PeerCapabilities;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -67,15 +68,6 @@ public class ConnectedPeer {
             capabilities = peer.getPeersCapabilities().getPeerCapabilities().entrySet().stream()
                     .map(entry -> new Capability(entry.getKey(), entry.getValue()))
                     .collect(Collectors.toList());
-        }
-
-        if (peer.getConnectionEstablishedTime() > 0) {
-            long age = (System.currentTimeMillis() - peer.getConnectionEstablishedTime());
-            long minutes = TimeUnit.MILLISECONDS.toMinutes(age);
-            long seconds = TimeUnit.MILLISECONDS.toSeconds(age) - TimeUnit.MINUTES.toSeconds(minutes);
-            this.age = String.format("%dm %ds", minutes, seconds);
-        } else {
-            this.age = "connecting...";
         }
 
         if (peer.getPeerType() == Peer.NETWORK) {

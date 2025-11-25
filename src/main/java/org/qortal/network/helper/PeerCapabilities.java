@@ -1,5 +1,8 @@
 package org.qortal.network.helper;
 
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlRootElement;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,6 +17,8 @@ import java.util.stream.Collectors;
  * @author Ice
  * @since v5.1.0
  */
+@XmlRootElement(name = "capabilities")
+@XmlAccessorType(XmlAccessType.FIELD)
 public class PeerCapabilities {
 
     // Empty Set of Peer Capabilities

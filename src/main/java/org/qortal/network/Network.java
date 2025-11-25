@@ -1073,6 +1073,7 @@ public class Network {
             LOGGER.info("[{}] Handshake status {}, message {} from peer {} isOutbound {}", peer.getPeerConnectionId(),
                     handshakeStatus.name(), (message != null ? message.getType().name() : "null"), peer, peer.isOutbound());
 
+  
             // Check message type is as expected
 			boolean unexpectedMessage = handshakeStatus.expectedMessageType != null
 					&& message.getType() != handshakeStatus.expectedMessageType;
@@ -1087,6 +1088,7 @@ public class Network {
 				peer.disconnect("unexpected message");
 				return;
 			}
+
 
             Handshake newHandshakeStatus = handshakeStatus.onMessage(peer, message);
 
@@ -1107,11 +1109,6 @@ public class Network {
             }
             peer.setHandshakeStatus(newHandshakeStatus);
 
-//            if (peer.getPeerType() == Peer.NETWORKDATA) {
-//                // Need to pull it out as it should not be in here accept for the START/HELLO prior to exchange
-//                this.removeConnectedPeer(peer);
-//                LOGGER.info("Removed peer {} - Handshake {} from Network, type is {}",peer.getPeersNodeId(), peer.getHandshakeStatus(), peer.getPeerType());
-//            }
 
             if (newHandshakeStatus == Handshake.COMPLETED) {
                 this.onHandshakeCompleted(peer);
