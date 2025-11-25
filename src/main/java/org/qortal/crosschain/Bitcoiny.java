@@ -8,6 +8,8 @@ import org.bitcoinj.core.*;
 import org.bitcoinj.crypto.ChildNumber;
 import org.bitcoinj.crypto.DeterministicHierarchy;
 import org.bitcoinj.crypto.DeterministicKey;
+import org.bitcoinj.crypto.HDPath;
+import org.bitcoinj.params.AbstractBitcoinNetParams;
 import org.bitcoinj.script.Script.ScriptType;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.wallet.DeterministicKeyChain;
@@ -30,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /** Bitcoin-like (Bitcoin, Litecoin, etc.) support */
-public abstract class Bitcoiny implements ForeignBlockchain {
+public abstract class Bitcoiny extends AbstractBitcoinNetParams implements ForeignBlockchain {
 
 	protected static final Logger LOGGER = LogManager.getLogger(Bitcoiny.class);
 
@@ -77,6 +79,7 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	// Constructors and instance
 
 	protected Bitcoiny(BitcoinyBlockchainProvider blockchainProvider, Context bitcoinjContext, String currencyCode, Coin feePerKb) {
+		this.genesisBlock = this.getGenesisBlock();
 		this.blockchainProvider = blockchainProvider;
 		this.bitcoinjContext = bitcoinjContext;
 		this.currencyCode = currencyCode;
@@ -86,6 +89,15 @@ public abstract class Bitcoiny implements ForeignBlockchain {
 	}
 
 	// Getters & setters
+	@Override
+	public String getPaymentProtocolId() {
+		return this.id;
+	}
+
+	@Override
+	public Block getGenesisBlock() {
+		return this.genesisBlock;
+	}
 
 	public BitcoinyBlockchainProvider getBlockchainProvider() {
 		return this.blockchainProvider;
@@ -829,15 +841,27 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 
 		return new AddressInfo(
 				address.toString(),
-				toIntegerList( key.getPath()),
+				toIntegerList( key.getPath() ),
 				summingUnspentOutputs(address.toString()),
 				key.getPathAsString(),
 				transactionCount,
 				true);
 	}
 
-	private static  List<Integer> toIntegerList(ImmutableList<ChildNumber> path) {
+	/**
+	 * <p>Convert BitcoinJ native type to List of Integers, BitcoinJ v16 compatible
+	 * </p>
+	 *
+	 * @param path path to deterministic key
+	 * @return Array of Ints representing the keys position in the tree
+	 * @since v4.7.2
+	 */
+	private static  List<Integer> toIntegerList(HDPath path) {
+		return path.stream().map(ChildNumber::num).collect(Collectors.toList());
+	}
 
+	// BitcoinJ v15 compatible
+	private static  List<Integer> toIntegerList(ImmutableList<ChildNumber> path) {
 		return path.stream().map(ChildNumber::num).collect(Collectors.toList());
 	}
 
