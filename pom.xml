@@ -496,7 +496,7 @@
 		</dependency>
 		<!-- CIYAM AT (automated transactions) -->
 		<dependency>
-			<groupId>org.ciyam</groupId>
+			<groupId>com.github.iceburst</groupId>
 			<artifactId>AT</artifactId>
 			<version>${ciyam-at.version}</version>
 		</dependency>
@@ -514,7 +514,7 @@
 		</dependency>
 		<!-- For Litecoin, etc. support, requires bitcoinj -->
 		<dependency>
-			<groupId>com.github.qortal</groupId>
+			<groupId>com.github.iceburst</groupId>
 			<artifactId>altcoinj</artifactId>
 			<version>${altcoinj.version}</version>
 		</dependency>

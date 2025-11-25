@@ -765,7 +765,6 @@ public class Network {
 
         this.checkLongestConnection(now);
 
-<<<<<<< HEAD
             // Any left?
             if (peers.isEmpty()) {
                 return null;
@@ -789,10 +788,6 @@ public class Network {
             return newPeer;
         } catch (DataException e) {
             LOGGER.error("Repository issue while finding a connectable peer", e);
-=======
-        // Any left?
-        if (peers.isEmpty()) {
->>>>>>> upstream/master
             return null;
         }
 
@@ -1548,37 +1543,6 @@ public class Network {
             // Fetch all known peers
             List<PeerData> peers = new ArrayList<>(this.allKnownPeers);
 
-<<<<<<< HEAD
-            synchronized (this.allKnownPeers) {
-                // Fetch all known peers
-                List<PeerData> peers = new ArrayList<>(this.allKnownPeers);
-
-                // 'Old' peers:
-                // We attempted to connect within the last day
-                // but we last managed to connect over a week ago.
-                Predicate<PeerData> isNotOldPeer = peerData -> {
-                    if (peerData.getLastAttempted() == null
-                            || peerData.getLastAttempted() < now - OLD_PEER_ATTEMPTED_PERIOD) {
-                        return true;
-                    }
-
-                    return peerData.getLastConnected() == null
-                            || peerData.getLastConnected() > now - OLD_PEER_CONNECTION_PERIOD;
-                };
-
-                // Disregard peers that are NOT 'old'
-                peers.removeIf(isNotOldPeer);
-
-                // Don't consider already connected peers (simple address match)
-                peers.removeIf(isConnectedPeer);
-
-                for (PeerData peerData : peers) {
-                    LOGGER.debug("Deleting old peer {} from repository", peerData.getAddress().toString());
-                    repository.getNetworkRepository().delete(peerData.getAddress());
-
-                    // Delete from known peer cache too
-                    this.allKnownPeers.remove(peerData);
-=======
             // 'Old' peers:
             // We attempted to connect within the last day
             // but we last managed to connect over a week ago.
@@ -1586,7 +1550,6 @@ public class Network {
                 if (peerData.getLastAttempted() == null
                         || peerData.getLastAttempted() < now - OLD_PEER_ATTEMPTED_PERIOD) {
                     return true;
->>>>>>> upstream/master
                 }
 
                 if (peerData.getLastConnected() == null
