@@ -33,6 +33,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.qortal.crypto.Crypto;
 import static org.qortal.network.PeerSendManager.HIGH_PRIORITY;
 
 public class ArbitraryDataFileManager extends Thread {
@@ -182,8 +183,11 @@ public class ArbitraryDataFileManager extends Thread {
                         // Stop asking for files from this peer
                         break;
                     }
-                } else {
-                    LOGGER.info("Already requesting data file {} for signature {} from peer {}", arbitraryDataFile, Base58.encode(signature), peer);
+                }
+                else {
+                    LOGGER.trace("Already requesting data file {} for signature {} from peer {}", arbitraryDataFile, Base58.encode(signature), peer);
+                    this.addResponse(responseInfo);
+
                 }
             }
         }
@@ -297,13 +301,27 @@ public class ArbitraryDataFileManager extends Thread {
 
                 ArbitraryDataFileMessage peersArbitraryDataFileMessage = (ArbitraryDataFileMessage) response;
                 arbitraryDataFile = peersArbitraryDataFileMessage.getArbitraryDataFile();
+                byte[] fileBytes = arbitraryDataFile.getBytes();
+                if (fileBytes == null || fileBytes.length == 0) {
+                    LOGGER.debug(String.format("Failed to read bytes for file hash %s", hash58));
+                    return null;
+                }
+
+                byte[] actualHash = Crypto.digest(fileBytes);
+                if (!Arrays.equals(hash, actualHash)) {
+                    LOGGER.debug(String.format("Hash mismatch for chunk: expected %s but got %s",
+                        hash58, Base58.encode(actualHash)));
+                    return null; 
+                } 
+     
+        
             } else {
                 LOGGER.debug(String.format("File hash %s already exists, so skipping the request", hash58));
-                arbitraryDataFile = existingFile;
+                arbitraryDataFile = null;
             }
 
             if (arbitraryDataFile != null) {
-
+           
                 arbitraryDataFile.save();
 
                 // If this is a metadata file then we need to update the cache

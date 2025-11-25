@@ -800,6 +800,9 @@ public class ArbitraryDataFileListManager {
                     LOGGER.info("We Think our external address is: {}", Network.getInstance().getOurExternalIpAddress());
                     ArbitraryDataFileListMessage arbitraryDataFileListMessage;
 
+                    Collections.shuffle(hashes.subList(1, hashes.size()));
+
+
                     // Remove optional parameters if the requesting peer doesn't support it yet
                     // A message with less statistical data is better than no message at all
                     /*  We are way past v3.2.0, this check will always pass

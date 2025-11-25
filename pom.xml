@@ -7,7 +7,7 @@
 	<packaging>jar</packaging>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<skipJUnitTests>true</skipJUnitTests>
+		<skipTests>true</skipTests>
 
 		<altcoinj.version>d7cf6ac</altcoinj.version> <!-- BC v16 / Updated Abstract Classes / alertSigningKey -->
 		<bitcoinj.version>0.16.3</bitcoinj.version>
@@ -297,23 +297,19 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-jar-plugin</artifactId>
 				<version>${maven-jar-plugin.version}</version>
-				<executions>
-					<execution>
-						<configuration>
-							<archive>
-								<manifest>
-									<addDefaultEntries>false</addDefaultEntries>
-									<addDefaultImplementationEntries>true</addDefaultImplementationEntries>
-								</manifest>
-								<manifestEntries>
-									<Last-Commit-Id>${git.commit.id.full}</Last-Commit-Id>
-									<Last-Commit-Time>${git.commit.time}</Last-Commit-Time>
-									<Reproducible-Build>true</Reproducible-Build>
-								</manifestEntries>
-							</archive>
-						</configuration>
-					</execution>
-				</executions>
+				<configuration>
+					<archive>
+						<manifest>
+							<addDefaultEntries>false</addDefaultEntries>
+							<addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+						</manifest>
+						<manifestEntries>
+							<Last-Commit-Id>${git.commit.id.full}</Last-Commit-Id>
+							<Last-Commit-Time>${git.commit.time}</Last-Commit-Time>
+							<Reproducible-Build>true</Reproducible-Build>
+						</manifestEntries>
+					</archive>
+				</configuration>
 			</plugin>
 			<!-- Copy modified hsqldb.jar to install / modified MANIFEST.MF-->
 			<plugin>
@@ -388,7 +384,6 @@
 					</execution>
 				</executions>
 			</plugin>
-			<!-- Removed, now use Maven reproducible by default v4.0, IntelliJ v2025.1 and later -->
 			<plugin>
 				<groupId>io.github.zlika</groupId>
 				<artifactId>reproducible-build-maven-plugin</artifactId>
@@ -412,7 +407,7 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<version>${maven-surefire-plugin.version}</version>
 				<configuration>
-					<skipTests>${skipJUnitTests}</skipTests>
+					<skipTests>${skipTests}</skipTests>
 				</configuration>
 			</plugin>
 		</plugins>
@@ -501,7 +496,7 @@
 		</dependency>
 		<!-- CIYAM AT (automated transactions) -->
 		<dependency>
-			<groupId>com.github.iceburst</groupId>
+			<groupId>org.ciyam</groupId>
 			<artifactId>AT</artifactId>
 			<version>${ciyam-at.version}</version>
 		</dependency>
@@ -519,7 +514,7 @@
 		</dependency>
 		<!-- For Litecoin, etc. support, requires bitcoinj -->
 		<dependency>
-			<groupId>com.github.iceburst</groupId>
+			<groupId>com.github.qortal</groupId>
 			<artifactId>altcoinj</artifactId>
 			<version>${altcoinj.version}</version>
 		</dependency>

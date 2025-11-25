@@ -161,6 +161,8 @@ public class Synchronizer extends Thread {
 			// Clear interrupted flag so we can shutdown trim threads
 			Thread.interrupted();
 			// Fall-through to exit
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
 		}
 	}
 
