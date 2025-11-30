@@ -185,10 +185,10 @@ public class NetworkData {
 
         // Attempt to set up UPnP. All errors are ignored.
         if (Settings.getInstance().isUPnPEnabled()) {
-            UPnP.openPortTCP(Settings.getInstance().getListenPort());
+            UPnP.openPortTCP(Settings.getInstance().getQDNListenPort());
         }
         else {
-            UPnP.closePortTCP(Settings.getInstance().getListenPort());
+            UPnP.closePortTCP(Settings.getInstance().getQDNListenPort());
         }
 
         // Start up first networking thread
