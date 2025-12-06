@@ -241,12 +241,22 @@ public class Network {
             LOGGER.debug("starting with {} known peers", this.allKnownPeers.size());
         }
 
-        // Attempt to set up UPnP. All errors are ignored.
+        // Attempt to set up UPnP for P2P. All errors are ignored.
+        int networkPort = Settings.getInstance().getListenPort();
         if (Settings.getInstance().isUPnPEnabled()) {
-            UPnP.openPortTCP(Settings.getInstance().getListenPort());
+            if(UPnP.isUPnPAvailable()) {
+
+                UPnP.openPortTCP(networkPort);
+                if (UPnP.isMappedTCP(networkPort))
+                    LOGGER.info("UPnP Mapped for P2P, port: {}", networkPort);
+                else
+                    LOGGER.warn("Unable to map P2P port: {} with UPnP, port in use?", networkPort);
+            } else {
+                LOGGER.debug("UPnP was not available - P2P");
+            }
         }
         else {
-            UPnP.closePortTCP(Settings.getInstance().getListenPort());
+            UPnP.closePortTCP(networkPort);
         }
 
         // Start up first networking thread
@@ -1437,7 +1447,8 @@ public class Network {
     }
 
     public String getOurExternalIpAddress() {
-        // FUTURE: replace port if UPnP is active, as it will be more accurate
+        if(UPnP.isUPnPAvailable())
+            return UPnP.getExternalIP();
         return this.ourExternalIpAddress;
     }
 

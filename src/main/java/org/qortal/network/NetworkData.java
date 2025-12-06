@@ -89,10 +89,6 @@ public class NetworkData {
     private final List<Peer> handshakedPeers = Collections.synchronizedList(new ArrayList<>());
     private final List<Peer> outboundHandshakedPeers = Collections.synchronizedList(new ArrayList<>());
 
-//    private List<Peer> immutableConnectedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
-//    private List<Peer> immutableHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
-//    private List<Peer> immutableOutboundHandshakedPeers = Collections.emptyList(); // always rebuilt from mutable, synced list above
-
     //  Count threads per message type in order to enforce limits
     private final Map<MessageType, Integer> threadsPerMessageType = Collections.synchronizedMap(new HashMap<>());
 
@@ -107,7 +103,7 @@ public class NetworkData {
 
     private String bindAddress = null;
 
-    private final ExecuteProduceConsume networkEPC;
+    private final ExecuteProduceConsume networkDataEPC;
     private Selector channelSelector;
     private ServerSocketChannel serverChannel;
     private SelectionKey serverSelectionKey;
@@ -118,7 +114,7 @@ public class NetworkData {
     private final List<String> ourExternalIpAddressHistory = new ArrayList<>();
     private String ourExternalIpAddress = null;
     private int ourExternalPort = Settings.getInstance().getListenPort();
-
+    private boolean canAcceptInbound = false;
     private volatile boolean isShuttingDown = false;
 
     // Constructors
@@ -130,12 +126,24 @@ public class NetworkData {
         maxPeers = Settings.getInstance().getMaxPeers();
 
         // We'll use a cached thread pool but with more aggressive timeout.
-        ExecutorService networkExecutor = new ThreadPoolExecutor(2,
-                Settings.getInstance().getMaxNetworkThreadPoolSize(),
-                NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,  // 5 Seconds
-                new SynchronousQueue<Runnable>(),
-                new NamedThreadFactory("NetworkData-EPC", Settings.getInstance().getNetworkThreadPriority()));
-        networkEPC = new NetworkDataProcessor(networkExecutor);
+//        ExecutorService networkExecutor = new ThreadPoolExecutor(2,
+//                Settings.getInstance().getMaxNetworkThreadPoolSize(),
+//                NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,  // 5 Seconds
+//                new SynchronousQueue<Runnable>(),
+//                new NamedThreadFactory("NetworkData-EPC", Settings.getInstance().getNetworkThreadPriority()));
+//        networkEPC = new NetworkDataProcessor(networkExecutor);
+        int networkDataPriority = Settings.getInstance().getNetworkThreadPriority();
+        if (networkDataPriority > 1)
+                networkDataPriority--;  // Create QDN with a lowerThread priority than the primary data
+
+        ExecutorService networkExecutor = new ThreadPoolExecutor(
+                2, // corePoolSize: maintain 10 threads
+                20, // maximumPoolSize: never exceed n threads
+                NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<Runnable>(), // Use an unbounded queue to hold excess tasks
+                new NamedThreadFactory("NetworkData-EPC", networkDataPriority));
+
+        networkDataEPC = new NetworkDataProcessor(networkExecutor);
     }
 
     public void start() throws IOException, DataException {
@@ -183,16 +191,26 @@ public class NetworkData {
             }
         }
 
-        // Attempt to set up UPnP. All errors are ignored.
+        // Attempt to set up UPnP for QDN. All errors are ignored.
+        int qdnPort = Settings.getInstance().getQDNListenPort();
         if (Settings.getInstance().isUPnPEnabled()) {
-            UPnP.openPortTCP(Settings.getInstance().getQDNListenPort());
+            if(UPnP.isUPnPAvailable()) {
+
+                UPnP.openPortTCP(qdnPort);
+                if (UPnP.isMappedTCP(qdnPort))
+                    LOGGER.info("UPnP Mapped for QDN, port: {}", qdnPort);
+                else
+                    LOGGER.warn("Unable to map QDN port: {} with UPnP, port in use?", qdnPort);
+            } else {
+                LOGGER.debug("UPnP was not available - QDN");
+            }
         }
         else {
-            UPnP.closePortTCP(Settings.getInstance().getQDNListenPort());
+            UPnP.closePortTCP(qdnPort);
         }
 
         // Start up first networking thread
-        networkEPC.start();
+        networkDataEPC.start();
     }
 
     // Getters / setters
@@ -244,7 +262,7 @@ public class NetworkData {
     }
 
     public StatsSnapshot getStatsSnapshot() {
-        return this.networkEPC.getStatsSnapshot();
+        return this.networkDataEPC.getStatsSnapshot();
     }
 
     // Peer lists
@@ -436,9 +454,6 @@ public class NetworkData {
         // A new PeerList is created as a snapshot every time this is called
         return new PeerList(this.handshakedPeers);
     }
-    //public List<Peer> getImmutableHandshakedPeers() {
-    //    return this.immutableHandshakedPeers;
-    //}
 
     public void addHandshakedPeer(Peer peer) {
         this.handshakedPeers.add(peer); // thread safe thanks to synchronized list
@@ -467,9 +482,6 @@ public class NetworkData {
         // A new PeerList is created as a snapshot every time this is called
         return new PeerList(this.outboundHandshakedPeers);
     }
-//    public List<Peer> getImmutableOutboundHandshakedPeers() {
-//        return this.immutableOutboundHandshakedPeers;
-//    }
 
     public void addOutboundHandshakedPeer(Peer peer) {
         if (!peer.isOutbound()) {
@@ -1034,8 +1046,11 @@ public class NetworkData {
         if (maxThreadsForMessageType != null) {
             Integer threadCount = threadsPerMessageType.get(message.getType());
             if (threadCount != null && threadCount >= maxThreadsForMessageType) {
-                LOGGER.warn("WOULD HAVE Discarding {} message as there are already {} active threads", message.getType().name(), threadCount);
+                LOGGER.info("WOULD HAVE Discarding {} message as there are already {} active threads", message.getType().name(), threadCount);
                 //return;  //@ToDo : Hack around to bypass thread counting
+            }
+            else {
+                LOGGER.info("Processing a thread for {} message, thread count is: {}", message.getType().name(), threadCount);
             }
         }
 
@@ -1044,6 +1059,9 @@ public class NetworkData {
             Integer threadCount = threadsPerMessageType.get(message.getType());
             if (threadCount != null && threadCount > threadCountPerMessageTypeWarningThreshold) {
                 LOGGER.info("Warning: high thread count for {} message type: {}", message.getType().name(), threadCount);
+            }
+            else {
+                LOGGER.info("Thread count is good: {} message {} threads",message.getType().name(), threadCount);
             }
         }
 
@@ -1082,13 +1100,13 @@ public class NetworkData {
             case ARBITRARY_DATA_FILE:
                 LOGGER.info("Processing ArbitraryDataFile Message");
                 ArbitraryDataFileMessage adfm = (ArbitraryDataFileMessage) message;
-                int msgId = adfm.getId();
+//                int msgId = adfm.getId();
                 ArbitraryDataFile adf = adfm.getArbitraryDataFile();
 
                 // Peer has the replyQueue
-                if (peer.isExpectingMessage(msgId)) { // If we knew this was coming in
-                    LOGGER.info("We were expecting: {}", msgId);
-                }
+//                if (peer.isExpectingMessage(msgId)) { // If we knew this was coming in
+//                    LOGGER.info("We were expecting: {}", msgId);
+//                }
 
                 // @ToDo: See if we can move this up into the if above
                 ArbitraryDataFileManager.getInstance().receivedArbitraryDataFile(peer, adf);
@@ -1215,7 +1233,6 @@ public class NetworkData {
 
         // FUTURE: we may want to disconnect from this peer if we've finished requesting data from it
 
-
         // Only the outbound side needs to send anything (after we've received handshake-completing response).
         // (If inbound sent anything here, it's possible it could be processed out-of-order with handshake message).
 
@@ -1236,7 +1253,7 @@ public class NetworkData {
 //            }
 
             // Send our peers list
-            // We dont need to exchange Peer Lists in NetworkData
+            // We don't need to exchange Peer Lists in NetworkData
 //            Message peersMessage = this.buildPeersMessage(peer);
 //            if (!peer.sendMessage(peersMessage)) {
 //                peer.disconnect("failed to send peers list");
@@ -1301,58 +1318,6 @@ public class NetworkData {
 //        // New format PEERS_V2 message that supports hostnames, IPv6 and ports
 //        return new PeersV2Message(peerAddresses);
 //    }
-
-
-    // This is for Main only
-//    public Message buildHeightOrChainTipInfo(Peer peer) {
-//        if (peer.getPeersVersion() >= BlockSummariesV2Message.MINIMUM_PEER_VERSION) {
-//            int latestHeight = Controller.getInstance().getChainHeight();
-//
-//            try (final Repository repository = RepositoryManager.getRepository()) {
-//                List<BlockSummaryData> latestBlockSummaries = repository.getBlockRepository().getBlockSummaries(latestHeight - BROADCAST_CHAIN_TIP_DEPTH, latestHeight);
-//                return new BlockSummariesV2Message(latestBlockSummaries);
-//            } catch (DataException e) {
-//                return null;
-//            }
-//        } else {
-//            // For older peers
-//            BlockData latestBlockData = Controller.getInstance().getChainTip();
-//            return new HeightV2Message(latestBlockData.getHeight(), latestBlockData.getSignature(),
-//                    latestBlockData.getTimestamp(), latestBlockData.getMinterPublicKey());
-//        }
-//    }
-
-    // This is for main Network only
-//    public void broadcastOurChain() {
-//        BlockData latestBlockData = Controller.getInstance().getChainTip();
-//        int latestHeight = latestBlockData.getHeight();
-//
-//        try (final Repository repository = RepositoryManager.getRepository()) {
-//            List<BlockSummaryData> latestBlockSummaries = repository.getBlockRepository().getBlockSummaries(latestHeight - BROADCAST_CHAIN_TIP_DEPTH, latestHeight);
-//            Message latestBlockSummariesMessage = new BlockSummariesV2Message(latestBlockSummaries);
-//
-//            // For older peers
-//            Message heightMessage = new HeightV2Message(latestBlockData.getHeight(), latestBlockData.getSignature(),
-//                    latestBlockData.getTimestamp(), latestBlockData.getMinterPublicKey());
-//
-//            NetworkData.getInstance().broadcast(broadcastPeer -> broadcastPeer.getPeersVersion() >= BlockSummariesV2Message.MINIMUM_PEER_VERSION
-//                    ? latestBlockSummariesMessage
-//                    : heightMessage
-//            );
-//        } catch (DataException e) {
-//            LOGGER.warn("Couldn't broadcast our chain tip info", e);
-//        }
-//    }
-
-//    public Message buildNewTransactionMessage(Peer peer, TransactionData transactionData) {
-//        // In V2 we send out transaction signature only and peers can decide whether to request the full transaction
-//        return new TransactionSignaturesMessage(Collections.singletonList(transactionData.getSignature()));
-//    }
-//
-//    public Message buildGetUnconfirmedTransactionsMessage(Peer peer) {
-//        return new GetUnconfirmedTransactionsMessage();
-//    }
-
 
     // External IP / peerAddress tracking
 
@@ -1512,10 +1477,7 @@ public class NetworkData {
 
         // We need the ip address only
         String remoteHost = p.getPeerData().getAddress().getHost();
-        int remoteHostQDNPort = 12394; // 12394
-        // ToDo: Maybe need to check this for old peers
-        //if(p.getPeersVersion() >= 0x050005000000L)
-        remoteHostQDNPort = (int) p.getPeerCapability("QDN");
+        int remoteHostQDNPort = (int) p.getPeerCapability("QDN");
 
         // if All Known Peers  already has this host. return;
         boolean alreadyKnown = allKnownPeers.stream()
@@ -1601,7 +1563,6 @@ public class NetworkData {
     }
 
     // Shutdown
-
     public void shutdown() {
         this.isShuttingDown = true;
 
@@ -1616,7 +1577,7 @@ public class NetworkData {
 
         // Stop processing threads
         try {
-            if (!this.networkEPC.shutdown(5000)) {
+            if (!this.networkDataEPC.shutdown(5000)) {
                 LOGGER.warn("Network threads failed to terminate");
             }
         } catch (InterruptedException e) {
@@ -1628,5 +1589,4 @@ public class NetworkData {
             peer.shutdown();
         }
     }
-
 }
