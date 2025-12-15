@@ -35,9 +35,9 @@ import org.qortal.controller.arbitrary.ArbitraryDataRenderManager;
 import org.qortal.controller.arbitrary.ArbitraryDataStorageManager;
 import org.qortal.controller.arbitrary.ArbitraryMetadataManager;
 import org.qortal.data.account.AccountData;
+import org.qortal.data.arbitrary.AdvancedStringMatcher;
 import org.qortal.data.arbitrary.ArbitraryCategoryInfo;
 import org.qortal.data.arbitrary.ArbitraryDataIndexDetail;
-import org.qortal.data.arbitrary.ArbitraryDataIndexScoreKey;
 import org.qortal.data.arbitrary.ArbitraryDataIndexScorecard;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
@@ -1681,7 +1681,7 @@ public String finalizeUpload(
 	@GET
 	@Path("/indices")
 	@Operation(
-			summary = "Find matching arbitrary resource indices",
+			summary = "Find exact and similar arbitrary resource indices",
 			description = "",
 			responses = {
 					@ApiResponse(
@@ -1698,40 +1698,28 @@ public String finalizeUpload(
 	)
 	public List<ArbitraryDataIndexScorecard> searchIndices(@QueryParam("terms") String[] terms) {
 
+		List<String> indexedTerms
+			= IndexCache.getInstance()
+				.getIndicesByTerm().entrySet().stream()
+				.map( Map.Entry::getKey )
+				.collect(Collectors.toList());
+
+		List<AdvancedStringMatcher.MatchResult> matchResults = ArbitraryIndexUtils.getMatchedTerms(terms, indexedTerms);
+
 		List<ArbitraryDataIndexDetail> indices = new ArrayList<>();
 
-		// get index details for each term
-		for( String term : terms ) {
-			List<ArbitraryDataIndexDetail> details = IndexCache.getInstance().getIndicesByTerm().get(term);
+		// get index details for each matched term
+		for( AdvancedStringMatcher.MatchResult matchResult : matchResults ) {
+
+			List<ArbitraryDataIndexDetail> details = IndexCache.getInstance().getIndicesByTerm().get(matchResult.getMatchedString());
 
 			if( details != null ) {
-				indices.addAll(details);
+
+				ArbitraryIndexUtils.reduceRanks(indices, matchResult.getSimilarity(), details);
 			}
 		}
 
-		// sum up the scores for each index with identical attributes
-		Map<ArbitraryDataIndexScoreKey, Double> scoreForKey
-			= indices.stream()
-				.collect(
-					Collectors.groupingBy(
-						index -> new ArbitraryDataIndexScoreKey(index.name, index.category, index.link),
-						Collectors.summingDouble(detail -> 1.0 / detail.rank)
-					)
-				);
-
-		// create scorecards for each index group and put them in descending order by score
-		List<ArbitraryDataIndexScorecard> scorecards
-			= scoreForKey.entrySet().stream().map(
-				entry
-				->
-				new ArbitraryDataIndexScorecard(
-					entry.getValue(),
-					entry.getKey().name,
-					entry.getKey().category,
-					entry.getKey().link)
-				)
-				.sorted(Comparator.comparingDouble(ArbitraryDataIndexScorecard::getScore).reversed())
-				.collect(Collectors.toList());
+		List<ArbitraryDataIndexScorecard> scorecards = ArbitraryIndexUtils.getArbitraryDataIndexScorecards(indices);
 
 		return scorecards;
 	}

@@ -14,10 +14,14 @@ import org.qortal.arbitrary.exception.MissingDataException;
 import org.qortal.arbitrary.misc.Service;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryTransactionDataHashWrapper;
+import org.qortal.data.arbitrary.AdvancedStringMatcher;
 import org.qortal.data.arbitrary.ArbitraryDataIndex;
 import org.qortal.data.arbitrary.ArbitraryDataIndexDetail;
+import org.qortal.data.arbitrary.ArbitraryDataIndexScoreKey;
+import org.qortal.data.arbitrary.ArbitraryDataIndexScorecard;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.IndexCache;
+import org.qortal.data.arbitrary.IssuerIndexKey;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -26,8 +30,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.stream.Collectors;
@@ -280,6 +286,124 @@ public class ArbitraryIndexUtils {
             return data;
         } catch (Exception e) {
             throw new IOException(String.format("Unable to load %s %s: %s", Service.JSON, name, e.getMessage()));
+        }
+    }
+
+    /**
+     * Get Matched Terms
+     *
+     * @param terms the terms of interest
+     * @param indexedTerms the terms indexed
+     *
+     * @return the terms of interest that match the terms indexed
+     */
+    public static List<AdvancedStringMatcher.MatchResult> getMatchedTerms(String[] terms, List<String> indexedTerms) {
+        // Create matcher with morphological matching enabled
+        AdvancedStringMatcher.MatcherConfig config = new AdvancedStringMatcher.MatcherConfig();
+        config.setMisspellingThreshold(0.3);
+        config.setPartialMatchThreshold(0.6);
+        config.setPartialPhraseThreshold(0.7);
+        config.setSynonymThreshold(0.3);
+        config.setMorphologicalThreshold(0.6);
+        config.setCaseSensitive(false);
+        config.setEnableMorphological(true);
+        config.setStopWordWeight(0.2);
+        config.setMinWordsForPartialMatch(2);
+
+        AdvancedStringMatcher matcher = new AdvancedStringMatcher(indexedTerms, config);
+
+        List<AdvancedStringMatcher.MatchResult> matchedTerms = new ArrayList<>();
+
+        // for each term of interest, add matches
+        for( String term : terms) {
+
+            matchedTerms.addAll(matcher.findMatches(term));
+        }
+
+        // for each matched string, only retain the strongest match
+        return matchedTerms.stream()
+                .collect(Collectors.groupingBy(
+                        index -> index.getMatchedString(),
+                        Collectors.maxBy(Comparator.comparingDouble(index -> index.getSimilarity()))
+                ))
+                .values()
+                .stream()
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get Arbitrary Data Index Scorecards
+     *
+     * @param indices the indices to score
+     *
+     * @return the scorecards
+     */
+    public static List<ArbitraryDataIndexScorecard> getArbitraryDataIndexScorecards(List<ArbitraryDataIndexDetail> indices) {
+        // sum up the scores for each index with identical attributes,
+        // for any index with identical attributes only one per issuer
+        Map<ArbitraryDataIndexScoreKey, Double> scoreForKey
+            = indices.stream()
+                .collect(Collectors.groupingBy(
+                        index -> new IssuerIndexKey(index),
+                        Collectors.minBy(Comparator.comparingInt(index -> index.rank))
+                ))
+                .values()
+                .stream()
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                    .collect(
+                        Collectors.groupingBy(
+                                index -> new ArbitraryDataIndexScoreKey(index.name, index.category, index.link),
+                                Collectors.summingDouble(detail -> 1.0 / detail.rank)
+                        )
+                );
+
+        // create scorecards for each index group and put them in descending order by score
+        List<ArbitraryDataIndexScorecard> scorecards
+            = scoreForKey.entrySet().stream().map(
+                    entry
+                            ->
+                            new ArbitraryDataIndexScorecard(
+                                    entry.getValue(),
+                                    entry.getKey().name,
+                                    entry.getKey().category,
+                                    entry.getKey().link)
+            )
+            .sorted(Comparator.comparingDouble(ArbitraryDataIndexScorecard::getScore).reversed())
+            .collect(Collectors.toList());
+
+        return scorecards;
+    }
+
+    /**
+     * Reduce Ranks
+     *
+     * For indices that are not exact matches, reduce their ranks for post-processing.
+     *
+     * @param indices the indices collected
+     * @param similarity the similarity to apply to all index details
+     * @param details the details of each index for the matched string of the match result
+     */
+    public static void reduceRanks(List<ArbitraryDataIndexDetail> indices, double similarity, List<ArbitraryDataIndexDetail> details) {
+
+        // if the similarity is less than 1, reduce the rank of each index to at least 2
+        if( similarity < 1.0 ) {
+            for( ArbitraryDataIndexDetail detail : details) {
+                double rankReduced = detail.rank / similarity;
+                indices.add(
+                    new ArbitraryDataIndexDetail(
+                        detail.issuer,
+                        Math.max(2, (int) rankReduced),
+                        new ArbitraryDataIndex(detail.term, detail.name, detail.category, detail.link),
+                        detail.indexIdentifer)
+                );
+            }
+        }
+        // if the similarity is 1 or higher, then do not reduce the rank
+        else {
+            indices.addAll(details);
         }
     }
 }
