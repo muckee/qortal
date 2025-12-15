@@ -863,9 +863,12 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 	 * @throws ForeignBlockchainException
 	 */
 	public Set<String> getWalletAddressesWithExecutor(String key58, ExecutorService executor) throws ForeignBlockchainException {
-		Wallet wallet = walletFromDeterministicKey58(key58);
+		Set<DeterministicKey> walletKeys = getWalletKeysWithExecutor(key58, executor);
 
-		return getAddressesWithExecutor( wallet, executor);
+		return
+			walletKeys.stream()
+				.map( key -> Address.fromKey(this.params, key, ScriptType.P2PKH).toString() )
+				.collect(Collectors.toSet());
 	}
 
 	/**
