@@ -65,6 +65,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -396,6 +397,8 @@ public class Controller extends Thread {
 		}
 
 		Controller.newInstance(args);
+
+		NETWORK_BLOCK_SUMMARIES_V_2_MESSAGE_SCHEDULER.scheduleAtFixedRate(() -> processNetworkBlockSummariesV2Messages(), 60, 1, TimeUnit.SECONDS);
 
 
 		cleanChunkUploadTempDir(); // cleanup leftover chunks from streaming to disk
@@ -1846,39 +1849,80 @@ public class Controller extends Thread {
 		Synchronizer.getInstance().requestSync();
 	}
 
+	// List to collect messages
+	private final static List<PeerMessage> SIGNATURE_MESSAGE_LIST = new ArrayList<>();
+	// Lock to synchronize access to the list
+	private final static Object SIGNATURE_MESSAGE_LOCK = new Object();
+
+	// Scheduled executor service to process messages every second
+	private static final ScheduledExecutorService NETWORK_BLOCK_SUMMARIES_V_2_MESSAGE_SCHEDULER = Executors.newScheduledThreadPool(1);
+
 	private void onNetworkBlockSummariesV2Message(Peer peer, Message message) {
-		BlockSummariesV2Message blockSummariesV2Message = (BlockSummariesV2Message) message;
+		synchronized (SIGNATURE_MESSAGE_LOCK) {
+			SIGNATURE_MESSAGE_LIST.add(new PeerMessage(peer, message));
+		}
+	}
 
-		if (!Settings.getInstance().isLite()) {
-			// If peer is inbound and we've not updated their height
-			// then this is probably their initial BLOCK_SUMMARIES_V2 message
-			// so they need a corresponding BLOCK_SUMMARIES_V2 message from us
-			if (!peer.isOutbound() && peer.getChainTipData() == null) {
-				Message responseMessage = Network.getInstance().buildHeightOrChainTipInfo(peer);
+	/**
+	 * Process Network Block Summaries
+	 *
+	 * This was extracted for scheduling purposes.
+	 */
+	private static void processNetworkBlockSummariesV2Messages() {
 
-				if (responseMessage == null || !peer.sendMessage(responseMessage)) {
-					peer.disconnect("failed to send our chain tip info");
+		try {
+			List<PeerMessage> messagesToProcess;
+			synchronized (SIGNATURE_MESSAGE_LOCK) {
+				messagesToProcess = new ArrayList<>(SIGNATURE_MESSAGE_LIST);
+				SIGNATURE_MESSAGE_LIST.clear();
+			}
+
+			Map<Long, Message> messageForVersion = new HashMap<>(2);
+
+			for( PeerMessage peerMessage : messagesToProcess ) {
+				Message message = peerMessage.getMessage();
+				Peer peer = peerMessage.getPeer();
+
+				BlockSummariesV2Message blockSummariesV2Message = (BlockSummariesV2Message) message;
+
+				if (!Settings.getInstance().isLite()) {
+					// If peer is inbound and we've not updated their height
+					// then this is probably their initial BLOCK_SUMMARIES_V2 message
+					// so they need a corresponding BLOCK_SUMMARIES_V2 message from us
+					if (!peer.isOutbound() && peer.getChainTipData() == null) {
+						Message responseMessage
+							= messageForVersion.computeIfAbsent(
+								peer.getPeersVersion(),
+								version -> Network.getInstance().buildHeightOrChainTipInfoForVersion(version)
+						);
+
+						if (responseMessage == null || !peer.sendMessage(responseMessage)) {
+							peer.disconnect("failed to send our chain tip info");
+							return;
+						}
+					}
+				}
+
+				if (message.hasId()) {
+					/*
+					 * Experimental proof-of-concept: discard messages with ID
+					 * These are 'late' reply messages received after timeout has expired,
+					 * having been passed upwards from Peer to Network to Controller.
+					 * Hence, these are NOT simple "here's my chain tip" broadcasts from other peers.
+					 */
+					LOGGER.debug("Discarding late {} message with ID {} from {}", message.getType().name(), message.getId(), peer);
 					return;
 				}
+
+				// Update peer chain tip data
+				peer.setChainTipSummaries(blockSummariesV2Message.getBlockSummaries());
+
+				// Potentially synchronize
+				Synchronizer.getInstance().requestSync();
 			}
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
 		}
-
-		if (message.hasId()) {
-			/*
-			 * Experimental proof-of-concept: discard messages with ID
-			 * These are 'late' reply messages received after timeout has expired,
-			 * having been passed upwards from Peer to Network to Controller.
-			 * Hence, these are NOT simple "here's my chain tip" broadcasts from other peers.
-			 */
-			LOGGER.debug("Discarding late {} message with ID {} from {}", message.getType().name(), message.getId(), peer);
-			return;
-		}
-
-		// Update peer chain tip data
-		peer.setChainTipSummaries(blockSummariesV2Message.getBlockSummaries());
-
-		// Potentially synchronize
-		Synchronizer.getInstance().requestSync();
 	}
 
 	private void onNetworkGetAccountMessage(Peer peer, Message message) {
