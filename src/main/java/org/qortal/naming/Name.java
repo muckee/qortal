@@ -108,7 +108,17 @@ public class Name {
 
 			// if updating the primary name, then set primary name to new name
 			if( account.getPrimaryName().isEmpty() || account.getPrimaryName().get().equals(updateNameTransactionData.getName())) {
-				account.setPrimaryName(updateNameTransactionData.getNewName());
+
+				String newName = updateNameTransactionData.getNewName();
+
+				// if there is a new name, then set primary to the new name
+				if( newName != null && !"".equals(newName)) {
+					account.setPrimaryName(newName);
+				}
+				// if there is not a new name and there is an existing primary name, then remove the existing primary name
+				else if( account.getPrimaryName().isPresent() ){
+					account.removePrimaryName();
+				}
 			}
 		}
 	}
