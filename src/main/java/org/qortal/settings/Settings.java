@@ -360,7 +360,7 @@ public class Settings {
 	private boolean directDataRetrievalEnabled = true;
 
 	/** Expiry time (ms) for (unencrypted) built/cached data */
-	private Long builtDataExpiryInterval = 7 * 24 * 60 * 60 * 1000L; // 30 days
+	private Long builtDataExpiryInterval = 7 * 24 * 60 * 60 * 1000L; // 7 days
 
 	/** Whether to validate every layer when building arbitrary data, or just the final layer */
 	private boolean validateAllDataLayers = false;
