@@ -1121,23 +1121,21 @@ public String finalizeUploadNoIdentifier(
     } finally {
         if (tempDir != null) {
             try {
-                Files.walk(tempDir)
-                    .sorted(Comparator.reverseOrder())
-                    .map(java.nio.file.Path::toFile)
-                    .forEach(File::delete);
+                ArbitraryTransactionUtils.deleteDirectory(tempDir.toFile());
             } catch (IOException e) {
                 LOGGER.warn("Failed to delete temp directory: {}", tempDir, e);
-            }
+            } catch (Exception e) {
+				LOGGER.error(e.getMessage(), e);
+			}
         }
 
         try {
-            Files.walk(chunkDir)
-                .sorted(Comparator.reverseOrder())
-                .map(java.nio.file.Path::toFile)
-                .forEach(File::delete);
+            ArbitraryTransactionUtils.deleteDirectory(chunkDir.toFile());
         } catch (IOException e) {
             LOGGER.warn("Failed to delete chunk directory: {}", chunkDir, e);
-        }
+        } catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+		}
     }
 }
 
@@ -1340,23 +1338,21 @@ public String finalizeUpload(
     } finally {
         if (tempDir != null) {
             try {
-                Files.walk(tempDir)
-                    .sorted(Comparator.reverseOrder())
-                    .map(java.nio.file.Path::toFile)
-                    .forEach(File::delete);
+               ArbitraryTransactionUtils.deleteDirectory(tempDir.toFile());
             } catch (IOException e) {
                 LOGGER.warn("Failed to delete temp directory: {}", tempDir, e);
-            }
+            } catch (Exception e) {
+				LOGGER.error(e.getMessage(), e);
+			}
         }
 
         try {
-            Files.walk(chunkDir)
-                .sorted(Comparator.reverseOrder())
-                .map(java.nio.file.Path::toFile)
-                .forEach(File::delete);
+            ArbitraryTransactionUtils.deleteDirectory(chunkDir.toFile());
         } catch (IOException e) {
             LOGGER.warn("Failed to delete chunk directory: {}", chunkDir, e);
-        }
+        } catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
+		}
     }
 }
 
