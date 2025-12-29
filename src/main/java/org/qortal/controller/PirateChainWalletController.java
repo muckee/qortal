@@ -56,6 +56,8 @@ public class PirateChainWalletController extends Thread {
     }
 
     public static PirateChainWalletController getInstance() {
+        if (!Settings.getInstance().isWalletEnabled("ARRR"))
+            return null;
         if (instance == null)
             instance = new PirateChainWalletController();
 
@@ -132,10 +134,14 @@ public class PirateChainWalletController extends Thread {
 
     public void shutdown() {
         // Save the wallet
-        this.saveCurrentWallet();
+        try {
+            this.saveCurrentWallet();
 
-        this.running = false;
-        this.interrupt();
+            this.running = false;
+            this.interrupt();
+        } catch (Exception e) {
+
+        }
     }
 
 

@@ -600,7 +600,9 @@ public class Controller extends Thread {
 		}
 
 		LOGGER.info("Starting wallets");
-		PirateChainWalletController.getInstance().start();
+        if( Settings.getInstance().isWalletEnabled("ARRR")) {
+            PirateChainWalletController.getInstance().start();
+        }
 
 		LOGGER.info(String.format("Starting API on port %d", Settings.getInstance().getApiPort()));
 		try {

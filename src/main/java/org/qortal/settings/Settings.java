@@ -244,6 +244,7 @@ public class Settings {
 	private int maxBlocksPerResponse = 200;
 
 	// Which blockchains this node is running
+    private Map<String, Boolean> wallets = new HashMap<>();
 	private String blockchainConfig = null; // use default from resources
 	private BitcoinNet bitcoinNet = BitcoinNet.MAIN;
 	private LitecoinNet litecoinNet = LitecoinNet.MAIN;
@@ -1032,6 +1033,15 @@ public class Settings {
 	public int getMaxDataPeerConnectionTime() {
 		return this.maxDataPeerConnectionTime;
 	}
+
+    public boolean isWalletEnabled(String coinKey) {
+
+        if ( this.wallets == null || !this.wallets.containsKey(coinKey)) {
+            return true;
+        }
+
+        return this.wallets.get(coinKey);
+    }
 
 	public String getBlockchainConfig() {
 		return this.blockchainConfig;
