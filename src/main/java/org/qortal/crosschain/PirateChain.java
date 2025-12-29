@@ -53,11 +53,8 @@ public class PirateChain extends Bitcoiny {
 
 			@Override
 			public Collection<Server> getServers() {
-				return Arrays.asList(
-					// Servers chosen on NO BASIS WHATSOEVER from various sources!
-//					new Server("lightd.pirate.black", Server.ConnectionType.SSL, 443),
-					new Server("arrr.qortal.link", Server.ConnectionType.SSL, 443)
-				);
+				//TODO Pirate Chain is in a state flux right now due to updates
+				return Arrays.asList();
 			}
 
 			@Override
