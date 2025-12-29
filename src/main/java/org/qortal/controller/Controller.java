@@ -1173,6 +1173,9 @@ public class Controller extends Thread {
 					// We were interrupted while waiting for thread to join
 				}
 
+				LOGGER.info("Shutting down TradeBot");
+				TradeBot.getInstance().shutdown();
+
 				// Make sure we're the only thread modifying the blockchain when shutting down the repository
 				ReentrantLock blockchainLock = Controller.getInstance().getBlockchainLock();
 				try {
