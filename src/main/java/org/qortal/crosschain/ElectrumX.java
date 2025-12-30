@@ -889,7 +889,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	}
 
 	private Optional<ChainableServerConnection> makeConnection(ChainableServer server, String requestedBy) {
-		LOGGER.info(() -> String.format("Connecting to %s %s", server, this.blockchain.currencyCode));
+		LOGGER.trace("Connecting to {} {}", server, this.blockchain.currencyCode);
 
 		try {
 			SocketAddress endpoint = new InetSocketAddress(server.getHostName(), server.getPort());
@@ -920,7 +920,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			if (this.expectedGenesisHash != null && !((String) featuresJson.get("genesis_hash")).equals(this.expectedGenesisHash))
 				return Optional.of( recorder.recordConnection(server, requestedBy, true, false, EXPECTED_GENESIS_ERROR) );
 
-			LOGGER.info(() -> String.format("Connected to %s %s", server, this.blockchain.currencyCode));
+			LOGGER.trace("Connected to {} {}", server, this.blockchain.currencyCode);
 			this.connections.add(electrumServer);
 			this.availableConnections.add(electrumServer);
 			return Optional.of( this.recorder.recordConnection( server, requestedBy, true, true, EMPTY) );
