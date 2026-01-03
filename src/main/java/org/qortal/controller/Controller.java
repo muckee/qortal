@@ -396,10 +396,11 @@ public class Controller extends Thread {
 			return; // Not System.exit() so that GUI can display error
 		}
 
-		Controller.newInstance(args);
+		final Controller controller = Controller.newInstance(args);
 
 		NETWORK_BLOCK_SUMMARIES_V_2_MESSAGE_SCHEDULER.scheduleAtFixedRate(() -> processNetworkBlockSummariesV2Messages(), 60, 1, TimeUnit.SECONDS);
 
+		GET_BLOCK_MESSAGE_SCHEDULER.scheduleAtFixedRate( () -> controller.processNetworkGetBlockMessages(), 60, 1, TimeUnit.SECONDS);
 
 		cleanChunkUploadTempDir(); // cleanup leftover chunks from streaming to disk
 
@@ -1562,41 +1563,149 @@ public class Controller extends Thread {
 		}
 	}
 
+	// List to collect messages
+	private final static List<PeerMessage> GET_BLOCK_MESSAGE_LIST = new ArrayList<>();
+
+	// Lock to synchronize access to the list
+	private final static Object GET_BLOCK_MESSAGE_LOCK = new Object();
+
+	// Scheduled executor service to process messages every second
+	private static final ScheduledExecutorService GET_BLOCK_MESSAGE_SCHEDULER = Executors.newScheduledThreadPool(1);
+
 	private void onNetworkGetBlockMessage(Peer peer, Message message) {
-		GetBlockMessage getBlockMessage = (GetBlockMessage) message;
-		byte[] signature = getBlockMessage.getSignature();
-		this.stats.getBlockMessageStats.requests.incrementAndGet();
+		synchronized (GET_BLOCK_MESSAGE_LOCK) {
+			GET_BLOCK_MESSAGE_LIST.add(new PeerMessage(peer, message));
+		}
+	}
 
-		ByteArray signatureAsByteArray = ByteArray.wrap(signature);
+	/**
+	 * Process Network Block Messages
+	 *
+	 * Process message collected in the GET_BLOCK_MESSAGE_LIST
+	 */
+	private void processNetworkGetBlockMessages() {
 
-		CachedBlockMessage cachedBlockMessage = this.blockMessageCache.get(signatureAsByteArray);
-		int blockCacheSize = Settings.getInstance().getBlockCacheSize();
-
-		// Check cached latest block message
-		if (cachedBlockMessage != null) {
-			this.stats.getBlockMessageStats.cacheHits.incrementAndGet();
-
-			// We need to duplicate it to prevent multiple threads setting ID on the same message
-			CachedBlockMessage clonedBlockMessage = Message.cloneWithNewId(cachedBlockMessage, message.getId());
-
-			if (!peer.sendMessage(clonedBlockMessage))
-				peer.disconnect("failed to send block");
-
-			return;
+		List<PeerMessage> messagesToProcess;
+		synchronized (GET_BLOCK_MESSAGE_LOCK) {
+			messagesToProcess = new ArrayList<>(GET_BLOCK_MESSAGE_LIST);
+			GET_BLOCK_MESSAGE_LIST.clear();
 		}
 
-		try (final Repository repository = RepositoryManager.getRepository()) {
-			BlockData blockData = repository.getBlockRepository().fromSignature(signature);
+		if( messagesToProcess.isEmpty() ) return;
 
-			if (blockData != null) {
+		Map<String, PeerMessage> toProcessBySignature58 = new HashMap<>();
+
+		for( PeerMessage peerMessage : messagesToProcess ) {
+			Message message = peerMessage.getMessage();
+			Peer peer = peerMessage.getPeer();
+
+			GetBlockMessage getBlockMessage = (GetBlockMessage) message;
+			byte[] signature = getBlockMessage.getSignature();
+			this.stats.getBlockMessageStats.requests.incrementAndGet();
+
+			ByteArray signatureAsByteArray = ByteArray.wrap(signature);
+
+			CachedBlockMessage cachedBlockMessage = this.blockMessageCache.get(signatureAsByteArray);
+
+			// Check cached latest block message
+			if (cachedBlockMessage != null) {
+				this.stats.getBlockMessageStats.cacheHits.incrementAndGet();
+
+				// We need to duplicate it to prevent multiple threads setting ID on the same message
+				CachedBlockMessage clonedBlockMessage = Message.cloneWithNewId(cachedBlockMessage, message.getId());
+
+				if (!peer.sendMessage(clonedBlockMessage))
+					peer.disconnect("failed to send block");
+			}
+			// if not cached, then process later
+			else {
+				toProcessBySignature58.put(Base58.encode(signature), peerMessage);
+			}
+
+		}
+
+		if(toProcessBySignature58.isEmpty()) return;
+
+		List<byte[]> signatures
+			= toProcessBySignature58.values().stream()
+				.map( toProcess -> toProcess.getMessage() )
+				.map( message -> (GetBlockMessage) message)
+				.map(GetBlockMessage::getSignature)
+				.collect(Collectors.toList());
+
+		List<String> signature58Processed = new ArrayList<>();
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+
+			List<BlockData> blockDataList = repository.getBlockRepository().fromSignatures(signatures);
+
+			for( BlockData blockData : blockDataList) {
+
 				if (PruneManager.getInstance().isBlockPruned(blockData.getHeight())) {
+
 					// If this is a pruned block, we likely only have partial data, so best not to sent it
-					blockData = null;
+					continue;
+				}
+
+				String signature58 = Base58.encode(blockData.getSignature());
+
+				PeerMessage peerMessage = toProcessBySignature58.get(signature58);
+
+				Message message = peerMessage.getMessage();
+				Peer peer = peerMessage.getPeer();
+
+				signature58Processed.add(signature58);
+
+				Block block = new Block(repository, blockData);
+
+				// V2 support
+				if (peer.getPeersVersion() >= BlockV2Message.MIN_PEER_VERSION) {
+					Message blockMessage = new BlockV2Message(block);
+					blockMessage.setId(message.getId());
+
+					if (!peer.sendMessage(blockMessage)) {
+						peer.disconnect("failed to send block");
+						// Don't fall-through to caching because failure to send might be from failure to build message
+						continue;
+					}
+
+					continue;
+				}
+
+				CachedBlockMessage blockMessage = new CachedBlockMessage(block);
+				blockMessage.setId(message.getId());
+
+				if (!peer.sendMessage(blockMessage)) {
+					peer.disconnect("failed to send block");
+					// Don't fall-through to caching because failure to send might be from failure to build message
+					continue;
+				}
+
+				int blockCacheSize = Settings.getInstance().getBlockCacheSize();
+
+				// If request is for a recent block, cache it
+				if (getChainHeight() - blockData.getHeight() <= blockCacheSize) {
+					this.stats.getBlockMessageStats.cacheFills.incrementAndGet();
+
+					this.blockMessageCache.put(ByteArray.wrap(blockData.getSignature()), blockMessage);
 				}
 			}
 
-			// If we have no block data, we should check the archive in case it's there
-			if (blockData == null) {
+			List<String> remainingSignature58ToProcess
+				= toProcessBySignature58.keySet().stream()
+					.filter(signature58 -> !signature58Processed.contains(signature58))
+					.collect(Collectors.toList());
+
+			for( String signature58 : remainingSignature58ToProcess) {
+
+				PeerMessage peerMessage = toProcessBySignature58.get(signature58);
+				Message message = peerMessage.getMessage();
+				Peer peer = peerMessage.getPeer();
+
+				GetBlockMessage getBlockMessage = (GetBlockMessage) message;
+				byte[] signature = getBlockMessage.getSignature();
+
+				// If we have no block data, we should check the archive in case it's there
 				if (Settings.getInstance().isArchiveEnabled()) {
 					Triple<byte[], Integer, Integer> serializedBlock = BlockArchiveReader.getInstance().fetchSerializedBlockBytesForSignature(signature, true, repository);
 					if (serializedBlock != null) {
@@ -1614,7 +1723,7 @@ public class Controller extends Thread {
 								break;
 
 							default:
-								return;
+								continue;
 						}
 						blockMessage.setId(message.getId());
 
@@ -1622,16 +1731,14 @@ public class Controller extends Thread {
 						if (!peer.sendMessage(blockMessage)) {
 							peer.disconnect("failed to send block");
 							// Don't fall-through to caching because failure to send might be from failure to build message
-							return;
+							continue;
 						}
 
 						// Sent successfully from archive, so nothing more to do
-						return;
+						continue;
 					}
 				}
-			}
 
-			if (blockData == null) {
 				// We don't have this block
 				this.stats.getBlockMessageStats.unknownBlocks.getAndIncrement();
 
@@ -1645,42 +1752,9 @@ public class Controller extends Thread {
 				blockUnknownMessage.setId(message.getId());
 				if (!peer.sendMessage(blockUnknownMessage))
 					peer.disconnect("failed to send block-unknown response");
-				return;
 			}
-
-			Block block = new Block(repository, blockData);
-
-			// V2 support
-			if (peer.getPeersVersion() >= BlockV2Message.MIN_PEER_VERSION) {
-				Message blockMessage = new BlockV2Message(block);
-				blockMessage.setId(message.getId());
-				if (!peer.sendMessage(blockMessage)) {
-					peer.disconnect("failed to send block");
-					// Don't fall-through to caching because failure to send might be from failure to build message
-					return;
-				}
-				return;
-			}
-
-			CachedBlockMessage blockMessage = new CachedBlockMessage(block);
-			blockMessage.setId(message.getId());
-
-			if (!peer.sendMessage(blockMessage)) {
-				peer.disconnect("failed to send block");
-				// Don't fall-through to caching because failure to send might be from failure to build message
-				return;
-			}
-
-			// If request is for a recent block, cache it
-			if (getChainHeight() - blockData.getHeight() <= blockCacheSize) {
-				this.stats.getBlockMessageStats.cacheFills.incrementAndGet();
-
-				this.blockMessageCache.put(ByteArray.wrap(blockData.getSignature()), blockMessage);
-			}
-		} catch (DataException e) {
-			LOGGER.error(String.format("Repository issue while sending block %s to peer %s", Base58.encode(signature), peer), e);
-		} catch (TransformationException e) {
-			LOGGER.error(String.format("Serialization issue while sending block %s to peer %s", Base58.encode(signature), peer), e);
+		} catch (Exception e) {
+			LOGGER.error(e.getMessage(), e);
 		}
 	}
 
