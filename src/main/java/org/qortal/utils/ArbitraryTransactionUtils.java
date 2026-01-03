@@ -212,7 +212,7 @@ public class ArbitraryTransactionUtils {
                 .forEach(path -> {
                     try {
                         Files.delete(path);
-                        LOGGER.info("deleted {}", path);
+                        LOGGER.debug("deleted {}", path);
                     } catch (IOException e) {
                         LOGGER.warn("failed to delete {}", path);
                     }
@@ -236,7 +236,7 @@ public class ArbitraryTransactionUtils {
                 .forEach(path -> {
                     try {
                         deleteDirectory(path.toFile());
-                        LOGGER.info("deleted {}", path);
+                        LOGGER.debug("deleted {}", path);
                     } catch (IOException e) {
                         LOGGER.warn("failed to delete {}", path);
                     }
