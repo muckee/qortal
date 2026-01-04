@@ -886,14 +886,14 @@ public class HSQLDBCacheUtils {
             dbCacheTimer.cancel();
             dbCacheTimer.purge();
             dbCacheTimer = null;
-            LOGGER.info("DB Cache Timer shutdown");
+            LOGGER.debug("DB Cache Timer shutdown");
         }
 
         if (balanceRecorderTimer != null) {
             balanceRecorderTimer.cancel();
             balanceRecorderTimer.purge();
             balanceRecorderTimer = null;
-            LOGGER.info("Balance Recorder Timer shutdown");
+            LOGGER.debug("Balance Recorder Timer shutdown");
         }
 
         LOGGER.info("HSQLDBCacheUtils timers shut down complete");
