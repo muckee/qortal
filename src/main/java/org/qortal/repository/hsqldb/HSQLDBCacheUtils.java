@@ -896,6 +896,6 @@ public class HSQLDBCacheUtils {
             LOGGER.debug("Balance Recorder Timer shutdown");
         }
 
-        LOGGER.info("HSQLDBCacheUtils timers shut down complete");
+        LOGGER.info("HSQLDBCacheUtils timers shutdown complete");
     }
 }
