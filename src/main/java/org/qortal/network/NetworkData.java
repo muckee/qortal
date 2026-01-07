@@ -76,6 +76,7 @@ public class NetworkData {
     private final int maxMessageSize;
     private final int minOutboundPeers;
     private final int maxPeers;
+    private final ScheduledExecutorService peerCountExecutor = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("NetworkData-Peer-Pruner"));
 
     private long nextDisconnectionCheck = 0L;
 
@@ -204,6 +205,9 @@ public class NetworkData {
             UPnP.closePortTCP(qdnPort);
         }
 
+        // Schedule the peer count check
+        this.peerCountExecutor.scheduleAtFixedRate(this::periodicallyCheckPeerCount, 10, 5, TimeUnit.MINUTES);
+
         // Start up first networking thread
         networkDataEPC.start();
     }
@@ -214,7 +218,6 @@ public class NetworkData {
         private static final NetworkData INSTANCE = new NetworkData();
     }
 
-    // @ToDo : does this return all MessageTypes?
     public Map<MessageType, Integer> getThreadsPerMessageType() {
         return this.threadsPerMessageType;
     }
@@ -1515,6 +1518,20 @@ public class NetworkData {
         }
     }
 
+    private void periodicallyCheckPeerCount() {
+        LOGGER.debug("Checking peer count...");
+        int currentPeers = this.getImmutableHandshakedPeers().size();
+
+        if (currentPeers > this.maxPeers) {
+            int peersToDisconnectCount = currentPeers - this.maxPeers;
+            LOGGER.info("Handshaked peer count ({}) exceeds max peers ({}). Disconnecting {} oldest peer(s).", currentPeers, this.maxPeers, peersToDisconnectCount);
+            List<Peer> peersToDisconnect = findOldPeers(peersToDisconnectCount);
+            for (Peer peer : peersToDisconnect) {
+                peer.disconnect("Exceeded max peers");
+            }
+        }
+    }
+
     /**
      * Returns the N peers with the lowest getLastQDNUse() values.
      *
@@ -1550,6 +1567,9 @@ public class NetworkData {
     // Shutdown
     public void shutdown() {
         this.isShuttingDown = true;
+
+        // Shutdown peer count checker
+        this.peerCountExecutor.shutdown();
 
         // Close listen socket to prevent more incoming connections
         if (this.serverChannel != null && this.serverChannel.isOpen()) {
