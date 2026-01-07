@@ -942,6 +942,7 @@ public class Peer {
                     break;
             }
 
+            //LOGGER.info("Performing TryTransfer with a timeout of {} ms", timeout);
             return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             // Send failure

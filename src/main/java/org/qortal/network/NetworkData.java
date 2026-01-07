@@ -50,13 +50,13 @@ public class NetworkData {
     private static final long CONNECT_FAILURE_BACKOFF = 5 * 60 * 1000L; // ms
 
     // Maximum time since last successful connection for peer info to be propagated, in milliseconds.
-    private static final long RECENT_CONNECTION_THRESHOLD = 24 * 60 * 60 * 1000L; // ms
+    //private static final long RECENT_CONNECTION_THRESHOLD = 24 * 60 * 60 * 1000L; // ms
 
     // Maximum time since last connection attempt before a peer is potentially considered "old", in milliseconds.
-    private static final long OLD_PEER_ATTEMPTED_PERIOD = 24 * 60 * 60 * 1000L; // ms
+    //private static final long OLD_PEER_ATTEMPTED_PERIOD = 24 * 60 * 60 * 1000L; // ms
 
     //  Maximum time since last successful connection before a peer is potentially considered "old", in milliseconds.
-    private static final long OLD_PEER_CONNECTION_PERIOD = 7 * 24 * 60 * 60 * 1000L; // ms
+    //private static final long OLD_PEER_CONNECTION_PERIOD = 7 * 24 * 60 * 60 * 1000L; // ms
 
     //  Maximum time allowed for handshake to complete, in milliseconds.
     private static final long HANDSHAKE_TIMEOUT = 60 * 1000L; // ms
@@ -151,7 +151,7 @@ public class NetworkData {
         // Grab P2P port from settings
         int listenPort = Settings.getInstance().getQDNListenPort();
 
-        // Grab P2P bind addresses from settings
+        // Grab bind addresses from settings
         List<String> bindAddresses = new ArrayList<>();
         if (Settings.getInstance().getBindAddress() != null) {
             bindAddresses.add(Settings.getInstance().getBindAddress());
@@ -194,16 +194,11 @@ public class NetworkData {
         // Attempt to set up UPnP for QDN. All errors are ignored.
         int qdnPort = Settings.getInstance().getQDNListenPort();
         if (Settings.getInstance().isUPnPEnabled()) {
-            if(UPnP.isUPnPAvailable()) {
-
-                UPnP.openPortTCP(qdnPort);
-                if (UPnP.isMappedTCP(qdnPort))
-                    LOGGER.info("UPnP Mapped for QDN, port: {}", qdnPort);
-                else
-                    LOGGER.warn("Unable to map QDN port: {} with UPnP, port in use?", qdnPort);
-            } else {
-                LOGGER.debug("UPnP was not available - QDN");
-            }
+            UPnP.openPortTCP(qdnPort);
+            if (UPnP.isMappedTCP(qdnPort))
+                LOGGER.info("UPnP Mapped for QDN, port: {}", qdnPort);
+            else
+                LOGGER.warn("Unable to map QDN port: {} with UPnP, port in use?", qdnPort);
         }
         else {
             UPnP.closePortTCP(qdnPort);
@@ -463,6 +458,7 @@ public class NetworkData {
         if (peer.isOutbound()) {
             this.addOutboundHandshakedPeer(peer);
         }
+        this.canAcceptInbound = true;
     }
 
     public void removeHandshakedPeer(Peer peer) {
@@ -1100,10 +1096,10 @@ public class NetworkData {
             case ARBITRARY_DATA_FILE:
                 LOGGER.info("Processing ArbitraryDataFile Message");
                 ArbitraryDataFileMessage adfm = (ArbitraryDataFileMessage) message;
-//                int msgId = adfm.getId();
                 ArbitraryDataFile adf = adfm.getArbitraryDataFile();
 
                 // Peer has the replyQueue
+//                int msgId = adfm.getId();
 //                if (peer.isExpectingMessage(msgId)) { // If we knew this was coming in
 //                    LOGGER.info("We were expecting: {}", msgId);
 //                }
@@ -1237,20 +1233,6 @@ public class NetworkData {
         // (If inbound sent anything here, it's possible it could be processed out-of-order with handshake message).
 
         //if (peer.isOutbound()) {
-//            if (!Settings.getInstance().isLite()) {
-//                // Send our height / chain tip info
-                //Message message = this.buildHeightOrChainTipInfo(peer);
-
-//                if (message == null) {
-//                    peer.disconnect("Couldn't build our chain tip info");
-//                    return;
-//                }
-//
-//                if (!peer.sendMessage(message)) {
-//                    peer.disconnect("failed to send height / chain tip info");
-//                    return;
-//                }
-//            }
 
             // Send our peers list
             // We don't need to exchange Peer Lists in NetworkData
@@ -1319,6 +1301,9 @@ public class NetworkData {
 //        return new PeersV2Message(peerAddresses);
 //    }
 
+    public boolean canAcceptInbound() {
+        return this.canAcceptInbound;
+    }
     // External IP / peerAddress tracking
 
     public void ourPeerAddressUpdated(String peerAddress) {

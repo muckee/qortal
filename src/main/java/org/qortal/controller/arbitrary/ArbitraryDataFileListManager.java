@@ -37,9 +37,6 @@ public class ArbitraryDataFileListManager {
 
     private static ArbitraryDataFileListManager instance;
 
-    // @ToDo: Need to update this prior to release
-    private static String MIN_PEER_VERSION_FOR_FILE_LIST_STATS = "3.2.0";
-
     /**
      * Map of recent incoming requests for ARBITRARY transaction data file lists.
      * <p>
@@ -70,15 +67,18 @@ public class ArbitraryDataFileListManager {
     /** Maximum number of seconds that a file list relay request is able to exist on the network */
     public static long RELAY_REQUEST_MAX_DURATION = 5000L;
     /** Maximum number of hops that a file list relay request is allowed to make */
-    public static int RELAY_REQUEST_MAX_HOPS = 8; // was 4, thi is no longer Data, only metaData
-
+    public static int RELAY_REQUEST_MAX_HOPS = 4; // was 4, this is no longer ArbData, only metaData/Lists
+    public static int SEARCH_DEPTH_MAX_HOPS = 6; // Only used to determine if we should forward or terminate a search for QDN data
     /** Minimum peer version to use relay */
     public static String RELAY_MIN_PEER_VERSION = "3.4.0";
-
+    private final Boolean isDirectConnectable;
+    private final Boolean isRelayAvailable;
 
     private ArbitraryDataFileListManager() {
         getArbitraryDataFileListMessageScheduler.scheduleAtFixedRate(this::processNetworkGetArbitraryDataFileListMessage, 60, 1, TimeUnit.SECONDS);
         arbitraryDataFileListMessageScheduler.scheduleAtFixedRate(this::processNetworkArbitraryDataFileListMessage, 60, 1, TimeUnit.SECONDS);
+        this.isDirectConnectable = NetworkData.getInstance().canAcceptInbound();
+        this.isRelayAvailable = Settings.getInstance().isRelayModeEnabled();
     }
 
     public static ArbitraryDataFileListManager getInstance() {
@@ -439,6 +439,9 @@ public class ArbitraryDataFileListManager {
         }
     }
 
+    /*
+     * Received a ArbitraryDataList Message
+     */
     private void processNetworkArbitraryDataFileListMessage() {
 
         try {
@@ -474,10 +477,11 @@ public class ArbitraryDataFileListManager {
                 // Do we have a pending request for this data?
                 Triple<String, Peer, Long> request = arbitraryDataFileListRequests.get(message.getId());
                 if (request == null || request.getA() == null) {
-                    LOGGER.trace("CONTINUE - Pending Request");
+                    LOGGER.trace("CONTINUE - No Pending Request");
                     continue;
                 }
-                boolean isRelayRequest = (request.getB() != null);
+
+                boolean isRelayRequest = (request.getB() != null); //Peer?
 
                 // Does this message's signature match what we're expecting?
                 byte[] signature = arbitraryDataFileListMessage.getSignature();
@@ -522,6 +526,14 @@ public class ArbitraryDataFileListManager {
 
             for (ArbitraryTransactionData arbitraryTransactionData : arbitraryTransactionDataList) {
 
+                if( arbitraryTransactionData == null )
+                    continue;
+
+                if (ListUtils.isNameBlocked(arbitraryTransactionData.getName())) {
+                    LOGGER.info("User is Blocked - Will not fetch data");
+                    continue;  //ToDo: Can this be changed to break to increase performance?
+                }
+
                 byte[] signature = arbitraryTransactionData.getSignature();
                 String signature58 = Base58.encode(signature);
 
@@ -534,8 +546,8 @@ public class ArbitraryDataFileListManager {
                 ArbitraryDataFileListMessage arbitraryDataFileListMessage = (ArbitraryDataFileListMessage) message;
 
                 Boolean isRelayRequest = isRelayRequestBySignature58.get(signature58);
-                if (!isRelayRequest) {
-//                    if (!isRelayRequest || !Settings.getInstance().isRelayModeEnabled()) {
+                if (!isRelayRequest || !this.isRelayAvailable) {
+
                     Long now = NTP.getTime();
 
                     // Keep track of the hashes this peer reports to have access to
@@ -550,10 +562,18 @@ public class ArbitraryDataFileListManager {
                         PeerData pd = new PeerData(pa,now, "INIT");
                         Peer peerWithFiles = new Peer(pd, Peer.NETWORKDATA);
 
-                        ArbitraryFileListResponseInfo responseInfo = new ArbitraryFileListResponseInfo(hash58, signature58,
-                                peerWithFiles, now, arbitraryDataFileListMessage.getRequestTime(), requestHops);
+                        // Update Response based on Content Holder being able to access direct connect
+                        ArbitraryFileListResponseInfo responseInfo;
 
-                        LOGGER.info("Adding responseInfo to ArbDataFileManager peer: {} FileHash: {}", peer, hash58);
+                        if(arbitraryDataFileListMessage.isDirectConnectable()) {
+                            responseInfo = new ArbitraryFileListResponseInfo(hash58, signature58,
+                                    peerWithFiles, now, arbitraryDataFileListMessage.getRequestTime(), requestHops, true);
+                            LOGGER.info("Adding QDN Direct Connect responseInfo to ArbDataFileManager peer: {} FileHash: {}", peer, hash58);
+                        } else { // We have to relay the peers chunks because they cant Direct Connect
+                            responseInfo = new ArbitraryFileListResponseInfo(hash58, signature58,
+                                    peer, now, arbitraryDataFileListMessage.getRequestTime(), requestHops, false);
+                            LOGGER.info("Adding QDN Relay-able responseInfo to ArbDataFileManager peer: {} FileHash: {}", peer, hash58);
+                        }
                         ArbitraryDataFileManager.getInstance().addResponse(responseInfo);
                     }
 
@@ -564,28 +584,22 @@ public class ArbitraryDataFileListManager {
                     }
                 }
 
-                boolean isBlocked = (arbitraryTransactionData == null || ListUtils.isNameBlocked(arbitraryTransactionData.getName()));
-                if (isBlocked) {
-                    LOGGER.info("User is Blocked - Will not fetch data");
-                    continue;
-                }
-
-                // Forwarding
+                // Forwarding - We are not the original requestor, just in the middle
                 LOGGER.info("Status of isRelayRequest {}", isRelayRequest);
-                if (isRelayRequest) {
-                //if (isRelayRequest && Settings.getInstance().isRelayModeEnabled()) {
+                if (isRelayRequest && this.isRelayAvailable) {
                     Triple<String, Peer, Long> request = requestBySignature58.get(signature58);
                     Peer requestingPeer = request.getB();
                     if (requestingPeer != null) {
                         LOGGER.info("Requesting Peer is: {}", requestingPeer);
                         Long requestTime = arbitraryDataFileListMessage.getRequestTime();
                         Integer requestHops = arbitraryDataFileListMessage.getRequestHops();
+                        Boolean isDirectConnectable = arbitraryDataFileListMessage.isDirectConnectable();
 
                         // Add each hash to our local mapping so we know who to ask later
                         Long now = NTP.getTime();
                         for (byte[] hash : hashes) {
                             String hash58 = Base58.encode(hash);
-                            ArbitraryRelayInfo relayInfo = new ArbitraryRelayInfo(hash58, signature58, peer, now, requestTime, requestHops);
+                            ArbitraryRelayInfo relayInfo = new ArbitraryRelayInfo(hash58, signature58, peer, now, requestTime, requestHops, isDirectConnectable);
                             ArbitraryDataFileManager.getInstance().addToRelayMap(relayInfo);
                         }
 
@@ -594,16 +608,9 @@ public class ArbitraryDataFileListManager {
                             requestHops++;
                         }
 
-                        ArbitraryDataFileListMessage forwardArbitraryDataFileListMessage;
+                        ArbitraryDataFileListMessage forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops,
+                                arbitraryDataFileListMessage.getPeerAddress(), arbitraryDataFileListMessage.isRelayPossible(), arbitraryDataFileListMessage.isDirectConnectable());
 
-                        // Remove optional parameters if the requesting peer doesn't support it yet
-                        // A message with less statistical data is better than no message at all
-                        /* if (!requestingPeer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
-                            forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes);
-                        } else {  LEGACY v3.2.0 code*/
-                            forwardArbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops,
-                                    arbitraryDataFileListMessage.getPeerAddress(), arbitraryDataFileListMessage.isRelayPossible());
-                        //}
                         forwardArbitraryDataFileListMessage.setId(message.getId());
 
                         // Forward to requesting peer
@@ -630,6 +637,7 @@ public class ArbitraryDataFileListManager {
     // Scheduled executor service to process messages every second
     private final ScheduledExecutorService getArbitraryDataFileListMessageScheduler = Executors.newScheduledThreadPool(1);
 
+    /* We receive a request to provide a data file list */
     public void onNetworkGetArbitraryDataFileListMessage(Peer peer, Message message) {
         // Don't respond if QDN is disabled
         if (!Settings.getInstance().isQdnEnabled()) {
@@ -641,6 +649,7 @@ public class ArbitraryDataFileListManager {
         }
     }
 
+    /* We received a request to provide a data List  */
     private void processNetworkGetArbitraryDataFileListMessage() {
 
         try {
@@ -681,9 +690,9 @@ public class ArbitraryDataFileListManager {
                 String requestingPeer = getArbitraryDataFileListMessage.getRequestingPeer();
 
                 if (requestingPeer != null) {
-                    LOGGER.info("Received hash list request with {} hashes from peer {} (requesting peer {}) for signature {}", hashCount, peer, requestingPeer, signature58);
+                    LOGGER.info("Received a request to provide a list request with {} hashes from peer {} (requesting peer {}) for signature {}", hashCount, peer, requestingPeer, signature58);
                 } else {
-                    LOGGER.info("Received hash list request with {} hashes from peer {} for signature {}", hashCount, peer, signature58);
+                    LOGGER.info("Requesting Peer is null, oh no");
                 }
 
                 signatureBySignature58.put(signature58, signature);
@@ -719,6 +728,16 @@ public class ArbitraryDataFileListManager {
             }
 
             for (ArbitraryTransactionData transactionData : transactionDataList) {
+
+                // Moved up in check priority to prevent "dead work"
+                if(transactionData == null)
+                    continue;
+
+                if (ListUtils.isNameBlocked(transactionData.getName())) {
+                    LOGGER.debug("User is Blocked - Stop processing");
+                    continue;
+                }
+
                 byte[] signature = transactionData.getSignature();
                 String signature58 = Base58.encode(signature);
                 List<byte[]> requestedHashes = requestedHashesBySignature58.get(signature58);
@@ -749,7 +768,6 @@ public class ArbitraryDataFileListManager {
                                 requestedHashes.add(arbitraryDataFile.getHash());
                             }
                         }
-
 
                         // Assume all chunks exists, unless one can't be found below
                         allChunksExist = true;
@@ -802,16 +820,8 @@ public class ArbitraryDataFileListManager {
 
                     Collections.shuffle(hashes.subList(1, hashes.size()));
 
-
-                    // Remove optional parameters if the requesting peer doesn't support it yet
-                    // A message with less statistical data is better than no message at all
-                    /*  We are way past v3.2.0, this check will always pass
-                    if (!peer.isAtLeastVersion(MIN_PEER_VERSION_FOR_FILE_LIST_STATS)) {
-                        arbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature, hashes);
-                    } else { */
-                        arbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature,
-                                hashes, NTP.getTime(), 0, ourAddress, true);
-                    //}
+                    arbitraryDataFileListMessage = new ArbitraryDataFileListMessage(signature,
+                            hashes, NTP.getTime(), 0, ourAddress, this.isRelayAvailable, this.isDirectConnectable);
 
                     arbitraryDataFileListMessage.setId(message.getId());
 
@@ -825,22 +835,12 @@ public class ArbitraryDataFileListManager {
                         LOGGER.info("No need for any forwarding because file list request is fully served");
                         continue;
                     }
-
-                }
-                boolean isBlocked = (transactionData == null || ListUtils.isNameBlocked(transactionData.getName()));
-                if (isBlocked) {
-                    LOGGER.info("User is Blocked - Stop processing");
-                    continue;
                 }
 
-                LOGGER.info("We don't have hashes - Checking Relay Mode");
+                LOGGER.info("We don't have hashes or all hashes - Checking Relay Mode");
                 // We may need to forward this request on
-                // @ToDo: COME BACK TO HERE
-                // Instead we always relay, but now we only send PeerInformation, not the actual file hashes from memory
-                // We don't need to check is Relay, because we made it here we will relay no mater what.
 
-
-                //if (Settings.getInstance().isRelayModeEnabled() ) {
+                if (this.isRelayAvailable ) {
                     // In relay mode - so ask our other peers if they have it
 
                     GetArbitraryDataFileListMessage getArbitraryDataFileListMessage = (GetArbitraryDataFileListMessage) message;
@@ -851,7 +851,7 @@ public class ArbitraryDataFileListManager {
 
                     if (totalRequestTime < RELAY_REQUEST_MAX_DURATION) { // 5 Seconds
                         // Relay request hasn't timed out yet, so can potentially be rebroadcast
-                        if (requestHops < RELAY_REQUEST_MAX_HOPS) { // 4 Hops
+                        if (requestHops < SEARCH_DEPTH_MAX_HOPS) { // 6 Hops
                             // Relay request hasn't reached the maximum number of hops yet, so can be rebroadcast
 
                             Message relayGetArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops, requestingPeer);
@@ -860,20 +860,24 @@ public class ArbitraryDataFileListManager {
                             LOGGER.debug("Rebroadcasting hash list request from peer {} for signature {} to our other peers... totalRequestTime: {}, requestHops: {}", peer, Base58.encode(signature), totalRequestTime, requestHops);
                             NetworkData.getInstance().broadcast(
                                     broadcastPeer ->
-                                            !broadcastPeer.isAtLeastVersion(RELAY_MIN_PEER_VERSION) ? null :
-                                                    broadcastPeer == peer || Objects.equals(broadcastPeer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getHost()) ? null : relayGetArbitraryDataFileListMessage
+                                            broadcastPeer == peer || Objects.equals(broadcastPeer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getHost()) ? null : relayGetArbitraryDataFileListMessage
                             );
+// ToDo: Removed assumption that any peers still exist that are less than v3.4.0, replaced with above code
+//                            NetworkData.getInstance().broadcast(
+//                                    broadcastPeer ->
+//                                            !broadcastPeer.isAtLeastVersion(RELAY_MIN_PEER_VERSION) ? null :
+//                                                    broadcastPeer == peer || Objects.equals(broadcastPeer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getHost()) ? null : relayGetArbitraryDataFileListMessage
+//                            );
 
                         } else {
-                            // This relay request has reached the maximum number of allowed hops
+                            LOGGER.trace("Request has reached the maximum number of allowed hops");
                         }
                     } else {
-                        // This relay request has timed out
+                        LOGGER.trace("Relay Request has timed out");
                     }
-//                } else {
-//                    LOGGER.info("Relay (fetch-reserve) is disabled");
-//                }
-
+                } else {
+                    LOGGER.debug("Relay (fetch-reserve) is disabled");
+                }
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);

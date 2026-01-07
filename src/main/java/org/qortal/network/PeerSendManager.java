@@ -68,9 +68,8 @@ public class PeerSendManager {
         this.peer = peer;
         this.executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r);
-            //t.setName("PeerSendManager-" + peer.getResolvedAddress().getHostString() + "-" + threadCount.getAndIncrement());
+            t.setName("PeerSendManager-" + peer.getResolvedAddress().getHostString() + "-" + threadCount.getAndIncrement());
             LOGGER.trace("Starting new thread: {}", peer.toString());
-            t.setName("PeerSendManager-" + peer.toString() + "-" + threadCount.getAndIncrement());
             return t;
         });
         start();

@@ -12,14 +12,16 @@ public class ArbitraryRelayInfo {
     private final Long timestamp;
     private final Long requestTime;
     private final Integer requestHops;
+    private final Boolean isDirectConnectable;
 
-    public ArbitraryRelayInfo(String hash58, String signature58, Peer peer, Long timestamp, Long requestTime, Integer requestHops) {
+    public ArbitraryRelayInfo(String hash58, String signature58, Peer peer, Long timestamp, Long requestTime, Integer requestHops, Boolean isDirectConnectable) {
         this.hash58 = hash58;
         this.signature58 = signature58;
         this.peer = peer;
         this.timestamp = timestamp;
         this.requestTime = requestTime;
         this.requestHops = requestHops;
+        this.isDirectConnectable = isDirectConnectable;
     }
 
     public boolean isValid() {
@@ -50,6 +52,8 @@ public class ArbitraryRelayInfo {
     public Integer getRequestHops() {
         return this.requestHops;
     }
+
+    public Boolean isDirectConnectable() { return this.isDirectConnectable; }
 
     @Override
     public String toString() {

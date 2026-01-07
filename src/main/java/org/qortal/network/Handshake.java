@@ -283,6 +283,14 @@ public enum Handshake {
 			} else {
 				capabilities.put("QDN", 0);
 			}
+//            if (NetworkData.getInstance().getIsInboundCapable() == false &&
+//                NetworkData.getInstance().getInboundTryCount() < 6 ) {
+//                // Test uPnP by opening some random port then give it to InboundTest?
+//                capabilities.put("InboundTest", 0);
+//            }
+//            if (NetworkData.getInstance().getIsInboundCapable() == true ) {
+//                capabilities.put("Inbound", true);
+//            }
 		}
 
 		Message helloMessage = useHelloV2

@@ -48,11 +48,11 @@ public class PirateChainWalletController extends Thread {
     private boolean shouldLoadWallet = false;
     private String loadStatus = null;
 
-    private static String qdnWalletSignature = "EsfUw54perxkEtfoUoL7Z97XPrNsZRZXePVZPz3cwRm9qyEPSofD5KmgVpDqVitQp7LhnZRmL6z2V9hEe1YS45T";
+    private static final String qdnWalletSignature = "EsfUw54perxkEtfoUoL7Z97XPrNsZRZXePVZPz3cwRm9qyEPSofD5KmgVpDqVitQp7LhnZRmL6z2V9hEe1YS45T";
 
 
     private PirateChainWalletController() {
-        this.running = true;
+        this.running = Settings.getInstance().isWalletEnabled("ARRR");
     }
 
     public static PirateChainWalletController getInstance() {
