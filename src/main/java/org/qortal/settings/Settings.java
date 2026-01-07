@@ -1,5 +1,28 @@
 package org.qortal.settings;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.Reader;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.JAXBException;
+import javax.xml.bind.UnmarshalException;
+import javax.xml.bind.Unmarshaller;
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
+import javax.xml.transform.stream.StreamSource;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.persistence.exceptions.XMLMarshalException;
@@ -15,17 +38,6 @@ import org.qortal.crosschain.PirateChain.PirateChainNet;
 import org.qortal.crosschain.Ravencoin.RavencoinNet;
 import org.qortal.network.message.MessageType;
 import org.qortal.utils.EnumUtils;
-
-import javax.xml.bind.JAXBContext;
-import javax.xml.bind.JAXBException;
-import javax.xml.bind.UnmarshalException;
-import javax.xml.bind.Unmarshaller;
-import javax.xml.bind.annotation.XmlAccessType;
-import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.transform.stream.StreamSource;
-import java.io.*;
-import java.nio.file.Paths;
-import java.util.*;
 
 // All properties to be converted to JSON via JAXB
 @XmlAccessorType(XmlAccessType.FIELD)
@@ -244,6 +256,7 @@ public class Settings {
 	private int maxBlocksPerResponse = 200;
 
 	// Which blockchains this node is running
+	@XmlJavaTypeAdapter(WalletsMapXmlAdapter.class)
     private Map<String, Boolean> wallets = new HashMap<>();
 	private String blockchainConfig = null; // use default from resources
 	private BitcoinNet bitcoinNet = BitcoinNet.MAIN;
