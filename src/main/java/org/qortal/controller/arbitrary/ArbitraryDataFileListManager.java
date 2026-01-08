@@ -840,7 +840,7 @@ public class ArbitraryDataFileListManager {
                 LOGGER.info("We don't have hashes or all hashes - Checking Relay Mode");
                 // We may need to forward this request on
 
-                if (this.isRelayAvailable ) {
+                //if (this.isRelayAvailable ) { = We do not want to block the relay of file find requests, this prevents Direct-Connect finding
                     // In relay mode - so ask our other peers if they have it
 
                     GetArbitraryDataFileListMessage getArbitraryDataFileListMessage = (GetArbitraryDataFileListMessage) message;
@@ -862,22 +862,15 @@ public class ArbitraryDataFileListManager {
                                     broadcastPeer ->
                                             broadcastPeer == peer || Objects.equals(broadcastPeer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getHost()) ? null : relayGetArbitraryDataFileListMessage
                             );
-// ToDo: Removed assumption that any peers still exist that are less than v3.4.0, replaced with above code
-//                            NetworkData.getInstance().broadcast(
-//                                    broadcastPeer ->
-//                                            !broadcastPeer.isAtLeastVersion(RELAY_MIN_PEER_VERSION) ? null :
-//                                                    broadcastPeer == peer || Objects.equals(broadcastPeer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getHost()) ? null : relayGetArbitraryDataFileListMessage
-//                            );
-
                         } else {
                             LOGGER.trace("Request has reached the maximum number of allowed hops");
                         }
                     } else {
                         LOGGER.trace("Relay Request has timed out");
                     }
-                } else {
-                    LOGGER.debug("Relay (fetch-reserve) is disabled");
-                }
+                //} else {
+                //    LOGGER.debug("Relay (fetch-reserve) is disabled");
+                //}
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
