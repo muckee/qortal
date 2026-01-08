@@ -1024,7 +1024,6 @@ public class Peer {
                     Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
                 case Peer.NETWORKDATA:
-                    LOGGER.info("Setting WRITE FLAG on {}", this.toString());
                     NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
                     break;
             }
