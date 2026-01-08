@@ -1689,7 +1689,8 @@ public class Block {
 		// Also update "transaction participants" in repository for "transactions involving X" support in API
 		linkTransactionsToBlock();
 
-		postBlockTidy();
+        if(blockchainHeight % 100 == 0) // Only sweep the balance table once every 100 blocks for 0 balances
+		    postBlockTidy();
 
 		// Log some debugging info relating to the block weight calculation
 		this.logDebugInfo();
