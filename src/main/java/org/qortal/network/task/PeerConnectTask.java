@@ -47,15 +47,14 @@ public class PeerConnectTask implements Task {
             switch (peer.getPeerType()) {
                 case Peer.NETWORK:
                     Network.getInstance().connectPeer(peer);
-                    LOGGER.trace("Successfully connected to peer {} on NETWORK", peer);
+                    LOGGER.trace("Called connectPeer {} on NETWORK", peer);
                     break;
                 case Peer.NETWORKDATA:
                     NetworkData.getInstance().connectPeer(peer);
-                    LOGGER.trace("Successfully connected to peer {} on NETWORKDATA", peer);
+                    LOGGER.trace("Called connectPeer {} on QDN", peer);
                     break;
             }
 
-            LOGGER.info("Successfully connected to peer {}", peer);
         } catch (Exception e) {
             LOGGER.error("Error connecting to peer {}", peer, e);
         }
