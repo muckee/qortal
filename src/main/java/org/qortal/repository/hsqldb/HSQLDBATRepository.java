@@ -167,7 +167,7 @@ public class HSQLDBATRepository implements ATRepository {
 				+ "is_frozen, frozen_balance, sleep_until_message_timestamp "
 				+ "FROM ATs "
 				+ "WHERE is_finished = false "
-				+ "ORDER BY created_when ASC";
+				+ "ORDER BY created_when ASC, AT_address ASC";
 
 		List<ATData> executableATs = new ArrayList<>();
 
@@ -208,6 +208,8 @@ public class HSQLDBATRepository implements ATRepository {
 
 				executableATs.add(atData);
 			} while (resultSet.next());
+
+			LOGGER.info("getAllExecutableATs SUCCESS");
 
 			return executableATs;
 		} catch (SQLException e) {
@@ -707,7 +709,7 @@ public class HSQLDBATRepository implements ATRepository {
 				+ "JOIN ATStates "
 				+ "ON ATStates.AT_address = ATs.AT_address "
 				+ "WHERE height = ? "
-				+ "ORDER BY created_when ASC";
+				+ "ORDER BY created_when ASC, AT_address ASC";
 
 		List<ATStateData> atStates = new ArrayList<>();
 
@@ -725,6 +727,8 @@ public class HSQLDBATRepository implements ATRepository {
 				ATStateData atStateData = new ATStateData(atAddress, height, stateHash, fees, isInitial);
 				atStates.add(atStateData);
 			} while (resultSet.next());
+
+			LOGGER.info("getBlockATStatesAtHeight SUCCESS");
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch AT states for this height from repository", e);
 		}
