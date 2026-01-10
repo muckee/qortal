@@ -583,20 +583,18 @@ public class NetworkData {
 
         private Task maybeProduceConnectPeerTask(Long now) throws InterruptedException {
             if(now == null) {
-                LOGGER.info("Now is null :(");
                 return null;
             }
             if (now < nextConnectTaskTimestamp.get()) {
-                //LOGGER.info("Not going to try and connect, {} < {}", now, nextConnectTaskTimestamp.get());
                 return null;
             }
+
+            nextConnectTaskTimestamp.set(now + 3000L); // change from 1s to 3s, don't need to get data peers so aggressively
 
             if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers) {
                 LOGGER.info("Not going to try to connect, .size() >= {}", minOutboundPeers);
                 return null;
             }
-
-            nextConnectTaskTimestamp.set(now + 3000L); // change from 1s to 3s, don't need to get data peers so aggressively
 
             Peer targetPeer = getConnectablePeer(now);
             if (targetPeer == null) {
