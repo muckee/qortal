@@ -209,8 +209,6 @@ public class HSQLDBATRepository implements ATRepository {
 				executableATs.add(atData);
 			} while (resultSet.next());
 
-			LOGGER.info("getAllExecutableATs SUCCESS");
-
 			return executableATs;
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch executable ATs from repository", e);
@@ -727,8 +725,6 @@ public class HSQLDBATRepository implements ATRepository {
 				ATStateData atStateData = new ATStateData(atAddress, height, stateHash, fees, isInitial);
 				atStates.add(atStateData);
 			} while (resultSet.next());
-
-			LOGGER.info("getBlockATStatesAtHeight SUCCESS");
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch AT states for this height from repository", e);
 		}
