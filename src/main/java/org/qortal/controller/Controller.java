@@ -1142,7 +1142,10 @@ public class Controller extends Thread {
 				ApiService.getInstance().stop();
 
 				LOGGER.info("Shutting down wallets");
-				PirateChainWalletController.getInstance().shutdown();
+				PirateChainWalletController pirateWalletController = PirateChainWalletController.getInstance();
+				if (pirateWalletController != null) {
+					pirateWalletController.shutdown();
+				}
 
 				if (Settings.getInstance().isAutoUpdateEnabled()) {
 					LOGGER.info("Shutting down auto-update");
