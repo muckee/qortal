@@ -94,7 +94,7 @@ public class Settings {
 	private String apiKeyPath = System.getProperty("user.dir");
 	/** Whether to allow automatic authentication from localhost (loopback) addresses */
 	private boolean localAuthBypassEnabled = false;
-
+	private String ourExternalIpAddress = null;
 	private Boolean apiRestricted;
 	private boolean apiLoggingEnabled = false;
 	private boolean apiDocumentationEnabled = false;
@@ -847,6 +847,10 @@ public class Settings {
 
 	public String getApiKey() {
 		return this.apiKey;
+	}
+
+	public String getOurExternalIpAddress() {
+		return this.ourExternalIpAddress;
 	}
 
 	public String getApiKeyPath() {
