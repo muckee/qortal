@@ -720,9 +720,13 @@ public class OnlineAccountsManager {
      * @return true if our signature(s) have been submitted recently.
      */
     public boolean hasActiveOnlineAccountSignatures() {
-        final Long minLatestBlockTimestamp = NTP.getTime() - (2 * 60 * 60 * 1000L);
+        final Long now = NTP.getTime();
+        if (now == null)
+            return false;
+    
+        final long minLatestBlockTimestamp = now - (2 * 60 * 60 * 1000L);
         boolean isUpToDate = Controller.getInstance().isUpToDate(minLatestBlockTimestamp);
-
+    
         return isUpToDate && hasOurOnlineAccounts();
     }
 
