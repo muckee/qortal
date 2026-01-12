@@ -70,11 +70,11 @@ public class NTP implements Runnable {
 
 				try {
 					if (!isOffsetSet)
-						LOGGER.info("NTP poll start remote={}", remote);
+						LOGGER.trace("NTP poll start remote={}", remote);
 
 					InetAddress address = InetAddress.getByName(remote);
 					if (!isOffsetSet)
-						LOGGER.info("NTP resolved remote={} addr={}", remote, address.getHostAddress());
+						LOGGER.trace("NTP resolved remote={} addr={}", remote, address.getHostAddress());
 
 					// CRITICAL: NTPUDPClient is backed by ONE UDP socket. If you call getTime()
 					// concurrently, replies can mismatch requests ("Originate time does not match the request").
