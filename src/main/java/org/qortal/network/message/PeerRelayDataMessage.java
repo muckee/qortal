@@ -28,7 +28,9 @@ public class PeerRelayDataMessage extends Message {
 		} catch (IOException e) {
 			throw new AssertionError("IOException shouldn't occur with ByteArrayOutputStream");
 		}
-
+		this.dataBytes = bytes.toByteArray();
+		this.checksumBytes = Message.generateChecksum(this.dataBytes);
+	
 		this.hash = hash;
 		this.peerAddress = PeerAddress.fromString(fullHost);
 
