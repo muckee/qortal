@@ -152,7 +152,8 @@ public class Network {
     private final Lock mergePeersLock = new ReentrantLock();
 
     private List<String> ourExternalIpAddressHistory = new ArrayList<>();
-    private String ourExternalIpAddress = null;
+    private String ourExternalIpAddress = Settings.getInstance().getOurExternalIpAddress();
+ 
     private int ourExternalPort = Settings.getInstance().getListenPort();
 
     private volatile boolean isShuttingDown = false;
