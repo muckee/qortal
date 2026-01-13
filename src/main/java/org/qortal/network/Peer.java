@@ -1,8 +1,35 @@
 package org.qortal.network;
 
-import com.google.common.hash.HashCode;
-import com.google.common.net.HostAndPort;
-import com.google.common.net.InetAddresses;
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.SocketTimeoutException;
+import java.net.StandardSocketOptions;
+import java.net.UnknownHostException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.SocketChannel;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TransferQueue;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
@@ -20,17 +47,9 @@ import org.qortal.settings.Settings;
 import org.qortal.utils.ExecuteProduceConsume.Task;
 import org.qortal.utils.NTP;
 
-import java.io.IOException;
-import java.net.*;
-import java.nio.ByteBuffer;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
-import java.security.SecureRandom;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.LongAdder;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import com.google.common.hash.HashCode;
+import com.google.common.net.HostAndPort;
+import com.google.common.net.InetAddresses;
 
 // For managing one peer
 public class Peer {
@@ -562,6 +581,7 @@ public class Peer {
         this.connectionTimestamp = NTP.getTime();
         this.lastValidUse = NTP.getTime();
         this.socketChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+
         this.socketChannel.configureBlocking(false);
         if (network == Peer.NETWORK)
             Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
@@ -943,7 +963,7 @@ public class Peer {
             }
 
             //LOGGER.info("Performing TryTransfer with a timeout of {} ms", timeout);
-            return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
+            return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS); // TODOT changed to try transfer to offer
         } catch (InterruptedException e) {
             // Send failure
             LOGGER.error("Interrupt Exception");
@@ -960,41 +980,41 @@ public class Peer {
      * @param message message to be sent
      * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
      */
-    public boolean sendMessageWithTimeoutNow(Message message, int timeout) {
-        if (!this.socketChannel.isOpen()) {
-            LOGGER.debug("SocketChannel was not open; returning false");
-            return false;
-        }
+    // public boolean sendMessageWithTimeoutNow(Message message, int timeout) {
+    //     if (!this.socketChannel.isOpen()) {
+    //         LOGGER.debug("SocketChannel was not open; returning false");
+    //         return false;
+    //     }
 
-        try {
-            // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
-            LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
-                    message.getType().name(), message.getId(), this);
+    //     try {
+    //         // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
+    //         LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
+    //                 message.getType().name(), message.getId(), this);
 
-            // Check message properly constructed
-            message.checkValidOutgoing();
+    //         // Check message properly constructed
+    //         message.checkValidOutgoing();
 
-            // Possible race condition:
-            // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
-            // Avoided by poll-with-timeout in writeChannel() above.
-            switch (this.getPeerType()) {
-                case Peer.NETWORK:
-                    Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
-                    break;
-                case Peer.NETWORKDATA:
-                    NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
-                    break;
-            }
-            return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-            // Send failure
-            LOGGER.error("Interrupt Exception");
-            return false;
-        } catch (MessageException e) {
-            LOGGER.error(e.getMessage(), e);
-            return false;
-        }
-    }
+    //         // Possible race condition:
+    //         // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
+    //         // Avoided by poll-with-timeout in writeChannel() above.
+    //         switch (this.getPeerType()) {
+    //             case Peer.NETWORK:
+    //                 Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+    //                 break;
+    //             case Peer.NETWORKDATA:
+    //                 NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+    //                 break;
+    //         }
+    //         return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
+    //     } catch (InterruptedException e) {
+    //         // Send failure
+    //         LOGGER.error("Interrupt Exception");
+    //         return false;
+    //     } catch (MessageException e) {
+    //         LOGGER.error(e.getMessage(), e);
+    //         return false;
+    //     }
+    // }
 
     public boolean sendMessageWhenReady(Message message) throws InterruptedException {  // TimeOut Value removed
 
@@ -1028,7 +1048,22 @@ public class Peer {
                     break;
             }
 
-            return this.sendQueue.tryTransfer(message, 24, TimeUnit.HOURS);  // Give it a day to transfer, stupid long
+            final boolean isGetArbitraryDataFile = message.getType() == MessageType.GET_ARBITRARY_DATA_FILE;
+            final long startNs = isGetArbitraryDataFile ? System.nanoTime() : 0L;
+            if (isGetArbitraryDataFile) {
+                LOGGER.info("[{}] GET_ARBITRARY_DATA_FILE tryTransfer start: msgId={}, peer={}, peerType={}, socketOpen={}",
+                        this.peerConnectionId, message.getId(), this, this.peerType, this.socketChannel.isOpen());
+            }
+
+            boolean transferred = this.sendQueue.tryTransfer(message, 40, TimeUnit.SECONDS);  // Give it a day to transfer, stupid long
+
+            if (isGetArbitraryDataFile) {
+                long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+                LOGGER.info("[{}] GET_ARBITRARY_DATA_FILE tryTransfer done: msgId={}, transferred={}, elapsedMs={}, peer={}, peerType={}, socketOpen={}",
+                        this.peerConnectionId, message.getId(), transferred, elapsedMs, this, this.peerType, this.socketChannel.isOpen());
+            }
+
+            return transferred;
         } catch (InterruptedException e) {
             // Send failure
             LOGGER.error("Interrupt Exception");
@@ -1104,32 +1139,39 @@ public class Peer {
     // Calling sendMessageWhenReady is now blocking until socket.isOpen == true
     public Message getResponseToDataFile(Message message) {
         BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
-
+    
         // Assign random ID to this message
         Random random = new Random();
         int id;
         do {
             id = random.nextInt(Integer.MAX_VALUE - 1) + 1;
-
-            // Put queue into map (keyed by message ID) so we can poll for a response
-            // If putIfAbsent() doesn't return null, then this ID is already taken
         } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
         message.setId(id);
-
+        
+        LOGGER.info("[{}] About to call sendMessageWhenReady for msgType={}, msgId={}, socketOpen={}",
+                this.peerConnectionId, message.getType(), id, this.socketChannel.isOpen());
+    
         try {
-            this.sendMessageWhenReady(message);
-            //this.replyQueues.remove(id);
-            // We are returning null as the message?
-            // return null;
+            boolean booleanSent = this.sendMessageWhenReady(message);
+            if (!booleanSent) {
+                LOGGER.warn("[{}] Failed to send message: {}", this.peerConnectionId, message.getType());
+                this.replyQueues.remove(id);
+                return null;
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[{}] Failed to send message: {}", this.peerConnectionId, e.getMessage());
+            this.replyQueues.remove(id);
+            return null;
         }
-        catch (Exception e) {
-            LOGGER.warn("FAIL: Upstream from sendMessageWhenReady()");
-        }
-
+    
         try {
-            return blockingQueue.poll(1, TimeUnit.HOURS);  // If we get here, we are F'ed
+            return blockingQueue.poll(40, TimeUnit.SECONDS);  // Increased from 100ms
         } catch (InterruptedException e) {
-            throw new RuntimeException(e);
+            LOGGER.error("InterruptedException: {}", e.getMessage());
+            Thread.currentThread().interrupt();
+            return null;
+        } finally {
+            this.replyQueues.remove(id);  // Remove AFTER poll completes
         }
     }
 

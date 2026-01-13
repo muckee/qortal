@@ -1,27 +1,6 @@
 package org.qortal.controller.arbitrary;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.qortal.controller.Controller;
-import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
-//import org.qortal.data.arbitrary.ArbitraryResourceData;
-import org.qortal.data.transaction.ArbitraryTransactionData;
-import org.qortal.network.*;
-import org.qortal.network.message.GetArbitraryDataFileMessage;
-import org.qortal.network.message.GetArbitraryDataFilesMessage;
-import org.qortal.network.message.MessageException;
-import org.qortal.network.message.MessageType;
-import org.qortal.repository.DataException;
-import org.qortal.repository.Repository;
-import org.qortal.repository.RepositoryManager;
-import org.qortal.settings.Settings;
-import org.qortal.utils.ArbitraryTransactionUtils;
-import org.qortal.utils.Base58;
-import org.qortal.utils.NTP;
-import org.qortal.utils.NamedThreadFactory;
-
-import javax.xml.crypto.Data;
-import java.nio.charset.StandardCharsets;
+import static java.lang.Thread.NORM_PRIORITY;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -33,9 +12,28 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
-import static java.lang.Thread.NORM_PRIORITY;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.qortal.controller.Controller;
+import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
+import org.qortal.data.transaction.ArbitraryTransactionData;
+import org.qortal.network.NetworkData;
+import org.qortal.network.Peer;
+import org.qortal.network.PeerAddress;
+import org.qortal.network.PeerList;
+import org.qortal.network.PeerSendManagement;
+import org.qortal.network.message.GetArbitraryDataFileMessage;
+import org.qortal.network.message.MessageException;
+import org.qortal.network.message.MessageType;
+import org.qortal.repository.DataException;
+import org.qortal.repository.Repository;
+import org.qortal.repository.RepositoryManager;
+import org.qortal.settings.Settings;
+import org.qortal.utils.ArbitraryTransactionUtils;
+import org.qortal.utils.Base58;
+import org.qortal.utils.NTP;
+import org.qortal.utils.NamedThreadFactory;
 
 public class ArbitraryDataFileRequestThread {
 
@@ -44,7 +42,7 @@ public class ArbitraryDataFileRequestThread {
     private static final Integer FETCHER_LIMIT_PER_PEER = Settings.getInstance().getMaxThreadsForMessageType(MessageType.GET_ARBITRARY_DATA_FILE);
     //ToDo: replace static int in next line with FETCHER_LIMIT CONST
     // The defined value of 20 is based on a 100mb connection processing 20 file chunks in a second
-    private final ExecutorService masterFileFetcherPool = Executors.newFixedThreadPool(1000);
+    private final ExecutorService masterFileFetcherPool = Executors.newFixedThreadPool(20);
     private static final String FETCHER_THREAD_PREFIX = "Arbitrary Data Fetcher ";
     private ConcurrentHashMap<String, ExecutorService> executorByPeer = new ConcurrentHashMap<>();
 
@@ -103,7 +101,7 @@ public class ArbitraryDataFileRequestThread {
             String peer = peerTimeLapse.getKey();
             Integer elapsedSeconds = peerTimeLapse.getValue();
 
-            if (elapsedSeconds > 8 ) {  // stale, drop list and counter
+            if (elapsedSeconds > 12 ) {  // stale, drop list and counter
                 arbitraryDataFileManager.removePeerTimeOut(peer);
                 LOGGER.info("Removing Peer: {} for time out greater than 8", peer.toString());
             }
@@ -247,9 +245,8 @@ public class ArbitraryDataFileRequestThread {
                     byte[] fileHashBytes = Base58.decode(fileHash);
 
                     GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(data.getSignature(), fileHashBytes);
-                    // this.replyQueues is null, caused crash
-                    int msgId = peer.addToReplyQueue();
-                    message.setId(msgId);
+                    // No reply queue needed - responses are handled asynchronously via NetworkData.onMessage()
+                    // The message ID defaults to -1 (no ID) for fire-and-forget messages
 
                     LOGGER.debug("Adding hash {} to PeerSendManager send to {}", fileHash, peer);
                     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message);

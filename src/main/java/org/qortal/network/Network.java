@@ -49,7 +49,12 @@ public class Network {
     /**
      * How long before retrying after a connection failure, in milliseconds.
      */
-    private static final long CONNECT_FAILURE_BACKOFF = 5 * 60 * 1000L; // ms
+    private static final long CONNECT_FAILURE_BACKOFF = 2 * 60 * 1000L; // ms
+    /**
+     * How long to wait between connection attempts when isolated (no peers) and retrying backoff peers, in milliseconds.
+     * This prevents hammering peers when the node has no connections.
+     */
+    private static final long ISOLATION_RETRY_INTERVAL = 10 * 1000L; // ms
     /**
      * How long between informational broadcasts to all connected peers, in milliseconds.
      */
@@ -106,6 +111,12 @@ public class Network {
     private long nextDisconnectionCheck = 0L;
 
     private final List<PeerData> allKnownPeers = new ArrayList<>();
+    
+    /**
+     * Track whether the last peer selected was from the backoff list.
+     * Used to determine retry interval when isolated.
+     */
+    private volatile boolean lastPeerWasFromBackoff = false;
 
     /**
      * Maintain two lists for each subset of peers:
@@ -246,8 +257,11 @@ public class Network {
         int networkPort = Settings.getInstance().getListenPort();
         if (Settings.getInstance().isUPnPEnabled()) {
             UPnP.openPortTCP(networkPort);
-            if (UPnP.isMappedTCP(networkPort))
+            if (UPnP.isMappedTCP(networkPort)){
+                this.ourExternalIpAddress = UPnP.getExternalAddress();
                 LOGGER.info("UPnP Mapped for P2P, port: {}", networkPort);
+            }
+                
             else
                 LOGGER.warn("Unable to map P2P port: {} with UPnP, port in use?", networkPort);
         }
@@ -611,7 +625,15 @@ public class Network {
                 return null;
             }
 
-            nextConnectTaskTimestamp.set(now + 1000L);
+            // Check if we're isolated (no peers at all, inbound or outbound)
+            boolean hasNoPeers = getImmutableHandshakedPeers().isEmpty();
+            
+            // When isolated AND retrying backoff peers, use longer interval to avoid hammering
+            if (hasNoPeers && lastPeerWasFromBackoff) {
+                nextConnectTaskTimestamp.set(now + ISOLATION_RETRY_INTERVAL);
+            } else {
+                nextConnectTaskTimestamp.set(now + 1000L);
+            }
 
             Peer targetPeer = getConnectablePeer(now);
             if (targetPeer == null) {
@@ -746,9 +768,24 @@ public class Network {
             }
         
             LOGGER.trace("ConnectedPeers: {}, Handshaked Peers: {} ", immutableConnectedPeers.size(), immutableHandshakedPeers.size());
+            
+            // Check if we have any handshaked peers (inbound or outbound) - are we isolated?
+            boolean hasNoPeers = getImmutableHandshakedPeers().isEmpty();
                 
             // Don't consider peers with recent connection failures
             final long lastAttemptedThreshold = now - CONNECT_FAILURE_BACKOFF;
+            
+            // Save peers in backoff for later consideration if we're isolated
+            List<PeerData> peersInBackoff = new ArrayList<>();
+            if (hasNoPeers) {
+                peersInBackoff = peers.stream()
+                    .filter(peerData -> peerData.getLastAttempted() != null
+                        && (peerData.getLastConnected() == null
+                        || peerData.getLastConnected() < peerData.getLastAttempted())
+                        && peerData.getLastAttempted() > lastAttemptedThreshold)
+                    .collect(Collectors.toList());
+            }
+            
             peers.removeIf(peerData -> peerData.getLastAttempted() != null
                 && (peerData.getLastConnected() == null
                 || peerData.getLastConnected() < peerData.getLastAttempted())
@@ -769,8 +806,29 @@ public class Network {
 
             this.checkLongestConnection(now);
 
+            // If we have no available peers but have peers in backoff, and we're isolated, retry them
+            // Being isolated is worse than retrying a peer that might still be down
+            if (peers.isEmpty() && !peersInBackoff.isEmpty() && hasNoPeers) {
+                // Filter out self and connected from backoff list
+                synchronized (this.selfPeers) {
+                    peersInBackoff.removeIf(isSelfPeer);
+                }
+                peersInBackoff.removeIf(isConnectedPeer);
+                
+                if (!peersInBackoff.isEmpty()) {
+                    peers = peersInBackoff;
+                    lastPeerWasFromBackoff = true;
+                    LOGGER.info("No connected peers - retrying {} peer(s) in backoff period", peers.size());
+                }
+            } else {
+                lastPeerWasFromBackoff = false;
+            }
+
             // Any left?
             if (peers.isEmpty()) {
+                if (hasNoPeers) {
+                    LOGGER.debug("Isolated node: No connectable peers found!");
+                }
                 return null;
             }
 
@@ -1159,18 +1217,21 @@ public class Network {
         LOGGER.debug("[{}] Handshake completed with peer {} on {}", peer.getPeerConnectionId(), peer,
                 peer.getPeersVersionString());
 
-        // Are we already connected to this peer?
-        Peer existingPeer = getHandshakedPeerWithPublicKey(peer.getPeersPublicKey());
-        // NOTE: actual object reference compare, not Peer.equals()
-        if (existingPeer != peer) {
-            LOGGER.info("[{}] We already have a connection with peer {} - discarding",
-                    peer.getPeerConnectionId(), peer);
-            peer.disconnect("existing connection");
-            return;
-        }
+        // Synchronize duplicate check and add operation to prevent race condition
+        synchronized (this.handshakedPeers) {
+            // Are we already connected to this peer?
+            Peer existingPeer = getHandshakedPeerWithPublicKey(peer.getPeersPublicKey());
+            // NOTE: actual object reference compare, not Peer.equals()
+            if (existingPeer != null && existingPeer != peer) {
+                LOGGER.info("[{}] We already have a connection with peer {} - discarding",
+                        peer.getPeerConnectionId(), peer);
+                peer.disconnect("existing connection");
+                return;
+            }
 
-        // Add to this.handshakedPeers cache list
-        this.addHandshakedPeer(peer);
+            // Add to this.handshakedPeers cache list
+            this.addHandshakedPeer(peer);
+        }
 
         // Make a note that we've successfully completed handshake (and when)
         peer.getPeerData().setLastConnected(NTP.getTime());
@@ -1443,8 +1504,8 @@ public class Network {
     }
 
     public String getOurExternalIpAddress() {
-        if(UPnP.isMappedTCP(Settings.getInstance().getListenPort()))
-            return UPnP.getExternalAddress();
+        // if(UPnP.isMappedTCP(Settings.getInstance().getListenPort()))
+        //     return UPnP.getExternalAddress();
         return this.ourExternalIpAddress;
     }
 

@@ -35,7 +35,7 @@ public class PingTask implements Task {
         if (message == null || message.getType() != MessageType.PING) {
             LOGGER.debug("[{}] Didn't receive reply from {} for PING ID {}",
                     peer.getPeerConnectionId(), peer, pingMessage.getId());
-            peer.disconnect("no ping received");
+            // peer.disconnect("no ping received");
             return;
         }
 

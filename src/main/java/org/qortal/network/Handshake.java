@@ -63,7 +63,7 @@ public enum Handshake {
 		@Override
 		public Handshake onMessage(Peer peer, Message message) {
 			ChallengeMessage challengeMessage = (ChallengeMessage) message;
-			LOGGER.info("STARTING RX of CHALLENGE on {}", peer.getPeerType());
+			LOGGER.info("STARTING RX of CHALLENGE on {}, from {}", peer.getPeerType(), peer.getPeerData().getAddress());
 			byte[] peersPublicKey = challengeMessage.getPublicKey();
 			byte[] peersChallenge = challengeMessage.getChallenge();
 
@@ -135,7 +135,7 @@ public enum Handshake {
 			Message challengeMessage = new ChallengeMessage(publicKey, challenge);
 			if (!peer.sendMessage(challengeMessage))
 				peer.disconnect("failed to send CHALLENGE");
-			LOGGER.info("FINISHED sending CHALLENGE on {}", peer.getPeerType());
+			LOGGER.info("FINISHED sending CHALLENGE on {}, to {}", peer.getPeerType(), peer.getPeerData().getAddress());
 		}
 	},
 	RESPONSE(MessageType.RESPONSE) {

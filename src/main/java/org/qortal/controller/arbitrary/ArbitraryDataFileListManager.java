@@ -1,5 +1,24 @@
 package org.qortal.controller.arbitrary;
 
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.arbitrary.ArbitraryDataFile;
@@ -10,7 +29,11 @@ import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
 import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
-import org.qortal.network.*;
+import org.qortal.network.Network;
+import org.qortal.network.NetworkData;
+import org.qortal.network.Peer;
+import org.qortal.network.PeerAddress;
+import org.qortal.network.PeerList;
 import org.qortal.network.message.ArbitraryDataFileListMessage;
 import org.qortal.network.message.GetArbitraryDataFileListMessage;
 import org.qortal.network.message.Message;
@@ -22,14 +45,6 @@ import org.qortal.utils.Base58;
 import org.qortal.utils.ListUtils;
 import org.qortal.utils.NTP;
 import org.qortal.utils.Triple;
-
-import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-
-import static org.qortal.controller.arbitrary.ArbitraryDataFileManager.MAX_FILE_HASH_RESPONSES;
 
 public class ArbitraryDataFileListManager {
 
@@ -65,7 +80,7 @@ public class ArbitraryDataFileListManager {
 
 
     /** Maximum number of seconds that a file list relay request is able to exist on the network */
-    public static long RELAY_REQUEST_MAX_DURATION = 5000L;
+    public static long RELAY_REQUEST_MAX_DURATION = 20000L;
     /** Maximum number of hops that a file list relay request is allowed to make */
     public static int RELAY_REQUEST_MAX_HOPS = 4; // was 4, this is no longer ArbData, only metaData/Lists
     public static int SEARCH_DEPTH_MAX_HOPS = 6; // Only used to determine if we should forward or terminate a search for QDN data
@@ -75,8 +90,8 @@ public class ArbitraryDataFileListManager {
     private final Boolean isRelayAvailable;
 
     private ArbitraryDataFileListManager() {
-        getArbitraryDataFileListMessageScheduler.scheduleAtFixedRate(this::processNetworkGetArbitraryDataFileListMessage, 60, 1, TimeUnit.SECONDS);
-        arbitraryDataFileListMessageScheduler.scheduleAtFixedRate(this::processNetworkArbitraryDataFileListMessage, 60, 1, TimeUnit.SECONDS);
+        getArbitraryDataFileListMessageScheduler.scheduleAtFixedRate(this::processNetworkGetArbitraryDataFileListMessage, 60 * 1000, 500, TimeUnit.MILLISECONDS);
+        arbitraryDataFileListMessageScheduler.scheduleAtFixedRate(this::processNetworkArbitraryDataFileListMessage, 60 * 1000, 500, TimeUnit.MILLISECONDS);
         this.isDirectConnectable = NetworkData.getInstance().canAcceptInbound();
         this.isRelayAvailable = Settings.getInstance().isRelayModeEnabled();
     }
@@ -429,6 +444,7 @@ public class ArbitraryDataFileListManager {
     private final ScheduledExecutorService arbitraryDataFileListMessageScheduler = Executors.newScheduledThreadPool(1);
 
     public void onNetworkArbitraryDataFileListMessage(Peer peer, Message message) {
+        LOGGER.info("onNetworkArbitraryDataFileListMessage called: peer={}, messageId={}", peer, message.getId());
         // Don't process if QDN is disabled
         if (!Settings.getInstance().isQdnEnabled()) {
             return;
@@ -482,7 +498,7 @@ public class ArbitraryDataFileListManager {
                 }
 
                 boolean isRelayRequest = (request.getB() != null); //Peer?
-
+                LOGGER.info("isRelayRequest: {}", isRelayRequest);
                 // Does this message's signature match what we're expecting?
                 byte[] signature = arbitraryDataFileListMessage.getSignature();
                 String signature58 = Base58.encode(signature);
@@ -614,7 +630,7 @@ public class ArbitraryDataFileListManager {
                         forwardArbitraryDataFileListMessage.setId(message.getId());
 
                         // Forward to requesting peer
-                        LOGGER.trace("Forwarding file list with {} hashes to requesting peer: {}", hashes.size(), requestingPeer);
+                        LOGGER.info("Forwarding file list with {} hashes to requesting peer: {}", hashes.size(), requestingPeer);
                         requestingPeer.sendMessage(forwardArbitraryDataFileListMessage);
                     }
                 }
@@ -690,7 +706,7 @@ public class ArbitraryDataFileListManager {
                 String requestingPeer = getArbitraryDataFileListMessage.getRequestingPeer();
 
                 if (requestingPeer != null) {
-                    LOGGER.info("Received a request to provide a list request with {} hashes from peer {} (requesting peer {}) for signature {}", hashCount, peer, requestingPeer, signature58);
+                    LOGGER.info("Received a request to provide a list request with {} hashes from peer {} (requesting peer {}) for signature {} messageId {}", hashCount, peer, requestingPeer, signature58, message.getId());
                 } else {
                     LOGGER.info("Requesting Peer is null, oh no");
                 }
@@ -706,10 +722,6 @@ public class ArbitraryDataFileListManager {
                 LOGGER.trace("signatureBySignature58 is EMPTY");
                 return;
             }
-
-            List<byte[]> hashes = new ArrayList<>();
-            boolean allChunksExist = false;
-            boolean hasMetadata = false;
 
             List<ArbitraryTransactionData> transactionDataList;
             try (final Repository repository = RepositoryManager.getRepository()) {
@@ -741,6 +753,11 @@ public class ArbitraryDataFileListManager {
                 byte[] signature = transactionData.getSignature();
                 String signature58 = Base58.encode(signature);
                 List<byte[]> requestedHashes = requestedHashesBySignature58.get(signature58);
+                List<byte[]> hashes = new ArrayList<>();
+                List<byte[]> originalRequestedHashes = requestedHashes;
+                List<byte[]> missingRequestedHashes = null;
+                boolean allChunksExist = false;
+                boolean hasMetadata = false;
 
                 // Check if we're even allowed to serve data for this transaction
                 if (ArbitraryDataStorageManager.getInstance().canStoreData(transactionData)) {
@@ -771,17 +788,41 @@ public class ArbitraryDataFileListManager {
 
                         // Assume all chunks exists, unless one can't be found below
                         allChunksExist = true;
+                        List<byte[]> computedMissingRequestedHashes = new ArrayList<>();
 
-                        for (byte[] requestedHash : requestedHashes) {
-                            ArbitraryDataFileChunk chunk = ArbitraryDataFileChunk.fromHash(requestedHash, signature);
-                            if (chunk.exists()) {
-                                hashes.add(chunk.getHash());
-                                //LOGGER.trace("Added hash {}", chunk.getHash58());
-                            } else {
-                                LOGGER.trace("Couldn't add hash {} because it doesn't exist", chunk.getHash58());
-                                allChunksExist = false;
+                        // Optimization: Batch check file existence by scanning directory once
+                        Set<String> existingFileNames = getExistingFilesForSignature(signature);
+                        
+                        if (existingFileNames != null) {
+                            LOGGER.info("Existing file names");
+                            // Fast path: Use in-memory set lookup
+                            for (byte[] requestedHash : requestedHashes) {
+                                String hash58 = Base58.encode(requestedHash);
+                                if (existingFileNames.contains(hash58)) {
+                                    hashes.add(requestedHash);
+                                    //LOGGER.trace("Added hash {}", hash58);
+                                } else {
+                                    LOGGER.trace("Couldn't add hash {} because it doesn't exist", hash58);
+                                    allChunksExist = false;
+                                    computedMissingRequestedHashes.add(requestedHash);
+                                }
+                            }
+                        } else {
+                            LOGGER.info("legacy fallback file search");
+                            // Fallback path: Directory doesn't exist or error scanning
+                            for (byte[] requestedHash : requestedHashes) {
+                                ArbitraryDataFileChunk chunk = ArbitraryDataFileChunk.fromHash(requestedHash, signature);
+                                if (chunk.exists()) {
+                                    hashes.add(chunk.getHash());
+                                    //LOGGER.trace("Added hash {}", chunk.getHash58());
+                                } else {
+                                    LOGGER.trace("Couldn't add hash {} because it doesn't exist", chunk.getHash58());
+                                    allChunksExist = false;
+                                    computedMissingRequestedHashes.add(requestedHash);
+                                }
                             }
                         }
+                        missingRequestedHashes = computedMissingRequestedHashes;
                     } catch (DataException e) {
                         LOGGER.error(e.getMessage(), e);
                     }
@@ -801,7 +842,7 @@ public class ArbitraryDataFileListManager {
 
                 // We should only respond if we have at least one hash
                 String requestingPeer = requestingPeerBySignature58.get(signature58);
-                LOGGER.info("Preparing our response to GetArbitraryDataFileList");
+                LOGGER.info("Preparing our response to GetArbitraryDataFileList, {}", signature58);
                 if (!hashes.isEmpty()) {
 
                     // Firstly we should keep track of the requesting peer, to allow for potential direct connections later
@@ -849,12 +890,31 @@ public class ArbitraryDataFileListManager {
                     int requestHops = getArbitraryDataFileListMessage.getRequestHops() + 1;
                     long totalRequestTime = now - requestTime;
 
+                    LOGGER.info("GetArbitraryDataFileList relay check: signature={}, hashesCount={}, requestTime={}, now={}, totalRequestTime={}, requestHops={}, requestingPeer={}, fromPeer={}, messageId={}",
+                            Base58.encode(signature),
+                            missingRequestedHashes != null ? missingRequestedHashes.size() : (originalRequestedHashes == null ? 0 : originalRequestedHashes.size()),
+                            requestTime,
+                            now,
+                            totalRequestTime,
+                            requestHops,
+                            requestingPeer,
+                            peer, message.getId());
+
+                    // If we checked locally and don't need anything else, don't relay.
+                    // (An empty list can be interpreted as "request all" by the receiver.)
+                    if (missingRequestedHashes != null && missingRequestedHashes.isEmpty()) {
+                        LOGGER.trace("No missing hashes remaining for signature {}, skipping relay", signature58);
+                        continue;
+                    }
+
                     if (totalRequestTime < RELAY_REQUEST_MAX_DURATION) { // 5 Seconds
                         // Relay request hasn't timed out yet, so can potentially be rebroadcast
                         if (requestHops < SEARCH_DEPTH_MAX_HOPS) { // 6 Hops
                             // Relay request hasn't reached the maximum number of hops yet, so can be rebroadcast
 
-                            Message relayGetArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, hashes, requestTime, requestHops, requestingPeer);
+                            // If we couldn't compute what's missing (e.g. we didn't check local availability), relay the original request unchanged.
+                            List<byte[]> relayHashes = missingRequestedHashes != null ? missingRequestedHashes : originalRequestedHashes;
+                            Message relayGetArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, relayHashes, requestTime, requestHops, requestingPeer);
                             relayGetArbitraryDataFileListMessage.setId(message.getId());
 
                             LOGGER.debug("Rebroadcasting hash list request from peer {} for signature {} to our other peers... totalRequestTime: {}, requestHops: {}", peer, Base58.encode(signature), totalRequestTime, requestHops);
@@ -874,6 +934,51 @@ public class ArbitraryDataFileListManager {
             }
         } catch (Exception e) {
             LOGGER.error(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Efficiently gets all existing file names for a given signature by scanning the directory once.
+     * Returns a Set of file names (hash58 strings) for fast lookup, or null if directory doesn't exist or error occurs.
+     * 
+     * @param signature The signature bytes identifying the transaction
+     * @return Set of existing file names (hash58 strings), or null if directory doesn't exist
+     */
+    private Set<String> getExistingFilesForSignature(byte[] signature) {
+        try {
+            // Construct the directory path using the same logic as ArbitraryDataFile
+            String signature58 = Base58.encode(signature);
+            String sig58First2Chars = signature58.substring(0, 2).toLowerCase();
+            String sig58Next2Chars = signature58.substring(2, 4).toLowerCase();
+            Path directory = Path.of(Settings.getInstance().getDataPath(), sig58First2Chars, sig58Next2Chars, signature58);
+
+            // Check if directory exists
+            if (!Files.exists(directory) || !Files.isDirectory(directory)) {
+                return null;
+            }
+
+            // Scan directory once and collect all file names
+            Set<String> fileNames = new HashSet<>();
+            try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+                for (Path entry : stream) {
+                    if (Files.isRegularFile(entry)) {
+                        fileNames.add(entry.getFileName().toString());
+                    }
+                }
+            }
+            
+            LOGGER.trace("Scanned directory {} and found {} files for signature {}", 
+                    directory, fileNames.size(), signature58);
+            return fileNames;
+            
+        } catch (IOException e) {
+            LOGGER.debug("Error scanning directory for signature {}: {}", 
+                    Base58.encode(signature), e.getMessage());
+            return null;
+        } catch (Exception e) {
+            LOGGER.error("Unexpected error scanning directory for signature {}: {}", 
+                    Base58.encode(signature), e.getMessage());
+            return null;
         }
     }
 }

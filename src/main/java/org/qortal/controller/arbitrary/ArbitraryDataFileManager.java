@@ -1,11 +1,28 @@
 package org.qortal.controller.arbitrary;
 
-import com.google.common.net.InetAddresses;
+import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.controller.Controller;
+import org.qortal.crypto.Crypto;
 import org.qortal.data.arbitrary.ArbitraryDirectConnectionInfo;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
@@ -13,9 +30,16 @@ import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerAddress;
 import org.qortal.network.PeerSendManagement;
 import org.qortal.network.PeerSendManager;
-import org.qortal.network.message.*;
+import org.qortal.network.message.ArbitraryDataFileMessage;
+import org.qortal.network.message.BlockSummariesMessage;
+import org.qortal.network.message.GenericUnknownMessage;
+import org.qortal.network.message.GetArbitraryDataFileMessage;
+import org.qortal.network.message.Message;
+import org.qortal.network.message.MessageException;
+import org.qortal.network.message.MessageType;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -23,18 +47,8 @@ import org.qortal.settings.Settings;
 import org.qortal.utils.ArbitraryTransactionUtils;
 import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
-import org.qortal.utils.Triple;
 
-import java.security.SecureRandom;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-
-import org.qortal.crypto.Crypto;
-import static org.qortal.network.PeerSendManager.HIGH_PRIORITY;
+import com.google.common.net.InetAddresses;
 
 public class ArbitraryDataFileManager extends Thread {
 
@@ -71,12 +85,40 @@ public class ArbitraryDataFileManager extends Thread {
 
     private final Map<String, PeerSendManager> peerSendManagers = new ConcurrentHashMap<>();
 
+    // Relay queue system
+    private final Map<String, BlockingQueue<RelayRequest>> relayQueuesByPeer = new ConcurrentHashMap<>();
+    private final Map<String, Thread> relayWorkersByPeer = new ConcurrentHashMap<>();
+    private final Map<String, Long> inProgressRelayRequests = new ConcurrentHashMap<>();
+
     private PeerSendManager getOrCreateSendManager(Peer peer) {
         try {
             return peerSendManagers.computeIfAbsent(peer.toString(), key -> new PeerSendManager(peer));
         } catch (Exception e) {
             LOGGER.info("FAILED - Could not map to a peer or create a peer");
             return null;
+        }
+    }
+
+    /**
+     * Helper class to hold relay request information
+     */
+    private static class RelayRequest {
+        final Peer targetPeer;
+        final Peer requestingPeer;
+        final byte[] signature;
+        final byte[] hash;
+        final Message originalMessage;
+        final String hash58;
+        final long queuedTime;
+        
+        RelayRequest(Peer targetPeer, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) {
+            this.targetPeer = targetPeer;
+            this.requestingPeer = requestingPeer;
+            this.signature = signature;
+            this.hash = hash;
+            this.originalMessage = originalMessage;
+            this.hash58 = Base58.encode(hash);
+            this.queuedTime = NTP.getTime();
         }
     }
 
@@ -386,25 +428,130 @@ public class ArbitraryDataFileManager extends Thread {
 
     }
 
+    /**
+     * Queue a relay request to be processed sequentially per peer.
+     * This prevents concurrent relay requests to the same peer which can cause deadlocks.
+     * Includes timeout-based deduplication to allow retries of stuck requests.
+     */
+    private void queueRelayRequest(Peer peerToAsk, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) {
+        String peerKey = peerToAsk.toString();
+        String hash58 = Base58.encode(hash);
+        String dedupKey = hash58 + ":" + requestingPeer.toString();
+        
+        Long now = NTP.getTime();
+        
+        // Check if already in progress (with timeout)
+        Long existingTimestamp = inProgressRelayRequests.get(dedupKey);
+        if (existingTimestamp != null) {
+            long age = now - existingTimestamp;
+            if (age < 10000) {  // 10 second deduplication window
+                LOGGER.debug("Duplicate relay request for hash {} from peer {}, age={}ms, ignoring", 
+                        hash58, requestingPeer, age);
+                return;
+            } else {
+                LOGGER.info("Stale relay request found for hash {} (age={}ms), allowing retry", hash58, age);
+                // Fall through to queue the request
+            }
+        }
+        
+        // Mark as in-progress with current timestamp
+        inProgressRelayRequests.put(dedupKey, now);
+        
+        // Get or create queue for this relay peer
+        BlockingQueue<RelayRequest> queue = relayQueuesByPeer.computeIfAbsent(
+            peerKey, 
+            k -> new LinkedBlockingQueue<>()
+        );
+        
+        // Get or create worker thread for this relay peer
+        relayWorkersByPeer.computeIfAbsent(peerKey, k -> {
+            Thread worker = new Thread(() -> relayWorker(peerToAsk, queue), "RelayWorker-" + peerKey);
+            worker.setDaemon(true);
+            worker.start();
+            return worker;
+        });
+        
+        // Add request to queue
+        RelayRequest request = new RelayRequest(peerToAsk, requestingPeer, signature, hash, originalMessage);
+        if (!queue.offer(request)) {
+            LOGGER.warn("Failed to queue relay request for hash {} to peer {}", hash58, peerKey);
+            inProgressRelayRequests.remove(dedupKey);
+        } else {
+            LOGGER.debug("Queued relay request for hash {} to peer {} (queue size: {})", hash58, peerKey, queue.size());
+        }
+    }
+
+    /**
+     * Worker thread that processes relay requests sequentially for a specific peer.
+     * This ensures only one thread is ever sending to a peer at a time, preventing deadlocks.
+     * Includes staleness detection to drop requests that have been queued too long.
+     */
+    private void relayWorker(Peer targetPeer, BlockingQueue<RelayRequest> queue) {
+        LOGGER.info("Started relay worker for peer {}", targetPeer);
+        
+        while (!isStopping) {
+            try {
+                // Wait for next request (with timeout to allow cleanup)
+                RelayRequest request = queue.poll(60, TimeUnit.SECONDS);
+                
+                if (request == null) {
+                    // Queue empty for 60s - check if we should exit
+                    if (queue.isEmpty()) {
+                        LOGGER.debug("Relay worker for peer {} exiting due to inactivity", targetPeer);
+                        relayQueuesByPeer.remove(targetPeer.toString());
+                        relayWorkersByPeer.remove(targetPeer.toString());
+                        break;
+                    }
+                    continue;
+                }
+                
+                // Check if request is stale (original requester has timed out)
+                Long now = NTP.getTime();
+                long age = now - request.queuedTime;
+                if (age > 5000) {  // 5 second timeout matches getResponseToDataFile timeout
+                    LOGGER.warn("Dropping stale relay request for hash {} (queued {}ms ago)", request.hash58, age);
+                    String dedupKey = request.hash58 + ":" + request.requestingPeer.toString();
+                    inProgressRelayRequests.remove(dedupKey);
+                    continue;  // Skip to next request
+                }
+                
+                // Process the relay request
+                LOGGER.debug("Processing relay request for hash {} via peer {} (queued {}ms ago)", 
+                        request.hash58, targetPeer, age);
+                try {
+                    fetchFileForRelay(request.targetPeer, request.requestingPeer, 
+                                    request.signature, request.hash, request.originalMessage);
+                } catch (Exception e) {
+                    LOGGER.error("Error processing relay request for hash {}: {}", request.hash58, e.getMessage(), e);
+                } finally {
+                    // Always remove from in-progress set
+                    String dedupKey = request.hash58 + ":" + request.requestingPeer.toString();
+                    inProgressRelayRequests.remove(dedupKey);
+                }
+                
+            } catch (InterruptedException e) {
+                LOGGER.info("Relay worker for peer {} interrupted", targetPeer);
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+    }
+
     private void fetchFileForRelay(Peer peer, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) throws DataException {
         try {
             String hash58 = Base58.encode(hash);
 
-            LOGGER.debug(String.format("Fetching data file %.8s from peer %s", hash58, peer));
+            LOGGER.info(String.format("Fetching data file2 %.8s from peer %s", hash58, peer));
             arbitraryDataFileRequests.put(hash58, NTP.getTime());
             Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
-
-            Message response = null;
-            try {
-                response = peer.getResponseWithTimeout(getArbitraryDataFileMessage, (int) ArbitraryDataManager.ARBITRARY_REQUEST_TIMEOUT);
-            } catch (InterruptedException e) {
-                // Will return below due to null response
-            }
+            peer.QDNUse();
+            Message response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
+          
             arbitraryDataFileRequests.remove(hash58);
-            LOGGER.trace(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
+            LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
 
             if (response == null) {
-                LOGGER.debug("Received null response from peer {}", peer);
+                LOGGER.info("Received null response from peer {}", peer);
                 return;
             }
             if (response.getType() != MessageType.ARBITRARY_DATA_FILE) {
@@ -416,7 +563,7 @@ public class ArbitraryDataFileManager extends Thread {
             ArbitraryDataFile arbitraryDataFile = peersArbitraryDataFileMessage.getArbitraryDataFile();
 
             if (arbitraryDataFile != null) {
-
+                LOGGER.info("forwarding request");
                 // We might want to forward the request to the peer that originally requested it
                 this.handleArbitraryDataFileForwarding(requestingPeer, new ArbitraryDataFileMessage(signature, arbitraryDataFile), originalMessage);
             }
@@ -484,7 +631,7 @@ public class ArbitraryDataFileManager extends Thread {
             return;
         }
 
-        LOGGER.debug("Received arbitrary data file - forwarding is needed");
+        LOGGER.info("Received arbitrary data file - forwarding is needed");
 
         try {
             // The ID needs to match that of the original request
@@ -744,41 +891,71 @@ public class ArbitraryDataFileManager extends Thread {
     }
 
     // Network handlers
-    private void processDataFile(Peer peer, byte[] hash, byte[] sig, int msgId) {
+    private void processDataFile(Peer peer, byte[] hash, byte[] sig, Message originalMessage) {
+
         final String hash58 = Base58.encode(hash);
         try {
             ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromHash(hash, sig);
             ArbitraryRelayInfo relayInfo = this.getOptimalRelayInfoEntryForHash(hash58);
             if (arbitraryDataFile.exists()) {
-                LOGGER.trace("Hash {} exists, queueing send file to {}", hash58, peer);
+                LOGGER.info("Hash {} exists, queueing send file to {}", hash58, peer);
 
                 // We can serve the file directly as we already have it
                 ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(sig, arbitraryDataFile);
-                arbitraryDataFileMessage.setId(msgId);
+                arbitraryDataFileMessage.setId(originalMessage.getId());
 
                 PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage);
 
             }
             else if (relayInfo != null) {
-                LOGGER.debug("We have relay info for hash {}", Base58.encode(hash));
-                // We need to ask this peer for the file
-                Peer peerToAsk = relayInfo.getPeer();
-                if (peerToAsk != null) {
-                    // New Logic in v5.20 - Provide relay data to peer instead of fetching it
-                    PeerRelayDataMessage prdm = new PeerRelayDataMessage(peerToAsk.getPeerData().getAddress().getHost(), hash);
-                    PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageWithPriority(HIGH_PRIORITY, prdm);
-                    /* Old Logic,
-                    // Forward the message to this peer
-                    LOGGER.debug("Asking peer {} for hash {}", peerToAsk, hash58);
-                    // No need to pass arbitraryTransactionData below because this is only used for metadata caching,
-                    // and metadata isn't retained when relaying.
-                    // This is old logic,
-                    this.fetchFileForRelay(peerToAsk, peer, signature, hash, message);
-                    // Instead of relay tell them where we know about it
-                    */
+                if (!Settings.getInstance().isRelayModeEnabled()) {
+                    LOGGER.info("Relay info exists for hash {} but relay mode is disabled", hash58);
                 }
-                else {
-                    LOGGER.debug("Peer {} not found in relay info", peer);
+                LOGGER.info("We have relay info for hash {}", Base58.encode(hash));
+                
+                // Get the relay peer info
+                Peer relayPeer = relayInfo.getPeer();
+                PeerData relayPeerData = relayPeer != null ? relayPeer.getPeerData() : null;
+                PeerAddress relayPeerAddress = relayPeerData != null ? relayPeerData.getAddress() : null;
+                
+                if (relayPeerData == null) {
+                    LOGGER.warn("Relay peer data is null for hash {}", hash58);
+                } else {
+                    LOGGER.info("Relay peer address: {}", relayPeerAddress);
+                    
+                    // Try to get the current NetworkData peer for this address
+                    Peer peerToAsk = NetworkData.getInstance().getPeerByPeerData(relayPeerData);
+                    boolean socketOpen = peerToAsk != null 
+                            && peerToAsk.getSocketChannel() != null 
+                            && peerToAsk.getSocketChannel().isOpen();
+                    
+                    LOGGER.info("Resolved peerToAsk: {}, socketOpen: {}", peerToAsk, socketOpen);
+                    
+                    if (!socketOpen && Settings.getInstance().isRelayModeEnabled()) {
+                        // Socket is closed or peer not found - try to force connect
+                        LOGGER.info("Socket closed or peer not found for relay to {}. Attempting reconnect...", relayPeerAddress);
+                        
+                        // Create or reuse peer and force connection
+                        if (peerToAsk == null) {
+                            peerToAsk = new Peer(relayPeerData, Peer.NETWORKDATA);
+                            peerToAsk.setIsDataPeer(true);
+                        }
+                        
+                        // Add this hash to pending requests for when connection completes
+                        // (Similar to direct connection handling in ArbitraryDataFileRequestThread)
+                        // For now, we'll just log and skip - connection will be established for next time
+                        LOGGER.warn("Skipping relay for hash {} because socket is closed. Forcing reconnect for future requests.", hash58);
+                       
+                    }
+                    else if (peerToAsk != null && socketOpen && Settings.getInstance().isRelayModeEnabled()) {
+                        // Queue the relay request instead of calling directly to prevent concurrent access deadlocks
+                        LOGGER.debug("Queueing relay request for hash {} via peer {}", hash58, peerToAsk);
+                        this.queueRelayRequest(peerToAsk, peer, sig, hash, originalMessage);
+                    }
+                    else {
+                        LOGGER.warn("Cannot relay for hash {}: peerToAsk={}, socketOpen={}, relayModeEnabled={}",
+                                hash58, peerToAsk, socketOpen, Settings.getInstance().isRelayModeEnabled());
+                    }
                 }
             }
             else {
@@ -794,7 +971,7 @@ public class ArbitraryDataFileManager extends Thread {
                 Message fileUnknownMessage = peer.getPeersVersion() >= GenericUnknownMessage.MINIMUM_PEER_VERSION
                         ? new GenericUnknownMessage()
                         : new BlockSummariesMessage(Collections.emptyList());
-                fileUnknownMessage.setId(msgId);
+                fileUnknownMessage.setId(originalMessage.getId());
                 if (!peer.sendMessage(fileUnknownMessage)) {
                     LOGGER.debug("Couldn't sent file-unknown response");
                 }
@@ -807,7 +984,12 @@ public class ArbitraryDataFileManager extends Thread {
             LOGGER.debug("Unable to handle request for arbitrary data file: {}", hash58);
         } catch (MessageException e) {
             throw new RuntimeException(e);
-        }
+        } 
+        
+        // finally {
+        //     // Always remove from in-progress set when done
+        //     inProgressRelayRequests.remove(relayKey);
+        // }
 
     }
 
@@ -840,7 +1022,7 @@ public class ArbitraryDataFileManager extends Thread {
         byte[] signature = getArbitraryDataFileMessage.getSignature();
         Controller.getInstance().stats.getArbitraryDataFileMessageStats.requests.incrementAndGet();
 
-        processDataFile(peer, hash, signature, message.getId());
+        processDataFile(peer, hash, signature, message);
     }
 
 

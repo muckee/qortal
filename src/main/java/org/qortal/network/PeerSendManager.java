@@ -1,12 +1,15 @@
 package org.qortal.network;
 
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.qortal.network.message.Message;
 import org.qortal.network.helper.PeerSpeedTracker;
+import org.qortal.network.message.Message;
 import org.qortal.network.message.MessageException;
 
 
@@ -114,6 +117,7 @@ public class PeerSendManager {
 
                     for (int attempt = 1; attempt <= MAX_MESSAGE_ATTEMPTS; attempt++) {
                         try {
+                            
                             if (peer.sendMessageWithTimeout(message, timedMessage.getExpectedRunTime())) {
                                 success = true;
                                 failureCount.set(0); // reset on success
