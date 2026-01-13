@@ -22,7 +22,9 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -37,7 +39,9 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	// See: https://electrumx.readthedocs.io/en/latest/protocol-changes.html
 	private static final double MIN_PROTOCOL_VERSION = 1.2;
 	private static final double MAX_PROTOCOL_VERSION = 2.0; // Higher than current latest, for hopeful future-proofing
-	private static final String CLIENT_NAME = "Qortal";
+	private static final int MIN_TARGET_CONNECTIONS = 2;
+	private static final int DEFAULT_TARGET_CONNECTIONS = 3;
+	private static final int MAX_TARGET_CONNECTIONS = 12;
 
 	private static final int BLOCK_HEADER_LENGTH = 80;
 
@@ -51,13 +55,13 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private static final long MAX_AVG_RESPONSE_TIME = 2000L; // ms
 	public static final String MISSING_FEATURES_ERROR = "MISSING FEATURES ERROR";
 	public static final String EXPECTED_GENESIS_ERROR = "EXPECTED GENESIS ERROR";
-	public static final int MINIMUM_CONNECTIONS = 30;
-	public static final int MAXIMUM_CONNECTIONS = 50;
+	private static final long IDLE_DISCONNECT_MS = 2 * 60 * 1000L;
 
 	private ChainableServerConnectionRecorder recorder = new ChainableServerConnectionRecorder(100);
 
 	// the minimum number of connections targeted for this foreign blockchain
 	private int minimumConnections;
+	private final int maximumConnections;
 
 	public static class Server implements ChainableServer {
 		String hostname;
@@ -165,6 +169,12 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	// Scheduled executor service to monitor connections
 	private final ScheduledExecutorService scheduleMonitorConnections = Executors.newScheduledThreadPool(1);
 
+	private final Object connectionManagementLock = new Object();
+	private final Object connectionListLock = new Object();
+	private volatile boolean connectionManagementStarted = false;
+	private volatile long lastRpcTimeMs = 0L;
+	private final AtomicInteger inFlightRpcCount = new AtomicInteger(0);
+
 	// Constructors
 
 	public ElectrumX(String netId, String genesisHash, Collection<Server> initialServerList, Map<Server.ConnectionType, Integer> defaultPorts) {
@@ -173,12 +183,18 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 		this.servers.addAll(initialServerList);
 		this.defaultPorts.putAll(defaultPorts);
 
-		// the minimum is set to roughly 10% of the initial count
-		this.minimumConnections = (initialServerList.size() / 10) + 1;
+		int listSize = initialServerList.size();
+		if (listSize == 0) {
+			this.maximumConnections = 0;
+			this.minimumConnections = 0;
+			return;
+		}
 
-		scheduleMakeConnections.scheduleWithFixedDelay(this::makeConnections, 1, 3600, TimeUnit.SECONDS);
-		scheduleRecoverConnections.scheduleWithFixedDelay(this::recoverConnections, 120, 10, TimeUnit.SECONDS);
-		scheduleMonitorConnections.scheduleWithFixedDelay(this::monitorConnections, 1, 10, TimeUnit.MINUTES);
+		int scaledTarget = (listSize / 10) + 1;
+		int targetConnections = clamp(scaledTarget, MIN_TARGET_CONNECTIONS, MAX_TARGET_CONNECTIONS);
+		targetConnections = Math.min(listSize, Math.max(targetConnections, DEFAULT_TARGET_CONNECTIONS));
+		this.maximumConnections = targetConnections;
+		this.minimumConnections = Math.max(1, Math.min(listSize, Math.max(1, targetConnections / 2)));
 	}
 
 	// Methods for use by other classes
@@ -740,6 +756,54 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			this.availableConnections.add(server);
 	}
 
+	private boolean isIdle() {
+		if (this.inFlightRpcCount.get() > 0) {
+			return false;
+		}
+		if (this.lastRpcTimeMs <= 0L) {
+			return true;
+		}
+		return System.currentTimeMillis() - this.lastRpcTimeMs > IDLE_DISCONNECT_MS;
+	}
+
+	private void closeAllConnections(String reason) {
+		synchronized (this.connectionListLock) {
+			for (ElectrumServer server : new HashSet<>(this.connections)) {
+				this.connections.remove(server);
+				server.closeServer(this.getClass().getSimpleName(), reason);
+			}
+			this.availableConnections.clear();
+			this.remainingServers.clear();
+		}
+	}
+
+	/**
+	 * Ensure the connection maintenance threads are running and initial connections exist.
+	 */
+	private void ensureConnectionManagementStarted() {
+		if (this.connectionManagementStarted) {
+			return;
+		}
+
+		boolean shouldInit = false;
+		synchronized (this.connectionManagementLock) {
+			if (!this.connectionManagementStarted) {
+				this.connectionManagementStarted = true;
+				shouldInit = true;
+			}
+		}
+
+		if (!shouldInit) {
+			return;
+		}
+
+		startMakingConnections();
+
+		scheduleMakeConnections.scheduleWithFixedDelay(this::makeConnections, 1, 3600, TimeUnit.SECONDS);
+		scheduleRecoverConnections.scheduleWithFixedDelay(this::recoverConnections, 120, 10, TimeUnit.SECONDS);
+		scheduleMonitorConnections.scheduleWithFixedDelay(this::monitorConnections, 1, 10, TimeUnit.MINUTES);
+	}
+
 	/**
 	 * <p>Performs RPC call, with automatic reconnection to different server if needed.
 	 * </p>
@@ -749,6 +813,14 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	 * @throws ForeignBlockchainException if server returns error or something goes wrong
 	 */
 	private ElectrumServerResponse rpc(String method, Object...params) throws ForeignBlockchainException {
+		this.inFlightRpcCount.incrementAndGet();
+		this.lastRpcTimeMs = System.currentTimeMillis();
+		try {
+			ensureConnectionManagementStarted();
+			if (this.availableConnections.isEmpty()) {
+				LOGGER.debug("{} no available ElectrumX connections; starting connections on demand", this.blockchain.getCurrencyCode());
+				startMakingConnections();
+			}
 
 			ElectrumServer electrumServer = acquireServer();
 
@@ -771,6 +843,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 				if (response != null) {
 					releaseServer(electrumServer);
+					this.lastRpcTimeMs = System.currentTimeMillis();
 					return new ElectrumServerResponse(electrumServer, response);
 				}
 
@@ -785,6 +858,9 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			// Failed to perform RPC - maybe lack of servers?
 			LOGGER.info("Error: No connected Electrum servers when trying to make RPC call");
 			throw new ForeignBlockchainException.NetworkException(String.format("Failed to perform ElectrumX RPC %s", method));
+		} finally {
+			this.inFlightRpcCount.decrementAndGet();
+		}
 	}
 
 	/**
@@ -793,6 +869,11 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	 * Log the server connection status for this foreign blockchain.
 	 */
 	private void monitorConnections() {
+
+		if (this.isIdle() && !this.connections.isEmpty()) {
+			LOGGER.info("{} idle; closing {} ElectrumX connections", this.blockchain.getCurrencyCode(), this.connections.size());
+			this.closeAllConnections("idle timeout");
+		}
 
 		LOGGER.info(
 			"{} {} available connections, {} total servers, {} total connections, {} useless servers",
@@ -812,6 +893,9 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private void makeConnections() {
 
 		try {
+			if (this.isIdle()) {
+				return;
+			}
 			if( this.connections.isEmpty() ) {
 				startMakingConnections();
 			}
@@ -830,6 +914,9 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private void recoverConnections() {
 
 		try {
+			if (this.isIdle()) {
+				return;
+			}
 			if( this.connections.size() < this.minimumConnections ) {
 				LOGGER.debug("{} recovering connections", this.blockchain.currencyCode);
 				startMakingConnections();
@@ -846,8 +933,10 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private void startMakingConnections() {
 
 		// assume there are no server to get peers from, so we must start from the base list
-		this.remainingServers.clear();
-		this.remainingServers.addAll(this.servers);
+		synchronized (this.connectionListLock) {
+			this.remainingServers.clear();
+			this.remainingServers.addAll(this.servers);
+		}
 
 		connectRemainingServers();
 	}
@@ -860,19 +949,21 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private void makeMoreConnections() {
 
 		// if we need more connections
-		if(this.connections.size() < MINIMUM_CONNECTIONS) {
+		if(this.connections.size() < this.maximumConnections) {
 
 			// Ask for more servers
 			Set<Server> moreServers = serverPeersSubscribe();
 
-			// Add all servers to base list
-			this.servers.addAll(moreServers);
+			synchronized (this.connectionListLock) {
+				// Add all servers to base list
+				this.servers.addAll(moreServers);
 
-			// add base list to remaining list
-			this.remainingServers.addAll(this.servers);
+				// add base list to remaining list
+				this.remainingServers.addAll(this.servers);
 
-			// remove servers that this node is already connected to
-			this.remainingServers.removeAll(this.connections.stream().map(ElectrumServer::getServer).collect(Collectors.toList()));
+				// remove servers that this node is already connected to
+				this.remainingServers.removeAll(this.connections.stream().map(ElectrumServer::getServer).collect(Collectors.toList()));
+			}
 
 			// try connecting the remaining servers
 			connectRemainingServers();
@@ -881,11 +972,37 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 	private void connectRemainingServers() {
 		// while there are remaining servers and less than the maximum connections
-		while( !this.remainingServers.isEmpty() && this.connections.size() < MAXIMUM_CONNECTIONS ) {
-			ChainableServer server = this.remainingServers.remove(RANDOM.nextInt(this.remainingServers.size()));
+		while (true) {
+			ChainableServer server;
+			synchronized (this.connectionListLock) {
+				if (this.remainingServers.isEmpty() || this.connections.size() >= this.maximumConnections) {
+					return;
+				}
+				server = this.remainingServers.remove(RANDOM.nextInt(this.remainingServers.size()));
+			}
 
 			makeConnection(server, this.getClass().getSimpleName());
 		}
+	}
+
+	private static int clamp(int value, int min, int max) {
+		if (value < min) {
+			return min;
+		}
+		if (value > max) {
+			return max;
+		}
+		return value;
+	}
+
+	private static String randomClientName() {
+		final String alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+		StringBuilder name = new StringBuilder(12);
+		ThreadLocalRandom random = ThreadLocalRandom.current();
+		for (int i = 0; i < 12; i++) {
+			name.append(alphabet.charAt(random.nextInt(alphabet.length())));
+		}
+		return name.toString();
 	}
 
 	private Optional<ChainableServerConnection> makeConnection(ChainableServer server, String requestedBy) {
@@ -896,6 +1013,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			int timeout = 5000; // ms
 
 			ElectrumServer electrumServer = ElectrumServer.createInstance(server, endpoint, timeout, this.recorder);
+			electrumServer.setClientName(randomClientName());
 
 			// All connections need to start with a version negotiation
 			this.connectedRpc(electrumServer, "server.version");
@@ -954,7 +1072,12 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 		// server.version needs additional params to negotiate a version
 		if (method.equals("server.version")) {
-			requestParams.add(CLIENT_NAME);
+			String clientName = server.getClientName();
+			if (clientName == null) {
+				clientName = randomClientName();
+				server.setClientName(clientName);
+			}
+			requestParams.add(clientName);
 			List<String> versions = new ArrayList<>();
 			DecimalFormat df = new DecimalFormat("#.#");
 			versions.add(df.format(MIN_PROTOCOL_VERSION));
