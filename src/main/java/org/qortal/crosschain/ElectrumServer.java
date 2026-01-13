@@ -18,6 +18,7 @@ public class ElectrumServer {
     private Socket socket;
     private Scanner scanner;
     private int nextId = 1;
+    private String clientName;
 
     private ChainableServerConnectionRecorder recorder;
 
@@ -58,6 +59,14 @@ public class ElectrumServer {
 
     public int incrementNextId() {
         return nextId++;
+    }
+
+    public String getClientName() {
+        return this.clientName;
+    }
+
+    public void setClientName(String clientName) {
+        this.clientName = clientName;
     }
 
     public String write(byte[] bytes, String id) throws IOException {
