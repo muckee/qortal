@@ -44,6 +44,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private static final int DEFAULT_TARGET_CONNECTIONS = 3;
 	private static final double TARGET_CONNECTIONS_FRACTION = 0.75d;
 	private static final int PROBE_TIMEOUT_MS = 2000;
+	private static final long PROBE_RETRY_MS = 5 * 60 * 1000L;
 	private static final long FAILURE_PENALTY_MS = 5000L;
 
 	private static final int BLOCK_HEADER_LENGTH = 80;
@@ -183,7 +184,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private volatile long lastRpcTimeMs = 0L;
 	private final AtomicInteger inFlightRpcCount = new AtomicInteger(0);
 	private final Map<ChainableServer, Integer> serverFailureCounts = new ConcurrentHashMap<>();
-	private final Set<ChainableServer> probedServers = ConcurrentHashMap.newKeySet();
+	private final Map<ChainableServer, Long> serverLastProbeTime = new ConcurrentHashMap<>();
 	private volatile boolean initialProbeCompleted = false;
 	private volatile String lastScoreExtremesDigest = "";
 
@@ -802,6 +803,9 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 		}
 
 		int targetConnections = (int) Math.ceil(listSize * TARGET_CONNECTIONS_FRACTION);
+		if (listSize > 30) {
+			targetConnections = 30;
+		}
 		targetConnections = Math.max(targetConnections, DEFAULT_TARGET_CONNECTIONS);
 		int minTarget = Math.min(MIN_TARGET_CONNECTIONS, listSize);
 		targetConnections = clamp(targetConnections, minTarget, listSize);
@@ -874,10 +878,14 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	}
 
 	private void probeServers(Collection<ChainableServer> servers) {
+		long now = System.currentTimeMillis();
 		for (ChainableServer server : servers) {
-			if (this.probedServers.add(server)) {
-				probeServer(server);
+			Long lastProbe = this.serverLastProbeTime.get(server);
+			if (lastProbe != null && now - lastProbe < PROBE_RETRY_MS) {
+				continue;
 			}
+			this.serverLastProbeTime.put(server, now);
+			probeServer(server);
 		}
 	}
 
@@ -1057,9 +1065,14 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 				return;
 			}
 			if( this.connections.size() < this.minimumConnections ) {
-				LOGGER.debug("{} recovering connections", this.blockchain.currencyCode);
+				LOGGER.debug("{} recovering connections", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode());
+				List<ChainableServer> serversSnapshot;
+				synchronized (this.connectionListLock) {
+					serversSnapshot = new ArrayList<>(this.servers);
+				}
+				probeServers(serversSnapshot);
 				startMakingConnections();
-				LOGGER.debug("{} recovered {} connections", this.blockchain.currencyCode, this.connections.size());
+				LOGGER.debug("{} recovered {} connections", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), this.connections.size());
 			}
 		} catch (Exception e) {
 			LOGGER.error(e.getMessage(), e);
