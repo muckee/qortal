@@ -19,6 +19,7 @@ import java.net.SocketAddress;
 import java.text.DecimalFormat;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -41,7 +42,9 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private static final double MAX_PROTOCOL_VERSION = 2.0; // Higher than current latest, for hopeful future-proofing
 	private static final int MIN_TARGET_CONNECTIONS = 2;
 	private static final int DEFAULT_TARGET_CONNECTIONS = 3;
-	private static final int MAX_TARGET_CONNECTIONS = 12;
+	private static final double TARGET_CONNECTIONS_FRACTION = 0.75d;
+	private static final int PROBE_TIMEOUT_MS = 2000;
+	private static final long FAILURE_PENALTY_MS = 5000L;
 
 	private static final int BLOCK_HEADER_LENGTH = 80;
 
@@ -53,6 +56,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 	private static final int RESPONSE_TIME_READINGS = 5;
 	private static final long MAX_AVG_RESPONSE_TIME = 2000L; // ms
+	private static final long UNKNOWN_RESPONSE_PENALTY_MS = MAX_AVG_RESPONSE_TIME * 5;
 	public static final String MISSING_FEATURES_ERROR = "MISSING FEATURES ERROR";
 	public static final String EXPECTED_GENESIS_ERROR = "EXPECTED GENESIS ERROR";
 	private static final long IDLE_DISCONNECT_MS = 2 * 60 * 1000L;
@@ -61,7 +65,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 	// the minimum number of connections targeted for this foreign blockchain
 	private int minimumConnections;
-	private final int maximumConnections;
+	private int maximumConnections;
 
 	public static class Server implements ChainableServer {
 		String hostname;
@@ -87,11 +91,15 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 		@Override
 		public long averageResponseTime() {
-			if (this.responseTimes.size() < RESPONSE_TIME_READINGS) {
+			List<Long> snapshot;
+			synchronized (this.responseTimes) {
+				snapshot = new ArrayList<>(this.responseTimes);
+			}
+			if (snapshot.size() < RESPONSE_TIME_READINGS) {
 				// Not enough readings yet
 				return 0L;
 			}
-			OptionalDouble average = this.responseTimes.stream().mapToDouble(a -> a).average();
+			OptionalDouble average = snapshot.stream().filter(Objects::nonNull).mapToDouble(a -> a).average();
 			if (average.isPresent()) {
 				return Double.valueOf(average.getAsDouble()).longValue();
 			}
@@ -174,6 +182,10 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	private volatile boolean connectionManagementStarted = false;
 	private volatile long lastRpcTimeMs = 0L;
 	private final AtomicInteger inFlightRpcCount = new AtomicInteger(0);
+	private final Map<ChainableServer, Integer> serverFailureCounts = new ConcurrentHashMap<>();
+	private final Set<ChainableServer> probedServers = ConcurrentHashMap.newKeySet();
+	private volatile boolean initialProbeCompleted = false;
+	private volatile String lastScoreExtremesDigest = "";
 
 	// Constructors
 
@@ -183,18 +195,7 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 		this.servers.addAll(initialServerList);
 		this.defaultPorts.putAll(defaultPorts);
 
-		int listSize = initialServerList.size();
-		if (listSize == 0) {
-			this.maximumConnections = 0;
-			this.minimumConnections = 0;
-			return;
-		}
-
-		int scaledTarget = (listSize / 10) + 1;
-		int targetConnections = clamp(scaledTarget, MIN_TARGET_CONNECTIONS, MAX_TARGET_CONNECTIONS);
-		targetConnections = Math.min(listSize, Math.max(targetConnections, DEFAULT_TARGET_CONNECTIONS));
-		this.maximumConnections = targetConnections;
-		this.minimumConnections = Math.max(1, Math.min(listSize, Math.max(1, targetConnections / 2)));
+		updateConnectionTargets(initialServerList.size());
 	}
 
 	// Methods for use by other classes
@@ -777,6 +778,131 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 		}
 	}
 
+	private long averageConnectedResponseTime() {
+		long total = 0L;
+		int count = 0;
+		synchronized (this.connections) {
+			for (ElectrumServer server : this.connections) {
+				long responseTime = server.averageResponseTime();
+				if (responseTime > 0) {
+					total += responseTime;
+					count++;
+				}
+			}
+		}
+		return count == 0 ? 0L : total / count;
+	}
+
+	private void updateConnectionTargets(int listSize) {
+		if (listSize <= 0) {
+			this.maximumConnections = 0;
+			this.minimumConnections = 0;
+			LOGGER.info("{} has no ElectrumX servers configured", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode());
+			return;
+		}
+
+		int targetConnections = (int) Math.ceil(listSize * TARGET_CONNECTIONS_FRACTION);
+		targetConnections = Math.max(targetConnections, DEFAULT_TARGET_CONNECTIONS);
+		int minTarget = Math.min(MIN_TARGET_CONNECTIONS, listSize);
+		targetConnections = clamp(targetConnections, minTarget, listSize);
+		this.maximumConnections = targetConnections;
+		this.minimumConnections = Math.max(1, Math.min(listSize, Math.max(1, targetConnections / 2)));
+
+		LOGGER.info("{} targets {} connections (min {}), listSize {}, avgResponse {}ms", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), this.maximumConnections, this.minimumConnections, listSize, averageConnectedResponseTime());
+	}
+
+	private long scoreServer(ChainableServer server) {
+		long averageResponse = server.averageResponseTime();
+		long latencyScore = averageResponse > 0 ? averageResponse : UNKNOWN_RESPONSE_PENALTY_MS;
+		int failures = this.serverFailureCounts.getOrDefault(server, 0);
+		return latencyScore + (failures * FAILURE_PENALTY_MS);
+	}
+
+	private List<ChainableServer> selectPreferredServers(int maxServers) {
+		List<ChainableServer> snapshot;
+		synchronized (this.connectionListLock) {
+			snapshot = new ArrayList<>(this.servers);
+		}
+		if (snapshot.isEmpty() || maxServers <= 0) {
+			return Collections.emptyList();
+		}
+		snapshot.sort(Comparator.comparingLong(this::scoreServer));
+		logScoreExtremes(snapshot);
+		int limit = Math.min(maxServers, snapshot.size());
+		return new ArrayList<>(snapshot.subList(0, limit));
+	}
+
+	private void logScoreExtremes(List<ChainableServer> sortedServers) {
+		int limit = Math.min(3, sortedServers.size());
+		if (limit == 0) {
+			return;
+		}
+
+		StringBuilder best = new StringBuilder();
+		StringBuilder worst = new StringBuilder();
+		for (int i = 0; i < limit; i++) {
+			if (i > 0) {
+				best.append(", ");
+			}
+			ChainableServer server = sortedServers.get(i);
+			best.append(server).append(":").append(scoreServer(server)).append("ms");
+		}
+		for (int i = sortedServers.size() - limit; i < sortedServers.size(); i++) {
+			if (i > sortedServers.size() - limit) {
+				worst.append(", ");
+			}
+			ChainableServer server = sortedServers.get(i);
+			worst.append(server).append(":").append(scoreServer(server)).append("ms");
+		}
+
+		String digest = best.toString() + "|" + worst.toString() + "|" + this.connections.size();
+		if (digest.equals(this.lastScoreExtremesDigest)) {
+			return;
+		}
+		this.lastScoreExtremesDigest = digest;
+
+		LOGGER.info("{} top {} ElectrumX servers: {}", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), limit, best);
+		LOGGER.info("{} bottom {} ElectrumX servers: {}", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), limit, worst);
+	}
+
+	private void recordFailure(ChainableServer server) {
+		this.serverFailureCounts.merge(server, 1, Integer::sum);
+	}
+
+	private void recordSuccess(ChainableServer server) {
+		this.serverFailureCounts.put(server, 0);
+	}
+
+	private void probeServers(Collection<ChainableServer> servers) {
+		for (ChainableServer server : servers) {
+			if (this.probedServers.add(server)) {
+				probeServer(server);
+			}
+		}
+	}
+
+	private void probeServer(ChainableServer server) {
+		ElectrumServer electrumServer = null;
+		try {
+			SocketAddress endpoint = new InetSocketAddress(server.getHostName(), server.getPort());
+			electrumServer = ElectrumServer.createInstance(server, endpoint, PROBE_TIMEOUT_MS, this.recorder);
+			electrumServer.setClientName(randomClientName());
+
+			Object response = connectedRpc(electrumServer, "server.version");
+			if (response != null) {
+				recordSuccess(server);
+			} else {
+				recordFailure(server);
+			}
+		} catch (IOException | ForeignBlockchainException | ClassCastException | NullPointerException e) {
+			recordFailure(server);
+		} finally {
+			if (electrumServer != null) {
+				electrumServer.closeServer(this.getClass().getSimpleName(), "probe");
+			}
+		}
+	}
+
 	/**
 	 * Ensure the connection maintenance threads are running and initial connections exist.
 	 */
@@ -795,6 +921,18 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 		if (!shouldInit) {
 			return;
+		}
+
+		if (!this.initialProbeCompleted) {
+			List<ChainableServer> serversSnapshot;
+			synchronized (this.connectionListLock) {
+				serversSnapshot = new ArrayList<>(this.servers);
+			}
+			if (!serversSnapshot.isEmpty()) {
+				LOGGER.info("{} probing {} ElectrumX servers for initial scoring", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), serversSnapshot.size());
+				probeServers(serversSnapshot);
+			}
+			this.initialProbeCompleted = true;
 		}
 
 		startMakingConnections();
@@ -876,11 +1014,12 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 		}
 
 		LOGGER.info(
-			"{} {} available connections, {} total servers, {} total connections, {} useless servers",
+			"{} {} available connections, {} total servers, {} total connections (target {}), {} useless servers",
 			this.blockchain.getCurrencyCode(),
 			this.availableConnections.size(),
 			this.servers.size(),
 			this.connections.size(),
+			this.maximumConnections,
 			this.uselessServers.size()
 		);
 	}
@@ -935,7 +1074,10 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 		// assume there are no server to get peers from, so we must start from the base list
 		synchronized (this.connectionListLock) {
 			this.remainingServers.clear();
-			this.remainingServers.addAll(this.servers);
+			updateConnectionTargets(this.servers.size());
+			List<ChainableServer> preferredServers = selectPreferredServers(this.maximumConnections);
+			LOGGER.info("{} selecting {} of {} ElectrumX servers by score", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), preferredServers.size(), this.servers.size());
+			this.remainingServers.addAll(preferredServers);
 		}
 
 		connectRemainingServers();
@@ -953,15 +1095,27 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 
 			// Ask for more servers
 			Set<Server> moreServers = serverPeersSubscribe();
+			List<ChainableServer> newlyAdded = new ArrayList<>();
 
 			synchronized (this.connectionListLock) {
-				// Add all servers to base list
+				for (Server server : moreServers) {
+					if (!this.servers.contains(server)) {
+						newlyAdded.add(server);
+					}
+				}
 				this.servers.addAll(moreServers);
+			}
 
-				// add base list to remaining list
-				this.remainingServers.addAll(this.servers);
+			if (!newlyAdded.isEmpty()) {
+				LOGGER.info("{} probing {} newly discovered ElectrumX servers", this.blockchain == null ? "ElectrumX" : this.blockchain.getCurrencyCode(), newlyAdded.size());
+				probeServers(newlyAdded);
+			}
 
-				// remove servers that this node is already connected to
+			synchronized (this.connectionListLock) {
+				updateConnectionTargets(this.servers.size());
+				List<ChainableServer> preferredServers = selectPreferredServers(this.maximumConnections);
+				this.remainingServers.clear();
+				this.remainingServers.addAll(preferredServers);
 				this.remainingServers.removeAll(this.connections.stream().map(ElectrumServer::getServer).collect(Collectors.toList()));
 			}
 
@@ -1021,29 +1175,39 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			// Check connection is suitable by asking for server features, including genesis block hash
 			JSONObject featuresJson = (JSONObject) this.connectedRpc(electrumServer, "server.features");
 
-			if (featuresJson == null )
+			if (featuresJson == null ) {
+				recordFailure(server);
 				return Optional.of( recorder.recordConnection(server, requestedBy, true,  false, MISSING_FEATURES_ERROR) );
+			}
 
 			try {
 				double protocol_min = CrossChainUtils.getVersionDecimal(featuresJson, "protocol_min");
 
-				if (protocol_min < MIN_PROTOCOL_VERSION)
+				if (protocol_min < MIN_PROTOCOL_VERSION) {
+					recordFailure(server);
 					return Optional.of( recorder.recordConnection(server, requestedBy, true,  false, "old version: protocol_min = " + protocol_min + " < MIN_PROTOCOL_VERSION = " + MIN_PROTOCOL_VERSION) );
+				}
 			} catch (NumberFormatException e) {
+				recordFailure(server);
 				return Optional.of( recorder.recordConnection(server, requestedBy,true, false,featuresJson.get("protocol_min").toString() + " is not a valid version"));
 			} catch (NullPointerException e) {
+				recordFailure(server);
 				return Optional.of( recorder.recordConnection(server, requestedBy,true, false,"server version not available: protocol_min"));
 			}
 
-			if (this.expectedGenesisHash != null && !((String) featuresJson.get("genesis_hash")).equals(this.expectedGenesisHash))
+			if (this.expectedGenesisHash != null && !((String) featuresJson.get("genesis_hash")).equals(this.expectedGenesisHash)) {
+				recordFailure(server);
 				return Optional.of( recorder.recordConnection(server, requestedBy, true, false, EXPECTED_GENESIS_ERROR) );
+			}
 
+			recordSuccess(server);
 			LOGGER.debug(() -> String.format("Connected to %s %s", server, this.blockchain.currencyCode));
 			this.connections.add(electrumServer);
 			this.availableConnections.add(electrumServer);
 			return Optional.of( this.recorder.recordConnection( server, requestedBy, true, true, EMPTY) );
 		} catch (IOException | ForeignBlockchainException | ClassCastException | NullPointerException e) {
 			// Didn't work, try another server...
+			recordFailure(server);
 			return Optional.of( this.recorder.recordConnection( server, requestedBy, true, false, CrossChainUtils.getNotes(e)));
 		} catch( Exception e ) {
 			LOGGER.error(e.getMessage(), e);

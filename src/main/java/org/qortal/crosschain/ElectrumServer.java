@@ -2,6 +2,7 @@ package org.qortal.crosschain;
 
 import org.qortal.crypto.TrustlessSSLSocketFactory;
 
+import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import java.io.IOException;
 import java.net.Socket;
@@ -45,6 +46,10 @@ public class ElectrumServer {
         if (this.server.getConnectionType() == ElectrumX.Server.ConnectionType.SSL) {
             SSLSocketFactory factory = TrustlessSSLSocketFactory.getSocketFactory();
             this.socket = factory.createSocket(this.socket, server.getHostName(), server.getPort(), true);
+            this.socket.setSoTimeout(timeout);
+            this.socket.setTcpNoDelay(true);
+            this.socket.getOutputStream().flush();
+            ((SSLSocket) this.socket).startHandshake();
         }
 
         this.scanner = new Scanner(this.socket.getInputStream());
