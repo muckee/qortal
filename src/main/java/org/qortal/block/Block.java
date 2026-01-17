@@ -1896,6 +1896,11 @@ public class Block {
 	protected void processAtFeesAndStates() throws DataException {
 		ATRepository atRepository = this.repository.getATRepository();
 
+		// Safety check: ourAtStates should have been populated during validation
+		if (this.ourAtStates == null) {
+			throw new IllegalStateException("Cannot process AT fees and states: ourAtStates is null. Block validation may have failed.");
+		}
+
 		for (ATStateData atStateData : this.ourAtStates) {
 			Account atAccount = new Account(this.repository, atStateData.getATAddress());
 

@@ -85,9 +85,9 @@ public enum MessageType {
     GET_ACCOUNT_TRANSACTIONS(191, GetAccountTransactionsMessage::fromByteBuffer),
 
     FOREIGN_FEES( 200, ForeignFeesMessage::fromByteBuffer),
-    GET_FOREIGN_FEES( 201, GetForeignFeesMessage::fromByteBuffer),
+    GET_FOREIGN_FEES( 201, GetForeignFeesMessage::fromByteBuffer);
 
-    PEER_RELAY_DATA(210, PeerRelayDataMessage::fromByteBuffer);
+
 
     public final int value;
     public final MessageProducer fromByteBufferMethod;
