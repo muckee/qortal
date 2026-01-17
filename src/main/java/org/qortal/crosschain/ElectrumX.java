@@ -9,6 +9,7 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
 import org.qortal.api.resource.CrossChainUtils;
+import org.qortal.controller.Controller;
 import org.qortal.crypto.Crypto;
 import org.qortal.utils.BitTwiddling;
 
