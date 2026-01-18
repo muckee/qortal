@@ -158,9 +158,9 @@ public class NamesDatabaseIntegrityCheck {
                     long estimatedTotalTime = (long) (elapsedTime / (processedCount / (double) totalNames));
                     long estimatedTimeRemaining = estimatedTotalTime - elapsedTime;
 
-                    LOGGER.info("Progress: {}/{} names ({:.1f}%) - Elapsed: {} ms - Est. remaining: {} ms",
+                    LOGGER.info(String.format("Progress: %d/%d names (%.1f%%) - Elapsed: %d ms - Est. remaining: %d ms",
                             processedCount, totalNames, percentComplete,
-                            elapsedTime, estimatedTimeRemaining);
+                            elapsedTime, estimatedTimeRemaining));
                 }
             }
 
