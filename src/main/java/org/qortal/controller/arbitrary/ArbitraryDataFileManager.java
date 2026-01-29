@@ -6,23 +6,24 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.BlockingQueue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.arbitrary.ArbitraryDataFile;
 import org.qortal.controller.Controller;
-import org.qortal.crypto.Crypto;
 import org.qortal.data.arbitrary.ArbitraryDirectConnectionInfo;
 import org.qortal.data.arbitrary.ArbitraryFileListResponseInfo;
 import org.qortal.data.arbitrary.ArbitraryRelayInfo;
@@ -31,6 +32,8 @@ import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
+import org.qortal.network.PeerList;
+import org.qortal.network.MessageFactory;
 import org.qortal.network.PeerSendManagement;
 import org.qortal.network.PeerSendManager;
 import org.qortal.network.message.ArbitraryDataFileMessage;
@@ -39,7 +42,6 @@ import org.qortal.network.message.GenericUnknownMessage;
 import org.qortal.network.message.GetArbitraryDataFileMessage;
 import org.qortal.network.message.Message;
 import org.qortal.network.message.MessageException;
-import org.qortal.network.message.MessageType;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -50,9 +52,17 @@ import org.qortal.utils.NTP;
 
 import com.google.common.net.InetAddresses;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+
 public class ArbitraryDataFileManager extends Thread {
 
-    //public static final int SEND_TIMEOUT_MS = 500; We Now use the new TimedMessage Features
     private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataFileManager.class);
 
     private static ArbitraryDataFileManager instance;
@@ -60,6 +70,12 @@ public class ArbitraryDataFileManager extends Thread {
 
     // Map to keep track of our in progress (outgoing) arbitrary data file requests
     public Map<String, Long> arbitraryDataFileRequests = Collections.synchronizedMap(new HashMap<>());
+
+    // Map to track requested hashes for validation purposes (longer-lived than arbitraryDataFileRequests)
+    // Used to validate incoming chunks even after the main request map has been cleaned up
+    // This prevents legitimate delayed chunks from being rejected as unsolicited
+    // Cleaned up after 3 minutes (vs 24 seconds for the main map)
+    private final Map<String, Long> arbitraryDataFileRequestedGuard = Collections.synchronizedMap(new HashMap<>());
 
     // Map to keep track of hashes that we might need to relay
     public final List<ArbitraryRelayInfo> arbitraryRelayMap = Collections.synchronizedList(new ArrayList<>());
@@ -78,72 +94,478 @@ public class ArbitraryDataFileManager extends Thread {
     private Map<String, Long> recentDataRequests = Collections.synchronizedMap(new HashMap<>());
 
     // This needs to be a private class
-    //private Triple<Peer, Integer, List<ArbitraryFileListResponseInfo>> pendingPeerConnectionsWHashes = new
     private final PendingPeersWithHashes pendingPeersWithHashes = new PendingPeersWithHashes();
 
-    public static int MAX_FILE_HASH_RESPONSES = 1000;
+    // Track pending relay forwards - which peers requested which hashes from us
+    // Key format: hash58 + "|" + sourcePeerAddress (peer we're requesting from)
+    private final Map<String, List<PendingRelayForward>> pendingRelayForwards = new ConcurrentHashMap<>();
+    
+    // Track recently sent chunks to detect duplicates within 3 minutes
+    // Key format: hash58 + "|" + peerAddress, Value: timestamp when sent
+    private final Map<String, Long> recentlySentChunks = new ConcurrentHashMap<>();
+    private static final long DUPLICATE_SEND_WINDOW_MS = 3 * 60 * 1000L; // 3 minutes
+    
+    // Track peers that sent invalid hashes - prevent re-requesting from same peer for entire file
+    // Key format: signature58 + "|" + peerAddress, Value: timestamp when validation failed
+    private final Map<String, Long> invalidHashCooldowns = new ConcurrentHashMap<>();
+    private static final long INVALID_HASH_COOLDOWN_MS = 10 * 60 * 1000L; // 10 minutes
+    
+    // Relay cache configuration
+    private static final String RELAY_CACHE_DIR_NAME = "relay-cache";
+    private static final long RELAY_CACHE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000L; // 24 hours
+    private static final int RELAY_CACHE_CLEANUP_TRIGGER = 2000; // Trigger cleanup at ~1GB (assuming 500KB avg per file)
+    private static final long RELAY_CACHE_MIN_FILE_AGE_MS = 5 * 60 * 1000L; // 5 minutes minimum age before deletion
+    private Path relayCacheDir;
+    private final AtomicInteger relayCacheFileCount = new AtomicInteger(0);
 
-    private final Map<String, PeerSendManager> peerSendManagers = new ConcurrentHashMap<>();
-
-    // Relay queue system
-    private final Map<String, BlockingQueue<RelayRequest>> relayQueuesByPeer = new ConcurrentHashMap<>();
-    private final Map<String, Thread> relayWorkersByPeer = new ConcurrentHashMap<>();
-    private final Map<String, Long> inProgressRelayRequests = new ConcurrentHashMap<>();
-
-    private PeerSendManager getOrCreateSendManager(Peer peer) {
+    /**
+     * Creates a composite key for tracking relay requests by hash and source peer
+     * @param hash58 The hash in base58 format
+     * @param sourcePeer The peer we're requesting the data from
+     * @return Composite key in format "hash58|peerAddress"
+     */
+    private String createRelayKey(String hash58, Peer sourcePeer) {
+        return hash58 + "|" + sourcePeer.getPeerData().getAddress().toString();
+    }
+    
+    /**
+     * Initializes the relay cache directory in the system temp directory
+     */
+    private void initializeRelayCache() {
         try {
-            return peerSendManagers.computeIfAbsent(peer.toString(), key -> new PeerSendManager(peer));
-        } catch (Exception e) {
-            LOGGER.info("FAILED - Could not map to a peer or create a peer");
-            return null;
+            String tempDir = System.getProperty("java.io.tmpdir");
+            relayCacheDir = Paths.get(tempDir, "qortal", RELAY_CACHE_DIR_NAME);
+            Files.createDirectories(relayCacheDir);
+            
+            // Count existing files on startup
+            File[] existingFiles = relayCacheDir.toFile().listFiles();
+            if (existingFiles != null) {
+                int fileCount = 0;
+                for (File file : existingFiles) {
+                    if (file.isFile() && file.getName().endsWith(".tmp")) {
+                        fileCount++;
+                    }
+                }
+                relayCacheFileCount.set(fileCount);
+                LOGGER.debug("Initialized relay cache directory: {} ({} existing files)", relayCacheDir, fileCount);
+            } else {
+                LOGGER.debug("Initialized relay cache directory: {}", relayCacheDir);
+            }
+        } catch (IOException e) {
+            LOGGER.error("Failed to initialize relay cache directory: {}", e.getMessage());
+            relayCacheDir = null;
         }
     }
+    
+    /**
+     * Gets the path for a relay-cached chunk file
+     * @param hash58 The hash of the chunk
+     * @return Path to the cached file
+     */
+    private Path getRelayCachePath(String hash58) {
+        if (relayCacheDir == null) {
+            return null;
+        }
+        return relayCacheDir.resolve(hash58 + ".tmp");
+    }
+    
+    /**
+     * Saves chunk data to relay cache using streaming write to avoid holding byte[] reference
+     * Triggers cleanup if file count exceeds threshold
+     * @param hash58 The hash of the chunk
+     * @param data The chunk data
+     * @return true if saved successfully
+     */
+    private boolean saveToRelayCache(String hash58, byte[] data) {
+        if (relayCacheDir == null || data == null) {
+            return false;
+        }
+        
+        try {
+            // Check if cleanup is needed based on file count
+            int currentCount = relayCacheFileCount.incrementAndGet();
+            if (currentCount > RELAY_CACHE_CLEANUP_TRIGGER) {
+                LOGGER.trace("Relay cache has {} files (threshold: {}), triggering cleanup", 
+                        currentCount, RELAY_CACHE_CLEANUP_TRIGGER);
+                cleanupRelayCache();
+            }
+            
+            Path cachePath = getRelayCachePath(hash58);
+            // Use streaming write to avoid holding byte[] reference in memory during I/O
+            // This allows GC to reclaim the original byte[] sooner
+            try (java.io.OutputStream out = Files.newOutputStream(cachePath, 
+                    java.nio.file.StandardOpenOption.CREATE, 
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                    java.nio.file.StandardOpenOption.WRITE)) {
+                out.write(data);
+                out.flush();
+            }
+            
+            return true;
+        } catch (IOException e) {
+            LOGGER.warn("Failed to save to relay cache for hash {}: {}", hash58, e.getMessage());
+            relayCacheFileCount.decrementAndGet(); // Rollback counter on failure
+            return false;
+        }
+    }
+    
+    /**
+     * Loads chunk data from relay cache
+     * @param hash58 The hash of the chunk
+     * @return The chunk data, or null if not found
+     */
+    private byte[] loadFromRelayCache(String hash58) {
+        if (relayCacheDir == null) {
+            return null;
+        }
+        
+        try {
+            Path cachePath = getRelayCachePath(hash58);
+            if (Files.exists(cachePath)) {
+                byte[] data = Files.readAllBytes(cachePath);
+               
+                return data;
+            }
+        } catch (IOException e) {
+            LOGGER.warn("Failed to load from relay cache for hash {}: {}", hash58, e.getMessage());
+        }
+        return null;
+    }
+    
+    /**
+     * Cleans up the relay cache according to age and space constraints.
+     * Dynamically adjusts based on Qortal's storage usage to avoid interfering with cleanup thresholds.
+     */
+    private void cleanupRelayCache() {
+        if (relayCacheDir == null || !Files.exists(relayCacheDir)) {
+            return;
+        }
+        
+        try {
+            File[] files = relayCacheDir.toFile().listFiles();
+            if (files == null || files.length == 0) {
+                return;
+            }
+            
+            // Calculate total size of relay cache
+            long totalSize = 0;
+            List<FileInfo> fileInfos = new ArrayList<>();
+            
+            for (File file : files) {
+                if (file.isFile() && file.getName().endsWith(".tmp")) {
+                    long size = file.length();
+                    totalSize += size;
+                    
+                    try {
+                        BasicFileAttributes attrs = Files.readAttributes(file.toPath(), BasicFileAttributes.class);
+                        fileInfos.add(new FileInfo(file, attrs.creationTime().toMillis(), size));
+                    } catch (IOException e) {
+                        LOGGER.debug("Failed to read attributes for {}: {}", file.getName(), e.getMessage());
+                    }
+                }
+            }
+            
+            if (fileInfos.isEmpty()) {
+                return;
+            }
+            
+            // Sort by creation time (oldest first)
+            fileInfos.sort(Comparator.comparingLong(fi -> fi.creationTime));
+            
+            // Calculate max allowed size based on Qortal's storage headroom
+            long maxAllowedSize;
+            ArbitraryDataStorageManager storageManager = ArbitraryDataStorageManager.getInstance();
+            Long qortalStorageCapacity = storageManager.getStorageCapacity();
+            long qortalUsedSpace = storageManager.getTotalDirectorySize();
+            
+            if (qortalStorageCapacity != null && qortalUsedSpace > 0) {
+                // Calculate space before Qortal hits its cleanup threshold (90%)
+                long qortalCleanupThreshold = (long)(qortalStorageCapacity * ArbitraryDataStorageManager.DELETION_THRESHOLD);
+                long qortalHeadroom = qortalCleanupThreshold - qortalUsedSpace;
+                
+                if (qortalHeadroom < 0) {
+                    // Qortal is already over threshold, use minimal relay cache
+                    maxAllowedSize = 500L * 1024 * 1024; // 500MB minimum
+                    LOGGER.debug("Qortal over storage threshold, relay cache limited to 500MB");
+                } else {
+                    // Use up to 10% of the headroom, with min/max bounds
+                    long calculatedSize = (long)(qortalHeadroom * 0.10);
+                    maxAllowedSize = Math.max(500L * 1024 * 1024, // Min 500MB
+                                     Math.min(calculatedSize, 5L * 1024 * 1024 * 1024)); // Max 5GB
+                    LOGGER.debug("Relay cache limit: {} MB (based on {}% of {} MB headroom)", 
+                            maxAllowedSize / (1024 * 1024), 
+                            (int)(0.10 * 100),
+                            qortalHeadroom / (1024 * 1024));
+                }
+            } else {
+                // Fallback: conservative fixed size if Qortal's storage not calculated yet
+                maxAllowedSize = 2L * 1024 * 1024 * 1024; // 2GB
+                LOGGER.debug("Relay cache limit: 2GB (fallback - Qortal storage not calculated)");
+            }
+            
+            int deletedCount = 0;
+            long deletedSize = 0;
+            long now = System.currentTimeMillis();
+            int skippedYoungFiles = 0;
+            
+            // Delete oldest files until we're under the limit
+            // PROTECTION: Don't delete files younger than minimum age (prevents deletion of in-transit files)
+            for (FileInfo fileInfo : fileInfos) {
+                if (totalSize <= maxAllowedSize) {
+                    break;
+                }
+                
+                // Check file age - skip files that are too young
+                long fileAge = now - fileInfo.creationTime;
+                if (fileAge < RELAY_CACHE_MIN_FILE_AGE_MS) {
+                    skippedYoungFiles++;
+                    LOGGER.trace("Skipping file {} - too young ({} seconds old, min {} seconds)", 
+                            fileInfo.file.getName(), fileAge / 1000, RELAY_CACHE_MIN_FILE_AGE_MS / 1000);
+                    continue;
+                }
+                
+                if (fileInfo.file.delete()) {
+                    totalSize -= fileInfo.size;
+                    deletedSize += fileInfo.size;
+                    deletedCount++;
+                    LOGGER.trace("Deleted relay cache file: {} (age: {} seconds)", 
+                            fileInfo.file.getName(), fileAge / 1000);
+                }
+            }
+            
+            // Update file count after cleanup
+            File[] remainingFiles = relayCacheDir.toFile().listFiles();
+            int actualCount = 0;
+            if (remainingFiles != null) {
+                for (File f : remainingFiles) {
+                    if (f.isFile() && f.getName().endsWith(".tmp")) {
+                        actualCount++;
+                    }
+                }
+            }
+            relayCacheFileCount.set(actualCount);
+            
+            if (deletedCount > 0) {
+                String youngFilesMsg = skippedYoungFiles > 0 ? String.format(" (skipped %d young files)", skippedYoungFiles) : "";
+                LOGGER.trace("Relay cache cleanup: deleted {} files ({} MB), remaining: {} files ({} MB), limit: {} MB{}",
+                        deletedCount, deletedSize / (1024 * 1024),
+                        actualCount, totalSize / (1024 * 1024),
+                        maxAllowedSize / (1024 * 1024), youngFilesMsg);
+            } else {
+                LOGGER.trace("Relay cache: {} files ({} MB), limit: {} MB - no cleanup needed",
+                        actualCount, totalSize / (1024 * 1024), maxAllowedSize / (1024 * 1024));
+            }
+            
+        } catch (Exception e) {
+            LOGGER.error("Error during relay cache cleanup: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Helper class to hold file information for cleanup
+     */
+    private static class FileInfo {
+        final File file;
+        final long creationTime;
+        final long size;
+        
+        FileInfo(File file, long creationTime, long size) {
+            this.file = file;
+            this.creationTime = creationTime;
+            this.size = size;
+        }
+    }
+    
+    /**
+     * Gets the total size of the relay cache in bytes
+     * @return Total size in bytes, or 0 if cache is not initialized or empty
+     */
+    public long getRelayCacheSize() {
+        if (relayCacheDir == null) {
+            return 0;
+        }
+        
+        File cacheDir = relayCacheDir.toFile();
+        if (!cacheDir.exists() || !cacheDir.isDirectory()) {
+            return 0;
+        }
+        
+        // Quick check: if directory is empty, return 0 immediately
+        File[] files = cacheDir.listFiles();
+        if (files == null || files.length == 0) {
+            return 0;
+        }
+        
+        try {
+            return FileUtils.sizeOfDirectory(cacheDir);
+        } catch (IllegalArgumentException e) {
+            // Not a directory or other argument issue
+            LOGGER.debug("Relay cache path is not a directory: {}", e.getMessage());
+            return 0;
+        } catch (Exception e) {
+            LOGGER.error("Error calculating relay cache size: {}", e.getMessage(), e);
+            return 0;
+        }
+    }
+    
+    /**
+     * Erases all files from the relay cache
+     * Uses recursive delete with better error handling - continues on individual file failures
+     * @return true if successful, false otherwise
+     */
+    public boolean eraseRelayCache() {
+        if (relayCacheDir == null || !Files.exists(relayCacheDir)) {
+            return true; // Nothing to erase, consider it successful
+        }
+        
+        if (!Files.isDirectory(relayCacheDir)) {
+            LOGGER.warn("Relay cache path exists but is not a directory: {}", relayCacheDir);
+            return false;
+        }
+        
+        try {
+            // Get the count before cleaning
+            int deletedCount = relayCacheFileCount.get();
+            final AtomicInteger failedCount = new AtomicInteger(0);
+            
+            // Recursive delete using Files.walkFileTree for better error handling
+            Files.walkFileTree(relayCacheDir, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    try {
+                        Files.delete(file);
+                        return FileVisitResult.CONTINUE;
+                    } catch (IOException e) {
+                        // File might be locked or have permission issues - log and continue
+                        LOGGER.debug("Failed to delete file {}: {}", file, e.getMessage());
+                        failedCount.incrementAndGet();
+                        return FileVisitResult.CONTINUE; // Continue deleting other files
+                    }
+                }
+                
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    // Don't delete the root relay cache directory itself
+                    if (dir.equals(relayCacheDir)) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                    
+                    try {
+                        Files.delete(dir);
+                    } catch (IOException e) {
+                        LOGGER.debug("Failed to delete directory {}: {}", dir, e.getMessage());
+                        failedCount.incrementAndGet();
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+                
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) throws IOException {
+                    // Log but continue processing other files
+                    LOGGER.debug("Failed to access file {}: {}", file, exc.getMessage());
+                    failedCount.incrementAndGet();
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+            
+            // Update file count
+            relayCacheFileCount.set(0);
+            
+            int failed = failedCount.get();
+            if (failed > 0) {
+                LOGGER.warn("Erased relay cache: deleted {} files, {} failed", deletedCount - failed, failed);
+            } else {
+                LOGGER.info("Erased relay cache: deleted {} files", deletedCount);
+            }
+            
+            return failed == 0; // Return true only if all deletions succeeded
+        } catch (IOException e) {
+            LOGGER.error("Error erasing relay cache: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+
 
     /**
      * Helper class to hold relay request information
      */
-    private static class RelayRequest {
-        final Peer targetPeer;
-        final Peer requestingPeer;
-        final byte[] signature;
-        final byte[] hash;
-        final Message originalMessage;
-        final String hash58;
-        final long queuedTime;
-        
-        RelayRequest(Peer targetPeer, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) {
-            this.targetPeer = targetPeer;
-            this.requestingPeer = requestingPeer;
-            this.signature = signature;
-            this.hash = hash;
-            this.originalMessage = originalMessage;
-            this.hash58 = Base58.encode(hash);
-            this.queuedTime = NTP.getTime();
-        }
-    }
+    /**
+     * Helper class to track peers that requested a specific hash from us
+     * so we can forward it when we receive it
+     * Store PeerData instead of Peer to prevent memory leaks from stale Peer objects
+     */
+	private static class PendingRelayForward {
+		final PeerData requestingPeerData;  // Store lightweight PeerData instead of heavy Peer object
+		final int messageId;  // Store only the ID, not the full Message object
+		final long timestamp;
+
+		PendingRelayForward(Peer requestingPeer, Message originalMessage) {
+			this.requestingPeerData = requestingPeer.getPeerData();  // Extract PeerData immediately
+			this.messageId = originalMessage.getId();  // Extract ID immediately
+			this.timestamp = NTP.getTime();
+		}
+
+		boolean isStale() {
+			Long now = NTP.getTime();
+			return now != null && (now - timestamp) > ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT;
+		}
+		
+		/**
+		 * Resolves the Peer object from connected peers, or returns null if disconnected
+		 */
+		Peer getRequestingPeer(PeerList connectedPeers) {
+			return connectedPeers.get(requestingPeerData);
+		}
+	}
 
     private ArbitraryDataFileManager() {
+        // Initialize relay cache
+        initializeRelayCache();
+        
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::processResponses, 60, 1, TimeUnit.SECONDS);
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60, 1, TimeUnit.SECONDS);
 
-        ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
-
+        // Clean up stale pending relay forwards and disconnected peers
         cleaner.scheduleAtFixedRate(() -> {
-            long idleCutoff = TimeUnit.MINUTES.toMillis(2);
-            Iterator<Map.Entry<String, PeerSendManager>> iterator = peerSendManagers.entrySet().iterator();
-
+            int totalRemoved = 0;
+            PeerList connectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+            Iterator<Map.Entry<String, List<PendingRelayForward>>> iterator = pendingRelayForwards.entrySet().iterator();
+            
             while (iterator.hasNext()) {
-                Map.Entry<String, PeerSendManager> entry = iterator.next();
-                String peerHash = entry.getKey();
-                PeerSendManager manager = entry.getValue();
-
-                if (manager.isIdle(idleCutoff)) {
-                    iterator.remove(); // SAFE removal during iteration
-                    manager.shutdown();
-                    LOGGER.debug("Cleaned up PeerSendManager for peer {}", peerHash);
+                Map.Entry<String, List<PendingRelayForward>> entry = iterator.next();
+                String compositeKey = entry.getKey();  // Format: hash58|peerAddress
+                List<PendingRelayForward> forwards = entry.getValue();
+                
+                // Remove stale forwards and disconnected peers from the list
+                int beforeSize = forwards.size();
+                forwards.removeIf(forward -> {
+                    // Remove if stale by time
+                    if (forward.isStale()) {
+                        return true;
+                    }
+                    // Remove if peer is no longer connected (prevents memory leak from stale Peer references)
+                    Peer peer = forward.getRequestingPeer(connectedPeers);
+                    return peer == null;
+                });
+                int removedCount = beforeSize - forwards.size();
+                totalRemoved += removedCount;
+                
+                // If list is now empty, remove the entire entry
+                if (forwards.isEmpty()) {
+                    iterator.remove();
+                    LOGGER.debug("Removed empty pending relay forward list for composite key {}", compositeKey);
                 }
             }
-        }, 0, 5, TimeUnit.MINUTES);
+            
+            if (totalRemoved > 0) {
+                LOGGER.debug("Cleaned up {} stale/disconnected pending relay forward(s)", totalRemoved);
+            }
+        }, 30, 30, TimeUnit.SECONDS);
+        
+        // Clean up relay cache every hour
+        cleaner.scheduleAtFixedRate(() -> {
+            cleanupRelayCache();
+        }, RELAY_CACHE_CLEANUP_INTERVAL_MS, RELAY_CACHE_CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     public static ArbitraryDataFileManager getInstance() {
@@ -169,7 +591,115 @@ public class ArbitraryDataFileManager extends Thread {
 
     public void shutdown() {
         isStopping = true;
+        
+        // Shutdown schedulers first
+        LOGGER.info("Shutting down ArbitraryDataFileManager schedulers...");
+        
+        arbitraryDataFileHashResponseScheduler.shutdown();
+        cleaner.shutdown();
+        
+        try {
+            if (!arbitraryDataFileHashResponseScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("arbitraryDataFileHashResponseScheduler did not terminate in time, forcing shutdown");
+                arbitraryDataFileHashResponseScheduler.shutdownNow();
+            }
+            if (!cleaner.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("cleaner scheduler did not terminate in time, forcing shutdown");
+                cleaner.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOGGER.warn("Interrupted while shutting down schedulers, forcing shutdown");
+            arbitraryDataFileHashResponseScheduler.shutdownNow();
+            cleaner.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        
+        LOGGER.info("ArbitraryDataFileManager schedulers shut down successfully");
+        
+        // Interrupt the main thread
         this.interrupt();
+    }
+
+    /**
+     * Checks if a hash is currently queued in any peer's send queue.
+     * 
+     * <p>This method iterates through all handshaked peers and checks their send queues
+     * to see if a GetArbitraryDataFileMessage with the specified hash is queued.
+     * This is useful for preventing duplicate requests when cleaning up expired
+     * request tracking.
+     *
+     * @param hash58 the hash to check for, encoded in base58
+     * @return {@code true} if the hash is queued in any peer's send queue, otherwise {@code false}
+     */
+    private boolean isHashQueuedInAnyPeer(String hash58) {
+        PeerList connectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+        
+        for (Peer peer : connectedPeers) {
+            // Check Stage 3: Peer.sendQueue (final network send queue)
+            if (peer.isHashInSendQueue(hash58)) {
+                LOGGER.trace("Hash {} is queued in peer {} send queue (Stage 3)", hash58, peer);
+                return true;
+            }
+            
+            // Check Stages 1 & 2: PeerSendManager queues (disk I/O and preload queues)
+            // Uses O(1) hash map lookup instead of scanning queues
+            PeerSendManager sendManager = PeerSendManagement.getInstance().getSendManager(peer);
+            if (sendManager != null && sendManager.isHashQueued(hash58)) {
+                LOGGER.trace("Hash {} is queued in PeerSendManager for peer {} (Stage 1/2)", hash58, peer);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
+     * Adds a hash to the validation guard map only.
+     * The guard map persists longer to validate delayed chunk arrivals.
+     * This is separate from the main request tracking to keep concerns separated.
+     * 
+     * @param hash58 the hash to track, encoded in base58
+     */
+    public void addGuardTracking(String hash58) {
+        Long now = NTP.getTime();
+        if (now != null) {
+            arbitraryDataFileRequestedGuard.put(hash58, now);
+        }
+    }
+
+    /**
+     * Removes a hash from the validation guard map.
+     * Called after successful validation of a chunk or when a request fails.
+     * 
+     * @param hash58 the hash to remove, encoded in base58
+     */
+    void removeGuardTracking(String hash58) {
+        arbitraryDataFileRequestedGuard.remove(hash58);
+    }
+    
+    /**
+     * Checks if a signature-peer combination is currently in cooldown due to previous hash validation failure.
+     * Used by peer selection logic to avoid re-requesting ANY chunk from peers that sent invalid data for a file.
+     * 
+     * @param signature58 the file signature to check, encoded in base58
+     * @param peerAddress the peer address string
+     * @return true if this peer is in cooldown for this file, false otherwise
+     */
+    public boolean isSignaturePeerInCooldown(String signature58, String peerAddress) {
+        String cooldownKey = signature58 + "|" + peerAddress;
+        Long cooldownTime = invalidHashCooldowns.get(cooldownKey);
+        
+        if (cooldownTime == null) {
+            return false;
+        }
+        
+        Long now = NTP.getTime();
+        if (now == null) {
+            return true; // Conservative: assume in cooldown if we can't get time
+        }
+        
+        // Check if cooldown period has expired
+        return (now - cooldownTime) < INVALID_HASH_COOLDOWN_MS;
     }
 
     public void cleanupRequestCache(Long now) {
@@ -177,84 +707,79 @@ public class ArbitraryDataFileManager extends Thread {
             return;
         }
         final long requestMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_REQUEST_TIMEOUT;
-        arbitraryDataFileRequests.entrySet().removeIf(entry -> entry.getValue() == null || entry.getValue() < requestMinimumTimestamp);
+        // Only remove if expired AND not queued in any peer's send queue
+        arbitraryDataFileRequests.entrySet().removeIf(entry -> {
+            if (entry.getValue() == null || entry.getValue() < requestMinimumTimestamp) {
+                String hash58 = entry.getKey();
+                // Don't remove if still queued in any peer's send queue
+                if (isHashQueuedInAnyPeer(hash58)) {
+                    LOGGER.trace("Not removing expired hash {} from arbitraryDataFileRequests - still queued in peer send queue", hash58);
+                    return false;
+                }
+                return true;
+            }
+            return false;
+        });
+
+        // Clean up validation guard map with longer timeout (3 minutes to handle slow networks)
+        // This allows validation of chunks that arrive after the main map has been cleaned up
+        final long guardMinimumTimestamp = now - (10 * 60 * 1000L); // 10 minutes
+        arbitraryDataFileRequestedGuard.entrySet().removeIf(entry -> {
+            if (entry.getValue() == null || entry.getValue() < guardMinimumTimestamp) {
+                return true;
+            }
+            return false;
+        });
 
         final long relayMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_RELAY_TIMEOUT;
-        arbitraryRelayMap.removeIf(entry -> entry == null || entry.getTimestamp() == null || entry.getTimestamp() < relayMinimumTimestamp);
+        // Clean up relay map: remove stale entries AND entries for disconnected peers
+        PeerList connectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+        arbitraryRelayMap.removeIf(entry -> {
+            if (entry == null || entry.getTimestamp() == null || entry.getTimestamp() < relayMinimumTimestamp) {
+                return true; // Remove stale entries
+            }
+            // Also remove entries for peers that are no longer connected (prevents memory leak)
+            if (entry.getPeerData() != null && entry.getPeer(connectedPeers) == null) {
+                LOGGER.trace("Removing relay map entry for disconnected peer: {}", entry.getPeerData());
+                return true;
+            }
+            return false;
+        });
 
         final long directConnectionInfoMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_DIRECT_CONNECTION_INFO_TIMEOUT;
         directConnectionInfo.removeIf(entry -> entry.getTimestamp() < directConnectionInfoMinimumTimestamp);
 
         final long recentDataRequestMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_RECENT_DATA_REQUESTS_TIMEOUT;
         recentDataRequests.entrySet().removeIf(entry -> entry.getValue() < recentDataRequestMinimumTimestamp);
+        
+        // Clean up recently sent chunks tracking (older than 3 minutes)
+        final long recentlySentMinimumTimestamp = now - DUPLICATE_SEND_WINDOW_MS;
+        int removedCount = recentlySentChunks.size();
+        recentlySentChunks.entrySet().removeIf(entry -> entry.getValue() < recentlySentMinimumTimestamp);
+        removedCount -= recentlySentChunks.size();
+        if (removedCount > 0) {
+            LOGGER.trace("Cleaned up {} expired entries from recentlySentChunks tracking", removedCount);
+        }
+        
+        // Clean up invalid hash cooldowns (older than 10 minutes)
+        final long cooldownMinimumTimestamp = now - INVALID_HASH_COOLDOWN_MS;
+        int cooldownRemovedCount = invalidHashCooldowns.size();
+        invalidHashCooldowns.entrySet().removeIf(entry -> entry.getValue() < cooldownMinimumTimestamp);
+        cooldownRemovedCount -= invalidHashCooldowns.size();
+        if (cooldownRemovedCount > 0) {
+            LOGGER.debug("Cleaned up {} expired invalid hash cooldowns", cooldownRemovedCount);
+        }
     }
 
-    // Fetch data files by hash
-    public boolean fetchArbitraryDataFiles(Peer peer,
-                                           byte[] signature,
-                                           ArbitraryTransactionData arbitraryTransactionData,
-                                           List<byte[]> hashes, ArbitraryFileListResponseInfo responseInfo) throws DataException {
-        if (peer == null) {
-            LOGGER.info("Received a NULL peer, dropping back");
-            return false;
-        }
-        // Load data file(s)
-        ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromTransactionData(arbitraryTransactionData);
-        boolean receivedAtLeastOneFile = false;
-
-        // Now fetch actual data from this peer
-        for (byte[] hash : hashes) {
-            if (isStopping) {
-                return false;
-            }
-            String hash58 = Base58.encode(hash);
-            if (!arbitraryDataFile.chunkExists(hash)) {
-                // Only request the file if we aren't already requesting it from someone else
-                if (!arbitraryDataFileRequests.containsKey(Base58.encode(hash))) {
-                    LOGGER.info("Requesting data file {} from peer {}", hash58, peer);
-                    Long startTime = NTP.getTime();
-                    // peer == null, why? or how
-                    peer.QDNUse();
-                    ArbitraryDataFile receivedArbitraryDataFile = fetchArbitraryDataFile(peer, arbitraryTransactionData, signature, hash);
-                    Long endTime = NTP.getTime();
-                    if (receivedArbitraryDataFile != null) {
-                        LOGGER.trace("Received data file {} from peer {}. Time taken: {} ms", receivedArbitraryDataFile.getHash58(), peer, (endTime - startTime));
-                        receivedAtLeastOneFile = true;
-                    } else {
-                        LOGGER.trace("Peer {} didn't respond with data file {} for signature {}. Time taken: {} ms", peer, Base58.encode(hash), Base58.encode(signature), (endTime - startTime));
-                        // Stop asking for files from this peer
-                        break;
-                    }
-                }
-                else {
-                    LOGGER.trace("Already requesting data file {} for signature {} from peer {}", arbitraryDataFile, Base58.encode(signature), peer);
-                    this.addResponse(responseInfo);
-
-                }
-            }
-        }
-
-        if (receivedAtLeastOneFile) {
-            // Invalidate the hosted transactions cache as we are now hosting something new
-            ArbitraryDataStorageManager.getInstance().invalidateHostedTransactionsCache();
-
-            // Check if we have all the files we need for this transaction
-            if (arbitraryDataFile.allFilesExist()) {
-
-                // We have all the chunks for this transaction, so we should invalidate the transaction's name's
-                // data cache so that it is rebuilt the next time we serve it
-                ArbitraryDataManager.getInstance().invalidateCache(arbitraryTransactionData);
-            }
-        }
-
-        return receivedAtLeastOneFile;
-    }
-
+    
     // Lock to synchronize access to the list
     private final Object arbitraryDataFileHashResponseLock = new Object();
 
     // Scheduled executor service to process messages every second
     private final ScheduledExecutorService arbitraryDataFileHashResponseScheduler = Executors.newScheduledThreadPool(1);
+    
+    // Scheduled executor service for cleanup tasks (relay forwards and cache)
+    private final ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
 
     public void addResponse(ArbitraryFileListResponseInfo responseInfo) {
 
@@ -286,109 +811,12 @@ public class ArbitraryDataFileManager extends Thread {
         }
     }
 
-    private int requestArbitraryDataFile(Peer peer, ArbitraryTransactionData arbitraryTransactionData, byte[] signature, byte[] hash) throws DataException {
-
-        try {
-            ArbitraryDataFile existingFile = ArbitraryDataFile.fromHash(hash, signature);
-            boolean fileAlreadyExists = existingFile.exists();
-            if (fileAlreadyExists) {
-                return 1;
-            }
-            String hash58 = Base58.encode(hash);
-            arbitraryDataFileRequests.put(hash58, NTP.getTime());
-            Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
-            boolean wilco = peer.sendMessageWhenReady(getArbitraryDataFileMessage);
-            if (wilco) {
-                return 0;
-            } else {
-                LOGGER.warn("Failed to queue arbitrary file request message");
-                return -1;
-            }
-        } catch (DataException e) {
-            LOGGER.error(e.getMessage(), e);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-        return 0;
-    }
-
-    private ArbitraryDataFile fetchArbitraryDataFile(Peer peer, ArbitraryTransactionData arbitraryTransactionData, byte[] signature, byte[] hash) throws DataException {
-        ArbitraryDataFile arbitraryDataFile;
-
-        try {
-            ArbitraryDataFile existingFile = ArbitraryDataFile.fromHash(hash, signature);
-            boolean fileAlreadyExists = existingFile.exists();
-            String hash58 = Base58.encode(hash);
-
-            // Fetch the file if it doesn't exist locally
-            if (!fileAlreadyExists) {
-                LOGGER.info(String.format("Fetching data file %.8s from peer %s", hash58, peer));
-                arbitraryDataFileRequests.put(hash58, NTP.getTime());
-                Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
-
-                // @ToDo - This is where we are
-                Message response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
-
-                arbitraryDataFileRequests.remove(hash58);
-                LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
-
-                if (response == null) {
-                    LOGGER.debug("Received null response from peer {}", peer);
-                    return null;
-                }
-                if (response.getType() != MessageType.ARBITRARY_DATA_FILE) {
-                    LOGGER.debug("Received response with invalid type: {} from peer {}", response.getType(), peer);
-                    return null;
-                }
-
-                ArbitraryDataFileMessage peersArbitraryDataFileMessage = (ArbitraryDataFileMessage) response;
-                arbitraryDataFile = peersArbitraryDataFileMessage.getArbitraryDataFile();
-                byte[] fileBytes = arbitraryDataFile.getBytes();
-                if (fileBytes == null || fileBytes.length == 0) {
-                    LOGGER.debug(String.format("Failed to read bytes for file hash %s", hash58));
-                    return null;
-                }
-
-                byte[] actualHash = Crypto.digest(fileBytes);
-                if (!Arrays.equals(hash, actualHash)) {
-                    LOGGER.debug(String.format("Hash mismatch for chunk: expected %s but got %s",
-                        hash58, Base58.encode(actualHash)));
-                    return null; 
-                } 
-     
-        
-            } else {
-                LOGGER.debug(String.format("File hash %s already exists, so skipping the request", hash58));
-                arbitraryDataFile = null;
-            }
-
-            if (arbitraryDataFile != null) {
-           
-                arbitraryDataFile.save();
-
-                // If this is a metadata file then we need to update the cache
-                if (arbitraryTransactionData != null && arbitraryTransactionData.getMetadataHash() != null) {
-                    if (Arrays.equals(arbitraryTransactionData.getMetadataHash(), hash)) {
-                        ArbitraryDataCacheManager.getInstance().addToUpdateQueue(arbitraryTransactionData);
-                    }
-                }
-
-                // We may need to remove the file list request, if we have all the files for this transaction
-                this.handleFileListRequests(signature);
-            } else {
-                LOGGER.info("arbitraryDataFile was NULL");
-            }
-
-        } catch (DataException e) {
-            LOGGER.error(e.getMessage(), e);
-            arbitraryDataFile = null;
-        }
-
-        return arbitraryDataFile;
-    }
+    
 
     public void receivedArbitraryDataFile(Peer peer, ArbitraryDataFile adf) {
-
+        // Mark peer as actively used for QDN (prevents premature disconnect during active downloads)
+        peer.QDNUse();
+        
         //ArbitraryDataFile existingFile = ArbitraryDataFile.fromHash(hash, signature);
         //boolean fileAlreadyExists = existingFile.exists();
         byte[] signature = adf.getSignature();
@@ -396,13 +824,230 @@ public class ArbitraryDataFileManager extends Thread {
         String hash58 = adf.getHash58();
         byte[] hash = adf.getHash();
 
-        arbitraryDataFileRequests.remove(hash58);
-        LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
+       
 
+        // Get request timestamp BEFORE removing it (for download speed tracking)
+        Long requestTime = arbitraryDataFileRequests.get(hash58);
+        
+       
+        
+        arbitraryDataFileRequests.remove(hash58);
+        LOGGER.trace(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
+        
+        // Check if any peers requested this hash from us (for relaying)
+        // Use composite key with the responding peer to match the specific relay request
+        String relayKey = createRelayKey(hash58, peer);
+        List<PendingRelayForward> pendingRequests = pendingRelayForwards.remove(relayKey);
+        boolean isRelayOnly = (pendingRequests != null && !pendingRequests.isEmpty());
+       
+        if (isRelayOnly) {
+           
+            
+            // Validate hash before caching and relaying (using efficient validation)
+            if (!adf.validateHash(hash)) {
+                LOGGER.warn(String.format("Hash mismatch for relay chunk from peer %s: expected %s but got different hash - REFUSING to relay",
+                    peer, hash58));
+                // Clear fileContent immediately to free memory on validation failure
+                adf.clearFileContent();
+                return;
+            }
+            
+            // Get chunk data ONCE - this will be shared across all relay forwards (zero-copy)
+            byte[] chunkData = adf.getBytes();
+            if (chunkData == null) {
+                LOGGER.warn("Chunk data is null for relay forward hash {}", hash58);
+                // Clear fileContent immediately to free memory
+                adf.clearFileContent();
+                return;
+            }
+            
+            // Save to relay cache for persistence (uses streaming write to avoid holding reference)
+            saveToRelayCache(hash58, chunkData);
+            
+            // Capture primitives for MessageFactory lambdas
+            byte[] hashCopy = hash;
+            byte[] signatureCopy = signature;
+            String hash58Copy = hash58;
+            
+            // ZERO-COPY: Share the same byte[] reference across all relay forwards
+            // This avoids loading from cache multiple times (one load per forward)
+            // The byte[] will be held by all MessageFactory instances until they're processed
+            final byte[] sharedChunkData = chunkData;
+            
+            // Clear fileContent now - we have sharedChunkData reference and cache file
+            adf.clearFileContent();
+            
+            // Get current connected peers snapshot for resolving Peer objects
+            PeerList connectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+            
+            // Forward to all peers that requested this hash from us
+            for (PendingRelayForward forward : pendingRequests) {
+                // Skip stale requests
+                if (forward.isStale()) {
+                    LOGGER.debug("Skipping stale relay forward for hash {} to peer {} (age: {}ms)", 
+                            hash58, forward.requestingPeerData, NTP.getTime() - forward.timestamp);
+                    continue;
+                }
+                
+                // Resolve Peer object from connected peers (filters out disconnected peers)
+                Peer requestingPeer = forward.getRequestingPeer(connectedPeers);
+                if (requestingPeer == null) {
+                    // Peer is no longer connected - skip this forward
+                    LOGGER.debug("Skipping relay forward for hash {} - peer {} is no longer connected", 
+                            hash58, forward.requestingPeerData);
+                    continue;
+                }
+                
+                try {
+                    int forwardMessageId = forward.messageId;
+                    
+                    // ZERO-COPY MessageFactory: uses shared byte[] reference instead of loading from cache
+                    // This eliminates duplicate memory allocations when forwarding to multiple peers
+                    MessageFactory factory = () -> {
+                        try {
+                            // Use shared chunk data directly (zero-copy)
+                            // If sharedChunkData is still valid, use it; otherwise fall back to cache/disk
+                            ArbitraryDataFile lazyAdf;
+                            if (sharedChunkData != null) {
+                                // Zero-copy: reuse the same byte[] reference
+                                lazyAdf = new ArbitraryDataFile(sharedChunkData, signatureCopy, false);
+                               
+                            } else {
+                                // Fallback: shared data was GC'd, load from cache
+                                byte[] cachedData = loadFromRelayCache(hash58Copy);
+                                if (cachedData != null) {
+                                    lazyAdf = new ArbitraryDataFile(cachedData, signatureCopy, false);
+                                  
+                                } else {
+                                    // Final fallback: load from permanent storage
+                                    lazyAdf = ArbitraryDataFile.fromHash(hashCopy, signatureCopy);
+                                    if (!lazyAdf.exists()) {
+                                        LOGGER.debug("Chunk {} no longer exists when trying to relay forward", hash58Copy);
+                                        return null;
+                                    }
+                                    LOGGER.trace("Loaded chunk {} from disk for forwarding (fallback)", hash58Copy);
+                                }
+                            }
+                            
+                            ArbitraryDataFileMessage msg = new ArbitraryDataFileMessage(signatureCopy, lazyAdf);
+                            msg.setId(forwardMessageId);
+                            // Note: We don't clear fileContent here because ArbitraryDataFile created from byte array
+                            // doesn't have a filePath, so prefetch can't reload it. The prefetch mechanism will
+                            // use fileContent directly if available, avoiding double-loading.
+                            return msg;
+                        } catch (DataException e) {
+                            LOGGER.warn("Failed to load chunk {} for relay forward: {}", hash58Copy, e.getMessage());
+                            return null;
+                        }
+                    };
+                    
+                    // Check if we recently sent this chunk to this peer (within 3 minutes)
+                    String sendKey = hash58 + "|" + requestingPeer.getPeerData().getAddress().toString();
+                    Long now = NTP.getTime();
+                    
+                    
+                    
+                    // Record this send
+                    if (now != null) {
+                        recentlySentChunks.put(sendKey, now);
+                    }
+                    
+                    // Use estimated size WITHOUT loading data into memory
+                    int estimatedSize = 512 * 1024;  // Typical chunk size (~500KB)
+                    PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer).queueMessageFactory(factory, estimatedSize);
+          
+                } catch (MessageException e) {
+                    LOGGER.debug("Failed to queue ArbitraryDataFileMessage for relay: {}", e.getMessage());
+                } catch (Exception e) {
+                    LOGGER.error("Unexpected error queuing relay forward: {}", e.getMessage(), e);
+                }
+            }
+            // Relay chunks are now cached to temp dir - no need to skip further processing
+            LOGGER.trace("Completed relay forwarding for chunk {} - saved to relay cache, using zero-copy for {} forwards", hash58, pendingRequests.size());
+            return;
+        }
+        
+        // Only save if this was our own request (not a relay)
+        // SECURITY: Reject files we never requested
+        // Note: requestTime may be null if cleanup happened (>24s), but request may still be valid
+        if (requestTime == null) {
+            // Check the validation guard map (lasts 3 minutes vs 24 seconds)
+            // This handles the case where arbitraryDataFileRequests was cleaned up but chunks are still in transit
+            Long guardRequestTime = arbitraryDataFileRequestedGuard.get(hash58);
+            if (guardRequestTime == null) {
+                LOGGER.debug("Discarding unsolicited arbitrary data file {} from peer {} (not in arbitraryDataFileRequests or arbitraryDataFileRequestedGuard)", 
+                    hash58, peer);
+                // Clear fileContent immediately to free memory for unsolicited chunks
+                adf.clearFileContent();
+                return;
+            }
+            // Found in guard map - this is a legitimate delayed response
+            requestTime = guardRequestTime;
+           
+        }
+        
         try {
+            ArbitraryDataFile existingFile = ArbitraryDataFile.fromHash(hash, signature);
+            boolean fileAlreadyExists = existingFile.exists();
+            if(fileAlreadyExists) {
+                // Clear fileContent immediately if file already exists - no need to keep in memory
+                adf.clearFileContent();
+                return;
+            }
+            
+            // Validate hash before saving (using efficient streaming validation)
+           
+            if (!adf.validateHash(hash)) {
+                String signature58 = Base58.encode(signature);
+                LOGGER.warn("Hash mismatch for chunk {} (file {}) from peer {}: peer sent invalid data (possible malicious or corrupted)", 
+                    hash58, signature58, peer);
+                
+                // Add cooldown for entire file - prevent re-requesting ANY chunk from this peer for this file for 10 minutes
+                String cooldownKey = signature58 + "|" + peer.getPeerData().getAddress().toString();
+                Long now = NTP.getTime();
+                if (now != null) {
+                    invalidHashCooldowns.put(cooldownKey, now);
+                    LOGGER.warn("Added 10-minute cooldown for file {} from peer {} due to hash mismatch (affects all chunks)", 
+                        signature58, peer);
+                }
+                
+                // Clear fileContent immediately to free memory on validation failure
+                adf.clearFileContent();
+                return;
+            }
+          
+            
+            // Track download speed before saving
+            // requestTime is guaranteed to be non-null here due to check above
+            long roundTripTime = NTP.getTime() - requestTime;
+            int typicalChunkSize = 512 * 1024; // Typical chunk size (~500KB)
+            Long previousRTT = peer.getDownloadSpeedTracker().getLatestRoundTripTime();
+            peer.getDownloadSpeedTracker().addNewTimeMetric(typicalChunkSize, (int) roundTripTime);
+            Long newRTT = peer.getDownloadSpeedTracker().getLatestRoundTripTime();
+            if (previousRTT == null) {
+                LOGGER.debug("Chunk {} downloaded from {} in {}ms (new RTT measurement, avg={}ms)", 
+                    hash58, peer, roundTripTime, newRTT);
+            } else {
+                LOGGER.debug("Chunk {} downloaded from {} in {}ms (RTT smoothed: {}ms → {}ms)", 
+                    hash58, peer, roundTripTime, previousRTT, newRTT);
+            }
+            
+            // Disk write
+        
             adf.save();
+            
+            // Clear fileContent after saving - data is now on disk and can be reloaded if needed
+            adf.clearFileContent();
+            LOGGER.trace("Saved hash {} to disk (our own request)", hash58);
+            
+          
+            
+            // Remove from guard map now that we've successfully validated and saved
+            removeGuardTracking(hash58);
         } catch (DataException de) {
             LOGGER.error("FAILED to write hash chunk to disk!");
+            // Clear fileContent even on save failure to free memory
+            adf.clearFileContent();
             return;
         }
 
@@ -426,150 +1071,6 @@ public class ArbitraryDataFileManager extends Thread {
         // We may need to remove the file list request, if we have all the files for this transaction
         this.handleFileListRequests(signature);
 
-    }
-
-    /**
-     * Queue a relay request to be processed sequentially per peer.
-     * This prevents concurrent relay requests to the same peer which can cause deadlocks.
-     * Includes timeout-based deduplication to allow retries of stuck requests.
-     */
-    private void queueRelayRequest(Peer peerToAsk, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) {
-        String peerKey = peerToAsk.toString();
-        String hash58 = Base58.encode(hash);
-        String dedupKey = hash58 + ":" + requestingPeer.toString();
-        
-        Long now = NTP.getTime();
-        
-        // Check if already in progress (with timeout)
-        Long existingTimestamp = inProgressRelayRequests.get(dedupKey);
-        if (existingTimestamp != null) {
-            long age = now - existingTimestamp;
-            if (age < 10000) {  // 10 second deduplication window
-                LOGGER.debug("Duplicate relay request for hash {} from peer {}, age={}ms, ignoring", 
-                        hash58, requestingPeer, age);
-                return;
-            } else {
-                LOGGER.info("Stale relay request found for hash {} (age={}ms), allowing retry", hash58, age);
-                // Fall through to queue the request
-            }
-        }
-        
-        // Mark as in-progress with current timestamp
-        inProgressRelayRequests.put(dedupKey, now);
-        
-        // Get or create queue for this relay peer
-        BlockingQueue<RelayRequest> queue = relayQueuesByPeer.computeIfAbsent(
-            peerKey, 
-            k -> new LinkedBlockingQueue<>()
-        );
-        
-        // Get or create worker thread for this relay peer
-        relayWorkersByPeer.computeIfAbsent(peerKey, k -> {
-            Thread worker = new Thread(() -> relayWorker(peerToAsk, queue), "RelayWorker-" + peerKey);
-            worker.setDaemon(true);
-            worker.start();
-            return worker;
-        });
-        
-        // Add request to queue
-        RelayRequest request = new RelayRequest(peerToAsk, requestingPeer, signature, hash, originalMessage);
-        if (!queue.offer(request)) {
-            LOGGER.warn("Failed to queue relay request for hash {} to peer {}", hash58, peerKey);
-            inProgressRelayRequests.remove(dedupKey);
-        } else {
-            LOGGER.debug("Queued relay request for hash {} to peer {} (queue size: {})", hash58, peerKey, queue.size());
-        }
-    }
-
-    /**
-     * Worker thread that processes relay requests sequentially for a specific peer.
-     * This ensures only one thread is ever sending to a peer at a time, preventing deadlocks.
-     * Includes staleness detection to drop requests that have been queued too long.
-     */
-    private void relayWorker(Peer targetPeer, BlockingQueue<RelayRequest> queue) {
-        LOGGER.info("Started relay worker for peer {}", targetPeer);
-        
-        while (!isStopping) {
-            try {
-                // Wait for next request (with timeout to allow cleanup)
-                RelayRequest request = queue.poll(60, TimeUnit.SECONDS);
-                
-                if (request == null) {
-                    // Queue empty for 60s - check if we should exit
-                    if (queue.isEmpty()) {
-                        LOGGER.debug("Relay worker for peer {} exiting due to inactivity", targetPeer);
-                        relayQueuesByPeer.remove(targetPeer.toString());
-                        relayWorkersByPeer.remove(targetPeer.toString());
-                        break;
-                    }
-                    continue;
-                }
-                
-                // Check if request is stale (original requester has timed out)
-                Long now = NTP.getTime();
-                long age = now - request.queuedTime;
-                if (age > 5000) {  // 5 second timeout matches getResponseToDataFile timeout
-                    LOGGER.warn("Dropping stale relay request for hash {} (queued {}ms ago)", request.hash58, age);
-                    String dedupKey = request.hash58 + ":" + request.requestingPeer.toString();
-                    inProgressRelayRequests.remove(dedupKey);
-                    continue;  // Skip to next request
-                }
-                
-                // Process the relay request
-                LOGGER.debug("Processing relay request for hash {} via peer {} (queued {}ms ago)", 
-                        request.hash58, targetPeer, age);
-                try {
-                    fetchFileForRelay(request.targetPeer, request.requestingPeer, 
-                                    request.signature, request.hash, request.originalMessage);
-                } catch (Exception e) {
-                    LOGGER.error("Error processing relay request for hash {}: {}", request.hash58, e.getMessage(), e);
-                } finally {
-                    // Always remove from in-progress set
-                    String dedupKey = request.hash58 + ":" + request.requestingPeer.toString();
-                    inProgressRelayRequests.remove(dedupKey);
-                }
-                
-            } catch (InterruptedException e) {
-                LOGGER.info("Relay worker for peer {} interrupted", targetPeer);
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
-
-    private void fetchFileForRelay(Peer peer, Peer requestingPeer, byte[] signature, byte[] hash, Message originalMessage) throws DataException {
-        try {
-            String hash58 = Base58.encode(hash);
-
-            LOGGER.info(String.format("Fetching data file2 %.8s from peer %s", hash58, peer));
-            arbitraryDataFileRequests.put(hash58, NTP.getTime());
-            Message getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(signature, hash);
-            peer.QDNUse();
-            Message response = peer.getResponseToDataFile(getArbitraryDataFileMessage);
-          
-            arbitraryDataFileRequests.remove(hash58);
-            LOGGER.info(String.format("Removed hash %.8s from arbitraryDataFileRequests", hash58));
-
-            if (response == null) {
-                LOGGER.info("Received null response from peer {}", peer);
-                return;
-            }
-            if (response.getType() != MessageType.ARBITRARY_DATA_FILE) {
-                LOGGER.debug("Received response with invalid type: {} from peer {}", response.getType(), peer);
-                return;
-            }
-
-            ArbitraryDataFileMessage peersArbitraryDataFileMessage = (ArbitraryDataFileMessage) response;
-            ArbitraryDataFile arbitraryDataFile = peersArbitraryDataFileMessage.getArbitraryDataFile();
-
-            if (arbitraryDataFile != null) {
-                LOGGER.info("forwarding request");
-                // We might want to forward the request to the peer that originally requested it
-                this.handleArbitraryDataFileForwarding(requestingPeer, new ArbitraryDataFileMessage(signature, arbitraryDataFile), originalMessage);
-            }
-        } catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
-        }
     }
 
     Map<String, byte[]> signatureBySignature58 = new HashMap<>();
@@ -620,29 +1121,7 @@ public class ArbitraryDataFileManager extends Thread {
         }
     }
 
-    public void handleArbitraryDataFileForwarding(Peer requestingPeer, Message message, Message originalMessage) {
-        // Return if there is no originally requesting peer to forward to
-        if (requestingPeer == null) {
-            return;
-        }
-
-        // Return if we're not in relay mode or if this request doesn't need forwarding
-        if (!Settings.getInstance().isRelayModeEnabled()) {
-            return;
-        }
-
-        LOGGER.info("Received arbitrary data file - forwarding is needed");
-
-        try {
-            // The ID needs to match that of the original request
-            message.setId(originalMessage.getId());
-
-            PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer).queueMessage(message); //, SEND_TIMEOUT_MS
-
-        } catch (Exception e) {
-            LOGGER.error(e.getMessage(), e);
-        }
-    }
+  
 
     // Fetch data directly from peers
     private List<ArbitraryDirectConnectionInfo> getDirectConnectionInfoForSignature(byte[] signature) {
@@ -805,7 +1284,7 @@ public class ArbitraryDataFileManager extends Thread {
 
             ArbitraryRelayInfo relayInfo = relayInfoList.get(0);
 
-            LOGGER.debug("Returning optimal relay info for hash: {} (requestHops {})", hash58, relayInfo.getRequestHops());
+            LOGGER.trace("Returning optimal relay info for hash: {} (requestHops {})", hash58, relayInfo.getRequestHops());
             return relayInfo;
         }
         LOGGER.trace("No relay info exists for hash: {}", hash58);
@@ -892,54 +1371,185 @@ public class ArbitraryDataFileManager extends Thread {
 
     // Network handlers
     private void processDataFile(Peer peer, byte[] hash, byte[] sig, Message originalMessage) {
+        // Mark peer as actively used for QDN (we're serving them data)
+        peer.QDNUse();
 
         final String hash58 = Base58.encode(hash);
         try {
             ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromHash(hash, sig);
-            ArbitraryRelayInfo relayInfo = this.getOptimalRelayInfoEntryForHash(hash58);
+            
+            // Priority 1: Check permanent storage
             if (arbitraryDataFile.exists()) {
-                LOGGER.info("Hash {} exists, queueing send file to {}", hash58, peer);
+           
 
-                // We can serve the file directly as we already have it
-                ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(sig, arbitraryDataFile);
-                arbitraryDataFileMessage.setId(originalMessage.getId());
+                // Check if we recently sent this chunk to this peer (within 3 minutes)
+                String sendKey = hash58 + "|" + peer.getPeerData().getAddress().toString();
+                Long now = NTP.getTime();
+                
+             
+                
+                // Record this send
+                if (now != null) {
+                    recentlySentChunks.put(sendKey, now);
+                }
 
-                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage);
-
+                // Use lazy loading - only load chunk from disk when about to send
+                int messageId = originalMessage.getId();
+                MessageFactory factory = () -> {
+                    try {
+                        ArbitraryDataFile adf = ArbitraryDataFile.fromHash(hash, sig);
+                        if (!adf.exists()) {
+                            LOGGER.warn("Chunk {} no longer exists when trying to send", hash58);
+                            return null;
+                        }
+                        ArbitraryDataFileMessage msg = new ArbitraryDataFileMessage(sig, adf);
+                        msg.setId(messageId);
+                        return msg;
+                    } catch (DataException e) {
+                        LOGGER.warn("Failed to load chunk {} from disk: {}", hash58, e.getMessage());
+                        return null;
+                    }
+                };
+                
+                // Estimate chunk size (~500KB typical)
+                int estimatedSize = 512 * 1024;
+                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageFactory(factory, estimatedSize);
+                return; // Early return - found in permanent storage
+            } else {
+                LOGGER.debug("Hash {} does not exist in permanent storage, queueing send to {}", hash58, peer);
             }
-            else if (relayInfo != null) {
+            
+            // Priority 2: Check relay cache (before checking relayInfo) TODO: PUT BACK
+            // byte[] cachedData = loadFromRelayCache(hash58);
+            // if (cachedData != null) {
+            //     LOGGER.debug("Hash {} found in relay cache, sending directly to {} (cache hit!)", hash58, peer);
+                
+            //     int messageId = originalMessage.getId();
+            //     MessageFactory factory = () -> {
+            //         try {
+            //             byte[] data = loadFromRelayCache(hash58);
+            //             if (data == null) {
+            //                 LOGGER.warn("Chunk {} disappeared from relay cache between check and send", hash58);
+            //                 return null;
+            //             }
+            //             ArbitraryDataFile adf = new ArbitraryDataFile(data, sig, false);
+            //             ArbitraryDataFileMessage msg = new ArbitraryDataFileMessage(sig, adf);
+            //             msg.setId(messageId);
+            //             // Note: We don't clear fileContent here because ArbitraryDataFile created from byte array
+            //             // doesn't have a filePath, so prefetch can't reload it. The prefetch mechanism will
+            //             // use fileContent directly if available, avoiding double-loading.
+            //             return msg;
+            //         } catch (DataException e) {
+            //             LOGGER.warn("Failed to load chunk {} from relay cache: {}", hash58, e.getMessage());
+            //             return null;
+            //         }
+            //     };
+                
+            //     int estimatedSize = 512 * 1024;
+            //     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageFactory(factory, estimatedSize);
+            //     return; // Early return - found in relay cache, skip all relay logic
+            // }
+            
+            // Priority 3: Check relay info (cache miss - need to fetch from network)
+            // First, log all available relay options to diagnose potential issues
+            List<ArbitraryRelayInfo> allRelayInfos = this.getRelayInfoListForHash(hash58);
+            if (allRelayInfos != null && !allRelayInfos.isEmpty()) {
+                LOGGER.trace("Found {} relay info entries for hash {}", allRelayInfos.size(), hash58);
+                for (ArbitraryRelayInfo info : allRelayInfos) {
+                    PeerAddress addr = info.getPeerData() != null ? info.getPeerData().getAddress() : null;
+                    LOGGER.trace("  - Relay option: peer={}, hops={}, timestamp={}", 
+                            addr, info.getRequestHops(), info.getTimestamp());
+                }
+            }
+            
+            ArbitraryRelayInfo relayInfo = this.getOptimalRelayInfoEntryForHash(hash58);
+            if (relayInfo != null) {
+                removeFromRelayMap(relayInfo);
                 if (!Settings.getInstance().isRelayModeEnabled()) {
                     LOGGER.info("Relay info exists for hash {} but relay mode is disabled", hash58);
                 }
-                LOGGER.info("We have relay info for hash {}", Base58.encode(hash));
+                LOGGER.trace("Selected optimal relay info for hash {}: peer={}, hops={}", hash58,
+                        relayInfo.getPeerData() != null ? relayInfo.getPeerData().getAddress() : "null",
+                        relayInfo.getRequestHops());
                 
-                // Get the relay peer info
-                Peer relayPeer = relayInfo.getPeer();
-                PeerData relayPeerData = relayPeer != null ? relayPeer.getPeerData() : null;
+                // Get the relay peer info - resolve from connected peers to avoid stale references
+                PeerList connectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
+                Peer relayPeer = relayInfo.getPeer(connectedPeers);
+                PeerData relayPeerData = relayInfo.getPeerData();
                 PeerAddress relayPeerAddress = relayPeerData != null ? relayPeerData.getAddress() : null;
                 
                 if (relayPeerData == null) {
                     LOGGER.warn("Relay peer data is null for hash {}", hash58);
                 } else {
-                    LOGGER.info("Relay peer address: {}", relayPeerAddress);
+                    LOGGER.trace("Processing relay for hash {}: requesting peer={}, relay peer={}", 
+                            hash58, peer.getPeerData().getAddress(), relayPeerAddress);
+                    
+                    //  Check for relay loop - don't send back to the requesting peer
+                    // This can happen when multiple relay infos exist and the "optimal" one (by hop count)
+                    // points back to the requester
+                    if (relayPeer != null) {
+                        PeerAddress requestingPeerAddress = peer.getPeerData().getAddress();
+                        PeerAddress resolvedRelayAddress = relayPeer.getPeerData().getAddress();
+                        
+                        // Check if the relay peer is the same as the requesting peer (would create a loop)
+                        boolean isSamePeer = requestingPeerAddress.getHost().equalsIgnoreCase(resolvedRelayAddress.getHost())
+                                          && requestingPeerAddress.getPort() == resolvedRelayAddress.getPort();
+                        
+                        if (isSamePeer) {
+                            LOGGER.debug("Relay loop detected for hash {}! Optimal relay peer {} ({}:{}) is the SAME as requesting peer {} ({}:{})", 
+                                    hash58,
+                                    relayPeer, resolvedRelayAddress.getHost(), resolvedRelayAddress.getPort(),
+                                    peer, requestingPeerAddress.getHost(), requestingPeerAddress.getPort());
+                            LOGGER.debug("This indicates multiple relay infos exist and hop-count optimization selected the requester");
+                            
+                            // Try to find an alternative relay peer that ISN'T the requesting peer
+                            if (allRelayInfos != null && allRelayInfos.size() > 1) {
+                                LOGGER.debug("Searching for alternative relay peer from {} available options", allRelayInfos.size());
+                                ArbitraryRelayInfo alternativeRelayInfo = allRelayInfos.stream()
+                                        .filter(info -> {
+                                            PeerAddress infoAddr = info.getPeerData() != null ? info.getPeerData().getAddress() : null;
+                                            if (infoAddr == null) return false;
+                                            // Filter out the requesting peer to prevent loops
+                                            boolean isNotRequestingPeer = !(infoAddr.getHost().equalsIgnoreCase(requestingPeerAddress.getHost())
+                                                                         && infoAddr.getPort() == requestingPeerAddress.getPort());
+                                            return isNotRequestingPeer;
+                                        })
+                                        .min(Comparator.comparingInt(info -> info.getRequestHops() != null ? info.getRequestHops() : Integer.MAX_VALUE))
+                                        .orElse(null);
+                                
+                                if (alternativeRelayInfo != null) {
+                                    LOGGER.debug("Found alternative relay peer: {} (hops: {})", 
+                                            alternativeRelayInfo.getPeerData().getAddress(),
+                                            alternativeRelayInfo.getRequestHops());
+                                    relayInfo = alternativeRelayInfo;
+                                    relayPeer = relayInfo.getPeer(connectedPeers);
+                                    relayPeerData = relayInfo.getPeerData();
+                                    relayPeerAddress = relayPeerData != null ? relayPeerData.getAddress() : null;
+                                } else {
+                                    LOGGER.debug("No alternative relay peer found - all relay infos point to requesting peer! Skipping relay.");
+                                    relayPeer = null;
+                                }
+                            } else {
+                                LOGGER.debug("Only one relay info exists and it points to requesting peer - skipping relay for hash {}", hash58);
+                                relayPeer = null;
+                            }
+                        } else {
+                            LOGGER.trace("Relay peer {} is different from requesting peer {} - OK to relay", 
+                                    resolvedRelayAddress, requestingPeerAddress);
+                        }
+                    }
                     
                     // Try to get the current NetworkData peer for this address
-                    Peer peerToAsk = NetworkData.getInstance().getPeerByPeerData(relayPeerData);
-                    boolean socketOpen = peerToAsk != null 
-                            && peerToAsk.getSocketChannel() != null 
-                            && peerToAsk.getSocketChannel().isOpen();
+                   
+                    boolean socketOpen = relayPeer != null 
+                            && relayPeer.getSocketChannel() != null 
+                            && relayPeer.getSocketChannel().isOpen();
                     
-                    LOGGER.info("Resolved peerToAsk: {}, socketOpen: {}", peerToAsk, socketOpen);
+                    LOGGER.trace("Resolved relayPeer: {}, socketOpen: {}", relayPeer, socketOpen);
                     
                     if (!socketOpen && Settings.getInstance().isRelayModeEnabled()) {
                         // Socket is closed or peer not found - try to force connect
                         LOGGER.info("Socket closed or peer not found for relay to {}. Attempting reconnect...", relayPeerAddress);
-                        
-                        // Create or reuse peer and force connection
-                        if (peerToAsk == null) {
-                            peerToAsk = new Peer(relayPeerData, Peer.NETWORKDATA);
-                            peerToAsk.setIsDataPeer(true);
-                        }
                         
                         // Add this hash to pending requests for when connection completes
                         // (Similar to direct connection handling in ArbitraryDataFileRequestThread)
@@ -947,19 +1557,56 @@ public class ArbitraryDataFileManager extends Thread {
                         LOGGER.warn("Skipping relay for hash {} because socket is closed. Forcing reconnect for future requests.", hash58);
                        
                     }
-                    else if (peerToAsk != null && socketOpen && Settings.getInstance().isRelayModeEnabled()) {
-                        // Queue the relay request instead of calling directly to prevent concurrent access deadlocks
-                        LOGGER.debug("Queueing relay request for hash {} via peer {}", hash58, peerToAsk);
-                        this.queueRelayRequest(peerToAsk, peer, sig, hash, originalMessage);
+                    else if (socketOpen && Settings.getInstance().isRelayModeEnabled()) {
+                       
+                        
+                        // Track that this peer requested this hash from us, using composite key
+                        // Key includes the relay peer we're requesting from, so we can match responses correctly
+                        String relayKey = createRelayKey(hash58, relayPeer);
+                        pendingRelayForwards.computeIfAbsent(relayKey, k -> Collections.synchronizedList(new ArrayList<>()))
+                            .add(new PendingRelayForward(peer, originalMessage));
+                        
+                 
+                        
+                        LOGGER.debug("Relaying hash {} from requesting peer {} ({}:{}) to relay peer {} ({}:{})", 
+                                hash58, 
+                                peer, peer.getPeerData().getAddress().getHost(), peer.getPeerData().getAddress().getPort(),
+                                relayPeer, relayPeer.getPeerData().getAddress().getHost(), relayPeer.getPeerData().getAddress().getPort());
+                        
+                        // Relay tracking is handled by pendingRelayForwards map only
+                        // No need for arbitraryDataFileRequests or guard tracking since:
+                        // 1. Relay chunks are identified via pendingRelayForwards (line 946)
+                        // 2. Relay chunks exit early (line 1062) before guard check (line 1071)
+                        // 3. Relay validation uses pendingRelayForwards timeout, not guard timeout
+                        
+                        // Request the file from the relay peer using PeerSendManager
+                        try {
+                            GetArbitraryDataFileMessage getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(sig, hash);
+                            getArbitraryDataFileMessage.setId(originalMessage.getId());
+                            PeerSendManagement.getInstance().getOrCreateSendManager(relayPeer).queueMessage(getArbitraryDataFileMessage);
+                            LOGGER.debug("Successfully sent GetArbitraryDataFileMessage for hash {} to relay peer {} ({}:{})", 
+                                    hash58, relayPeer, 
+                                    relayPeer.getPeerData().getAddress().getHost(), 
+                                    relayPeer.getPeerData().getAddress().getPort());
+                        } catch (MessageException e) {
+                            LOGGER.error("Failed to create GetArbitraryDataFileMessage for relay: {}", e.getMessage());
+                            // Clean up pendingRelayForwards since request failed
+                            List<PendingRelayForward> forwards = pendingRelayForwards.get(relayKey);
+                            if (forwards != null) {
+                                // Remove by matching PeerData and message ID
+                                PeerData peerData = peer.getPeerData();
+                                forwards.removeIf(f -> f.requestingPeerData.equals(peerData) && f.messageId == originalMessage.getId());
+                            }
+                        }
                     }
                     else {
-                        LOGGER.warn("Cannot relay for hash {}: peerToAsk={}, socketOpen={}, relayModeEnabled={}",
-                                hash58, peerToAsk, socketOpen, Settings.getInstance().isRelayModeEnabled());
+                        LOGGER.warn("Cannot relay for hash {}: relayPeer={}, socketOpen={}, relayModeEnabled={}",
+                                hash58, relayPeer, socketOpen, Settings.getInstance().isRelayModeEnabled());
                     }
                 }
             }
             else {
-                LOGGER.debug("Hash {} doesn't exist and we don't have relay info", hash58);
+                LOGGER.debug("Hash {} doesn't exist anywhere (permanent storage, relay cache, or relay info)", hash58);
 
                 // We don't have this file
                 Controller.getInstance().stats.getArbitraryDataFileMessageStats.unknownFiles.getAndIncrement();
@@ -985,11 +1632,6 @@ public class ArbitraryDataFileManager extends Thread {
         } catch (MessageException e) {
             throw new RuntimeException(e);
         } 
-        
-        // finally {
-        //     // Always remove from in-progress set when done
-        //     inProgressRelayRequests.remove(relayKey);
-        // }
 
     }
 
@@ -1026,81 +1668,7 @@ public class ArbitraryDataFileManager extends Thread {
     }
 
 
-    /*  Original Good working Method
-    public void onNetworkGetArbitraryDataFileMessage(Peer peer, Message message) {
-        // Don't respond if QDN is disabled
-        if (!Settings.getInstance().isQdnEnabled()) {
-            return;
-        }
-
-        GetArbitraryDataFileMessage getArbitraryDataFileMessage = (GetArbitraryDataFileMessage) message;
-        byte[] hash = getArbitraryDataFileMessage.getHash();
-        String hash58 = Base58.encode(hash);
-        byte[] signature = getArbitraryDataFileMessage.getSignature();
-        Controller.getInstance().stats.getArbitraryDataFileMessageStats.requests.incrementAndGet();
-
-        LOGGER.info("Received GetArbitraryDataFileMessage from peer {} for hash {}", peer, Base58.encode(hash));
-
-        try {
-            ArbitraryDataFile arbitraryDataFile = ArbitraryDataFile.fromHash(hash, signature);
-            ArbitraryRelayInfo relayInfo = this.getOptimalRelayInfoEntryForHash(hash58);
-
-            if (arbitraryDataFile.exists()) {
-                LOGGER.info("Hash {} exists", hash58);
-
-                // We can serve the file directly as we already have it
-                LOGGER.info("Sending file {}...", arbitraryDataFile);
-                ArbitraryDataFileMessage arbitraryDataFileMessage = new ArbitraryDataFileMessage(signature, arbitraryDataFile);
-                arbitraryDataFileMessage.setId(message.getId());
-
-                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(arbitraryDataFileMessage); // , SEND_TIMEOUT_MS
-
-            }
-            else if (relayInfo != null) {
-                LOGGER.debug("We have relay info for hash {}", Base58.encode(hash));
-                // We need to ask this peer for the file
-                Peer peerToAsk = relayInfo.getPeer();
-                if (peerToAsk != null) {
-
-                    // Forward the message to this peer
-                    LOGGER.debug("Asking peer {} for hash {}", peerToAsk, hash58);
-                    // No need to pass arbitraryTransactionData below because this is only used for metadata caching,
-                    // and metadata isn't retained when relaying.
-                    this.fetchFileForRelay(peerToAsk, peer, signature, hash, message);
-                }
-                else {
-                    LOGGER.debug("Peer {} not found in relay info", peer);
-                }
-            }
-            else {
-                LOGGER.debug("Hash {} doesn't exist and we don't have relay info", hash58);
-
-                // We don't have this file
-                Controller.getInstance().stats.getArbitraryDataFileMessageStats.unknownFiles.getAndIncrement();
-
-                // Send valid, yet unexpected message type in response, so peer's synchronizer doesn't have to wait for timeout
-                LOGGER.debug("Sending 'file unknown' response to peer {} for GET_FILE request for unknown file {}", peer, arbitraryDataFile);
-
-                // Send generic 'unknown' message as it's very short
-                Message fileUnknownMessage = peer.getPeersVersion() >= GenericUnknownMessage.MINIMUM_PEER_VERSION
-                        ? new GenericUnknownMessage()
-                        : new BlockSummariesMessage(Collections.emptyList());
-                fileUnknownMessage.setId(message.getId());
-                if (!peer.sendMessage(fileUnknownMessage)) {
-                    LOGGER.debug("Couldn't sent file-unknown response");
-                }
-                else {
-                    LOGGER.debug("Sent file-unknown response for file {}", arbitraryDataFile);
-                }
-            }
-        }
-        catch (DataException e) {
-            LOGGER.debug("Unable to handle request for arbitrary data file: {}", hash58);
-        } catch (MessageException e) {
-            throw new RuntimeException(e);
-        }
-    }
-     */
+    
 
     /* Calls to SubClass */
     Map<String, Integer> getPeerTimeOuts() {
@@ -1115,9 +1683,7 @@ public class ArbitraryDataFileManager extends Thread {
         this.pendingPeersWithHashes.cleanOut(peer);
     }
 
-    void removePeerChunk(String peer, String hash58) {
-        this.pendingPeersWithHashes.removePeerChunk(peer, hash58);
-    }
+ 
 
     void incrementTimeOuts() {
         this.pendingPeersWithHashes.incrementTimeOuts();
@@ -1140,19 +1706,18 @@ public class ArbitraryDataFileManager extends Thread {
     }
 
     public static class PendingPeersWithHashes {
-        //private final Map<Peer, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks;
-        //private final Map<Peer, Integer> pendingPeerTries;
+
         // All keys are in the format "Host:Port"
         private final Map<String, List<ArbitraryFileListResponseInfo>> pendingPeerAndChunks;
         private final Map<String, Integer> pendingPeerTries;
 
-        private final List<String> isConnectingPeers;
+        private final Set<String> isConnectingPeers;
         private final Object combinedLock = new Object();
 
         public PendingPeersWithHashes() {
             pendingPeerTries = new HashMap<>();
             pendingPeerAndChunks = new HashMap<>();
-            isConnectingPeers = new ArrayList<>();
+            isConnectingPeers = new HashSet<>();
         }
 
         Map<String, Integer> getTimeOuts() {
@@ -1177,6 +1742,7 @@ public class ArbitraryDataFileManager extends Thread {
             synchronized (combinedLock) {
                 this.pendingPeerTries.remove(peer);
                 this.pendingPeerAndChunks.remove(peer);
+                this.isConnectingPeers.remove(peer);  // Also clear the connecting flag on timeout
             }
         }
 
@@ -1190,15 +1756,7 @@ public class ArbitraryDataFileManager extends Thread {
             return !this.pendingPeerAndChunks.isEmpty();
         }
 
-        boolean isPending(Peer peer) {
-            return this.pendingPeerAndChunks.containsKey(peer);
-        }
 
-        void removePeerChunk(String peer, String hash58){
-            // Find the specific hash and remove it from list
-            // if the list is empty remove PeerTimeOut if it hasn't expired
-            // setIsConnecting(false)
-        }
 
         void addPeerAndInfo(Peer peer, ArbitraryFileListResponseInfo aflri) {
             synchronized (combinedLock) {
@@ -1217,29 +1775,15 @@ public class ArbitraryDataFileManager extends Thread {
                 // 3. Only add if it is not a duplicate
                 if (!isDuplicate) {
                     currentList.add(aflri);
-                    LOGGER.info("ADDED unique AFLRI with hash {} for peer {}", aflri.getHash58(), peerKey);
+                    LOGGER.trace("ADDED unique AFLRI with hash {} for peer {}", aflri.getHash58(), peerKey);
                 } else {
-                    LOGGER.info("SKIPPED adding duplicate AFLRI with hash {} for peer {}", aflri.getHash58(), peerKey);
+                    LOGGER.trace("SKIPPED adding duplicate AFLRI with hash {} for peer {}", aflri.getHash58(), peerKey);
                 }
 
             } // End of synchronized block
         }
 
-        /* First Attempt
-        void addPeerAndInfo(Peer peer, ArbitraryFileListResponseInfo aflri) {
-            synchronized (combinedLock) {
-                this.pendingPeerTries.putIfAbsent(peer.toString(), 0);
-                LOGGER.info("Unique peer count is: {}", pendingPeerTries.size());
-                pendingPeerAndChunks
-                        .computeIfAbsent(peer.toString(), k -> new ArrayList<>())
-                        .add(aflri);
-                // @ToDo: only add aflri to the array if it does not exist
-                // Check aflri.getHash58() to determine if it exists
-            }
 
-            LOGGER.info("pendingPeerAndChucks has {} peers ", pendingPeerAndChunks.size());
-        }
-        */
 
         void setConnecting(String peer, boolean v) {
             synchronized (combinedLock) {

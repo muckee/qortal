@@ -28,12 +28,17 @@ public class MessageTask implements Task {
 
     @Override
     public void perform() throws InterruptedException {
-        LOGGER.trace("Routing Message to network {}", peer.getPeerType());
+        try {
+            LOGGER.trace("Routing Message to network {}", peer.getPeerType());
 
-        if (peer.getPeerType() == Peer.NETWORKDATA)
-            NetworkData.getInstance().onMessage(peer, nextMessage);
-        else
-            Network.getInstance().onMessage(peer, nextMessage);
-
+            if (peer.getPeerType() == Peer.NETWORKDATA)
+                NetworkData.getInstance().onMessage(peer, nextMessage);
+            else
+                Network.getInstance().onMessage(peer, nextMessage);
+        } finally {
+            // Defensive reset - onHandshakingMessage has its own finally, but this catches gaps
+            // Safe to call multiple times (idempotent) and ensures we never leak a stuck flag
+            peer.resetHandshakeMessagePending();
+        }
     }
 }

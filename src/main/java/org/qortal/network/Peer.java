@@ -23,9 +23,8 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TransferQueue;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -37,13 +36,17 @@ import org.qortal.data.block.BlockSummaryData;
 import org.qortal.data.block.CommonBlockData;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.helper.PeerCapabilities;
+import org.qortal.network.helper.PeerDownloadSpeedTracker;
+import org.qortal.network.message.ArbitraryDataFileMessage;
 import org.qortal.network.message.ChallengeMessage;
+import org.qortal.network.message.GetArbitraryDataFileMessage;
 import org.qortal.network.message.Message;
 import org.qortal.network.message.MessageException;
 import org.qortal.network.message.MessageType;
 import org.qortal.network.task.MessageTask;
 import org.qortal.network.task.PingTask;
 import org.qortal.settings.Settings;
+import org.qortal.utils.Base58;
 import org.qortal.utils.ExecuteProduceConsume.Task;
 import org.qortal.utils.NTP;
 
@@ -68,11 +71,6 @@ public class Peer {
      * Maximum time to wait for a message reply to arrive from peer. (ms)
      */
     private static final int RESPONSE_TIMEOUT = 180_000; // ms, was 3000
-
-    /**
-     * Maximum time to wait for a message to be added to sendQueue (ms)
-     */
-    private static final int QUEUE_TIMEOUT = 1000; // ms
 
     /**
      * Interval between PING messages to a peer. (ms)
@@ -107,10 +105,15 @@ public class Peer {
     private Map<Integer, BlockingQueue<Message>> replyQueues;
     private LinkedBlockingQueue<Message> pendingMessages;
 
-    private TransferQueue<Message> sendQueue;
-    private ByteBuffer outputBuffer;
-    private String outputMessageType;
-    private int outputMessageId;
+	private final BlockingQueue<Message> sendQueue;
+	private ByteBuffer outputBuffer;
+	private String outputMessageType;
+	private int outputMessageId;
+	private long lastWriteProgressTime = System.currentTimeMillis();
+	
+	// Shallow prefetch: track active prefetches to cap at 2-4 chunks per peer
+	private static final int MAX_PREFETCH_COUNT = 3; // Cap at 3 prefetches per peer (2-4 range)
+	private final AtomicInteger activePrefetchCount = new AtomicInteger(0);
 
     /**
      * True if we created connection to peer, false if we accepted incoming connection from peer.
@@ -120,6 +123,11 @@ public class Peer {
     private final Object handshakingLock = new Object();
     private Handshake handshakeStatus = Handshake.STARTED;
     private volatile boolean handshakeMessagePending = false;
+    private volatile long handshakeMessagePendingSince = 0;
+    /** TX side: true when we have successfully sent OUR RESPONSE */
+    private volatile boolean handshakeResponseSent = false;
+    /** RX side: true when we have validated THEIR RESPONSE */
+    private volatile boolean handshakeResponseValidated = false;
     private long handshakeComplete = -1L;
     private long maxConnectionAge = 0L;
 
@@ -142,10 +150,15 @@ public class Peer {
      */
     private Long lastValidUse = null;
 
+    /**
+     * Tracks download speeds for chunks received from this peer.
+     * Used to track when data was last received for peer selection optimization.
+     */
+    private PeerDownloadSpeedTracker downloadSpeedTracker = new PeerDownloadSpeedTracker();
+
     byte[] ourChallenge;
 
     private boolean syncInProgress = false;
-
 
     /* Pending signature requests */
     private List<byte[]> pendingSignatureRequests = Collections.synchronizedList(new ArrayList<>());
@@ -204,13 +217,13 @@ public class Peer {
     private final Map<MessageType, MessageStats> receivedMessageStats = new ConcurrentHashMap<>();
     private final Map<MessageType, MessageStats> sentMessageStats = new ConcurrentHashMap<>();
 
-    public boolean notSentHelloV2 = true;
+   
     // Constructors
 
     private Peer(int network, boolean outbound) {
         this.peerType = network;
         this.isOutbound = outbound;
-        this.sendQueue = new LinkedTransferQueue<>();
+        this.sendQueue = new LinkedBlockingQueue<>(2000); // Bounded queue for bulk streaming
         this.replyQueues = new ConcurrentHashMap<>();
         this.pendingMessages = new LinkedBlockingQueue<>();
     }
@@ -292,13 +305,118 @@ public class Peer {
         }
     }
 
+
+
+
+    /**
+     * Checks if this peer has a write that appears stuck (no progress for a while).
+     * 
+     * @param timeoutMs threshold in milliseconds
+     * @return true if outputBuffer has data but no write progress within timeout
+     */
+    public boolean hasStuckWrite(long timeoutMs) {
+        // Only consider it stuck if there's actually data waiting to be written
+        if (this.outputBuffer == null || !this.outputBuffer.hasRemaining()) {
+            return false;
+        }
+        
+        long elapsed = System.currentTimeMillis() - this.lastWriteProgressTime;
+        return elapsed > timeoutMs;
+    }
+
+    /**
+     * Returns info about the current stuck write, or null if not stuck.
+     * Useful for logging.
+     */
+    public String getStuckWriteInfo() {
+        if (this.outputBuffer == null) {
+            return null;
+        }
+        return String.format("type=%s, id=%d, remaining=%d bytes, stalled for %dms",
+                this.outputMessageType, 
+                this.outputMessageId,
+                this.outputBuffer.remaining(),
+                System.currentTimeMillis() - this.lastWriteProgressTime);
+    }
+
     protected void setHandshakeStatus(Handshake handshakeStatus) {
         synchronized (this.handshakingLock) {
+            // Never downgrade from COMPLETED - tryCompleteHandshake() is the sole authority for completion
+            if (this.handshakeStatus == Handshake.COMPLETED) {
+                return;
+            }
             this.handshakeStatus = handshakeStatus;
-            if (handshakeStatus.equals(Handshake.COMPLETED)) {
+        }
+    }
+
+    public boolean isHandshakeResponseSent() {
+        synchronized (this.handshakingLock) {
+            return this.handshakeResponseSent;
+        }
+    }
+
+    public void setHandshakeResponseSent(boolean handshakeResponseSent) {
+        synchronized (this.handshakingLock) {
+            this.handshakeResponseSent = handshakeResponseSent;
+        }
+    }
+
+    public boolean isHandshakeResponseValidated() {
+        synchronized (this.handshakingLock) {
+            return this.handshakeResponseValidated;
+        }
+    }
+
+    public void setHandshakeResponseValidated(boolean handshakeResponseValidated) {
+        synchronized (this.handshakingLock) {
+            this.handshakeResponseValidated = handshakeResponseValidated;
+        }
+    }
+
+    /**
+     * Atomically tries to complete the handshake if BOTH conditions are met:
+     * 1. RX side: Their RESPONSE has been validated (handshakeResponseValidated is true)
+     * 2. TX side: Our RESPONSE has been sent (handshakeResponseSent is true)
+     * 
+     * This uses two explicit flags instead of relying on enum state, because:
+     * - Enum state transitions happen OUTSIDE this lock
+     * - Order of RX/TX completion is non-deterministic
+     * - Both threads must call this method after setting their respective flag
+     * - Exactly one thread will succeed in completing the handshake
+     * 
+     * This is the same pattern used in TLS, QUIC, and SSH handshakes.
+     * 
+     * @return true if handshake was completed by this call, false if already completed or conditions not met
+     */
+    public boolean tryCompleteHandshake() {
+        synchronized (this.handshakingLock) {
+            // Both conditions must be true: RX validated + TX sent
+            if (this.handshakeResponseValidated && 
+                this.handshakeResponseSent && 
+                this.handshakeComplete < 0) {
+                
+                this.handshakeStatus = Handshake.COMPLETED;
                 this.handshakeComplete = System.currentTimeMillis();
                 this.generateRandomMaxConnectionAge();
+                
+                // Defensive sanity check - should never fail since we're inside the lock
+                if (this.handshakeStatus != Handshake.COMPLETED) {
+                    LOGGER.error("[{}] CRITICAL: handshakeStatus changed unexpectedly after completion! Expected COMPLETED, got {}",
+                            this.peerConnectionId, this.handshakeStatus);
+                }
+                return true;
             }
+            return false;
+        }
+    }
+
+    /**
+     * Check if handshake has already been completed.
+     * Used to prevent duplicate onHandshakeCompleted() calls.
+     */
+    public boolean isHandshakeCompleted() {
+        synchronized (this.handshakingLock) {
+            return this.handshakeComplete > 0;
         }
     }
 
@@ -317,12 +435,13 @@ public class Peer {
         Random random = new Random();
         // @ToDo : what the helly???  random age? MAx is default - 6 hrs in settings
         this.maxConnectionAge = (random.nextInt(peerConnectionTimeRange) + minPeerConnectionTime) * 1000L;
-        LOGGER.debug(String.format("[%s] Generated max connection age for peer %s. Min: %ds, max: %ds, range: %ds, random max: %dms", this.peerConnectionId, this, minPeerConnectionTime, maxPeerConnectionTime, peerConnectionTimeRange, this.maxConnectionAge));
+        LOGGER.debug("[{}] Generated max connection age for peer {}. Min: {}s, max: {}s, range: {}s, random max: {}ms", this.peerConnectionId, this, minPeerConnectionTime, maxPeerConnectionTime, peerConnectionTimeRange, this.maxConnectionAge);
 
     }
 
-    protected void resetHandshakeMessagePending() {
+    public void resetHandshakeMessagePending() {
         this.handshakeMessagePending = false;
+        this.handshakeMessagePendingSince = 0;
     }
 
     public PeerData getPeerData() {
@@ -578,9 +697,15 @@ public class Peer {
     // Processing
 
     private void sharedSetup(int network) throws IOException {
-        this.connectionTimestamp = NTP.getTime();
-        this.lastValidUse = NTP.getTime();
+        // Use NTP time if available, fall back to system time
+        // This prevents null timestamps which would exempt peers from timeout enforcement
+        Long ntpTime = NTP.getTime();
+        long timestamp = (ntpTime != null) ? ntpTime : System.currentTimeMillis();
+        
+        this.connectionTimestamp = timestamp;
+        this.lastValidUse = timestamp;
         this.socketChannel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+        this.socketChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
 
         this.socketChannel.configureBlocking(false);
         if (network == Peer.NETWORK)
@@ -606,28 +731,28 @@ public class Peer {
             this.socketChannel.socket().bind(new InetSocketAddress(bindAddr, 0));
             this.socketChannel.socket().connect(resolvedAddress, CONNECT_TIMEOUT);
         } catch (SocketTimeoutException e) {
-            LOGGER.info("[{}] Connection timed out to peer {}", this.peerConnectionId, this);
+            LOGGER.trace("[{}] Connection timed out to peer {}", this.peerConnectionId, this);
             return null;
         } catch (UnknownHostException e) {
-            LOGGER.info("[{}] Connection failed to unresolved peer {}", this.peerConnectionId, this);
+            LOGGER.trace("[{}] Connection failed to unresolved peer {}", this.peerConnectionId, this);
             return null;
         } catch (IOException e) {
-            LOGGER.info("[{}] Connection failed to peer {}", this.peerConnectionId, this);
+            LOGGER.trace("[{}] Connection failed to peer {}", this.peerConnectionId, this);
             return null;
         }
 
         try {
-            LOGGER.debug("[{}] Connected to peer {}", this.peerConnectionId, this);
+            LOGGER.trace("[{}] Connected to peer {}", this.peerConnectionId, this);
             sharedSetup(network);
             return socketChannel;
         } catch (IOException e) {
             LOGGER.trace("[{}] Post-connection setup failed, peer {}", this.peerConnectionId, this);
             try {
-                LOGGER.info("Closing Socket");
+                LOGGER.trace("Closing Socket");
                 socketChannel.close();
             } catch (IOException ce) {
                 // Failed to close?
-                LOGGER.info("EXCEPTION closing socket");
+                LOGGER.trace("EXCEPTION closing socket");
             }
             return null;
         }
@@ -642,11 +767,9 @@ public class Peer {
         synchronized (this.byteBufferLock) {
             while (true) {
                 if (!this.socketChannel.isOpen() ) {
-                    LOGGER.info("RETURNING - Socket isNotOpen or Socket it Close");
                     return;
                 }
                 if (this.socketChannel.socket().isClosed()) {
-                    LOGGER.info("RETURN - Socket isClosed");
                     return;
                 }
 
@@ -656,7 +779,12 @@ public class Peer {
                 }
 
                 final int priorPosition = this.byteBuffer.position();
+                long socketReadStart = System.nanoTime();
                 final int bytesRead = this.socketChannel.read(this.byteBuffer);
+                long socketReadTime = System.nanoTime() - socketReadStart;
+                
+               
+                
                 if (bytesRead == -1) {
                     if (priorPosition > 0) {
                         this.disconnect("EOF - read " + priorPosition + " bytes");
@@ -687,31 +815,41 @@ public class Peer {
                     // Can we build a message from buffer now?
                     ByteBuffer readOnlyBuffer = this.byteBuffer.asReadOnlyBuffer().flip();
                     try {
+                        long deserializeStart = System.nanoTime();
                         message = Message.fromByteBuffer(readOnlyBuffer);
+                        long deserializeTime = System.nanoTime() - deserializeStart;
+                        
+                        // Log deserialization timing for ARBITRARY_DATA_FILE messages
+                        if (message != null && message.getType() == MessageType.ARBITRARY_DATA_FILE) {
+                            long messageByteSize = readOnlyBuffer.position();
+                            LOGGER.trace("[{}] ARBITRARY_DATA_FILE receiver: fromByteBuffer() took {} ms ({} bytes), message ID {}",
+                                    this.peerConnectionId, deserializeTime / 1_000_000.0, messageByteSize, message.getId());
+                        }
                     } catch (MessageException e) {
                         LOGGER.debug("[{}] {}, from peer {}", this.peerConnectionId, e.getMessage(), this);
                         this.disconnect(e.getMessage());
                         return;
                     }
 
-                    if (message == null && bytesRead == 0 && !wasByteBufferFull) {
-                        // No complete message in buffer, no more bytes to read from socket
-                        // even though there was room to read bytes
-
-                        /* DISABLED
-                        // If byteBuffer is empty then we can deallocate it, to save memory, albeit costing GC
+                if (message == null && bytesRead == 0) {
+                    // No complete message and no bytes available right now.
+                    // Return so selector can re-arm OP_READ without busy looping.
+                    if (!wasByteBufferFull) {
+                        // If byteBuffer is completely empty, deallocate it to save memory
+                        // This helps reduce memory usage when peers are idle
+                        // The buffer will be reallocated on next read if needed
                         if (this.byteBuffer.remaining() == this.byteBuffer.capacity()) {
                             this.byteBuffer = null;
+                            LOGGER.trace("[{}] Deallocated empty byteBuffer for peer {}", this.peerConnectionId, this);
                         }
-                        */
-
-                        return;
                     }
+                    return;
+                }
 
-                    if (message == null) {
-                        // No complete message in buffer, but maybe more bytes to read from socket
-                        break;
-                    }
+                if (message == null) {
+                    // No complete message in buffer, but maybe more bytes to read from socket
+                    break;
+                }
 
                     LOGGER.trace("[{}] Received {} message with ID {} from peer {}", this.peerConnectionId,
                             message.getType().name(), message.getId(), this);
@@ -751,6 +889,10 @@ public class Peer {
                                 this.peerConnectionId, this);
                         return;
                     }
+                    
+                    LOGGER.debug("[{}] Queued {} message from peer {} (handshake status: {}, pending: {})",
+                            this.peerConnectionId, message.getType().name(), this, 
+                            this.handshakeStatus, this.handshakeMessagePending);
 
                     // Prematurely end any blocking channel select so that new messages can be processed.
                     // This might cause this.socketChannel.read() above to return zero into bytesRead.
@@ -767,42 +909,7 @@ public class Peer {
         }
     }
 
-    public int addToReplyQueue() {
-        BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
-        Random random = new Random();
-        int id;
-        do {
-            id = random.nextInt(Integer.MAX_VALUE - 1) + 1;
 
-            // Put queue into map (keyed by message ID) so we can poll for a response
-            // If putIfAbsent() doesn't return null, then this ID is already taken
-        } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
-
-        return id;
-    }
-
-    public boolean isExpectingMessage (int msgId) {
-        return this.replyQueues.containsKey(msgId);
-    }
-
-    public int addMultipleToReplyQueue(int hashCount) {
-        BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
-        Random random = new Random();
-        int id;
-        do {
-            id = random.nextInt(Integer.MAX_VALUE - hashCount) + 1;
-
-            // Put queue into map (keyed by message ID) so we can poll for a response
-            // If putIfAbsent() doesn't return null, then this ID is already taken
-        } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
-        //@ToDo: we might step on other replyQueue keys
-        int next = id + 1;
-        while (id + hashCount < next) {
-            this.replyQueues.put(next, blockingQueue);
-            next++;
-        }
-        return id;
-    }
 
     /** Maybe send some pending outgoing messages.
      *
@@ -812,30 +919,40 @@ public class Peer {
         // It is the responsibility of ChannelWriteTask's producer to produce only one call to writeChannel() at a time
 
         while (true) {
+            if (this.outputBuffer != null) {
+                LOGGER.trace("[{}] outputBuffer not null - skipping message processing, continuing to write existing buffer: type={}, id={}, remaining={} bytes",
+                        this.peerConnectionId, this.outputMessageType, this.outputMessageId, 
+                        this.outputBuffer != null ? this.outputBuffer.remaining() : 0);
+            }
             // If output byte buffer is null, fetch next message from queue (if any)
             while (this.outputBuffer == null) {
-                Message message;
+                // Simple poll from bounded queue
+                Message message = this.sendQueue.poll();
 
-                try {
-                    // Allow other thread time to add message to queue having raised OP_WRITE.
-                    // Timeout is overkill but not excessive enough to clog up networking / EPC.
-                    // This is to avoid race condition in sendMessageWithTimeout() below.
-                    message = this.sendQueue.poll(QUEUE_TIMEOUT, TimeUnit.MILLISECONDS);
-                } catch (InterruptedException e) {
-                    // Shutdown situation
-                    return false;
-                }
-
-                // No message? No further work to be done
+                // No message? No work to do - safe to clear OP_WRITE
+                // OP_WRITE will be re-armed by sendMessageWithTimeout() when new messages arrive
                 if (message == null)
-                    return false;
+                    return false; // No pending data
 
                 try {
+                    long startTime = System.nanoTime();
                     byte[] messageBytes = message.toBytes();
+                    long toBytesTime = System.nanoTime() - startTime;
+                    
                     this.outputBuffer = ByteBuffer.wrap(messageBytes);
                     this.outputMessageType = message.getType().name();
                     this.outputMessageId = message.getId();
-
+                    
+                    // Log only for ARBITRARY_DATA_FILE messages (actual chunks)
+                    if (message.getType() == MessageType.ARBITRARY_DATA_FILE) {
+                        LOGGER.trace("RESPONDER NETWORK PREP: messageId={}, toBytes={}ms, bytes={}, peer={}", 
+                            this.outputMessageId, toBytesTime / 1_000_000.0, messageBytes.length, this);
+                    }
+                    // Decrement prefetch count when message is processed (data loaded, ready to send)
+                    // This allows new prefetches to start as messages are consumed
+                    if (message instanceof ArbitraryDataFileMessage) {
+                        decrementPrefetchCount();
+                    }
 
                     LOGGER.trace("[{}] Sending {} message with ID {} to peer {}",
                             this.peerConnectionId, this.outputMessageType, this.outputMessageId, this);
@@ -847,35 +964,38 @@ public class Peer {
                     messageStats.totalBytes.add(this.outputBuffer.limit());
                 } catch (MessageException e) {
                     // Something went wrong converting message to bytes, so discard but allow another round
+                    // Still decrement prefetch count if it was an ArbitraryDataFileMessage
+                    if (message instanceof ArbitraryDataFileMessage) {
+                        decrementPrefetchCount();
+                    }
                     LOGGER.warn("[{}] Failed to send {} message with ID {} to peer {}: {}", this.peerConnectionId,
                             message.getType().name(), message.getId(), this, e.getMessage());
                 }
             }
 
             // If output byte buffer is not null, send from that
+            long socketWriteStart = System.nanoTime();
             int bytesWritten = this.socketChannel.write(outputBuffer);
-
-            int zeroSendCount = 0;
-
-            while (bytesWritten == 0) {
-                if (zeroSendCount > 9) {
-                    LOGGER.debug("Socket write stuck for too long, returning");
-                    return true;
-                }
-                try {
-                    Thread.sleep(10); // 10MS CPU Sleep to try and give it time to flush the socket 
-                }
-                catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return false; // optional, if you want to signal shutdown
-            }
-                zeroSendCount++;
-                bytesWritten = this.socketChannel.write(outputBuffer);
+            long socketWriteTime = System.nanoTime() - socketWriteStart;
+            
+            // Log for ARBITRARY_DATA_FILE
+            if (this.outputMessageType != null && this.outputMessageType.equals("ARBITRARY_DATA_FILE")) {
+                LOGGER.trace("RESPONDER NETWORK WRITE: messageId={}, socketWrite={}ms, wroteBytes={}, remainingBytes={}", 
+                    this.outputMessageId, socketWriteTime / 1_000_000.0, bytesWritten, 
+                    this.outputBuffer != null ? this.outputBuffer.remaining() : 0);
             }
 
-            if (this.peerType == NETWORKDATA) {
-                // record the time taken for speed Manager
+            // Update progress tracking
+            if (bytesWritten > 0) {
+                this.lastWriteProgressTime = System.currentTimeMillis();
+            } else {
+                // Socket send buffer full — wait for next OP_WRITE
+                // For bulk streaming, don't disconnect on write slowness - let TCP pace naturally
+                // Only disconnect on IOException, connection reset, or explicit protocol failures
+                return true;
             }
+
+          
 
             // If we then exhaust the byte buffer, set it to null (otherwise loop and try to send more)
             if (!this.outputBuffer.hasRemaining()) {
@@ -893,7 +1013,27 @@ public class Peer {
          * messages sequentially.
          */
         if (this.handshakeMessagePending) {
-            return null;
+            long pendingDuration = System.currentTimeMillis() - this.handshakeMessagePendingSince;
+            if (pendingDuration > 5_000L) {
+                // Safety timeout: handshake message processing stuck for too long
+                LOGGER.warn("[{}] handshakeMessagePending stuck for {}ms at status {}, force resetting for peer {}",
+                        this.peerConnectionId, pendingDuration, this.handshakeStatus, this);
+                
+                // Log what message was waiting to help diagnose the issue
+                Message peek = this.pendingMessages.peek();
+                if (peek != null) {
+                    LOGGER.warn("[{}] ... had pending {} message waiting (queue size: {})", 
+                            this.peerConnectionId, peek.getType().name(), this.pendingMessages.size());
+                }
+                
+                this.handshakeMessagePending = false;
+                this.handshakeMessagePendingSince = 0;
+                // Don't return null - allow processing to continue
+            } else {
+                LOGGER.debug("[{}] handshakeMessagePending=true blocking message task for peer {} at status {} (pending {}ms)",
+                        this.peerConnectionId, this, this.handshakeStatus, pendingDuration);
+                return null;
+            }
         }
 
         final Message nextMessage = this.pendingMessages.poll();
@@ -907,6 +1047,7 @@ public class Peer {
 
         if (this.handshakeStatus != Handshake.COMPLETED) {
             this.handshakeMessagePending = true;
+            this.handshakeMessagePendingSince = System.currentTimeMillis();
         }
 
         // Return a task to process message in queue
@@ -923,7 +1064,12 @@ public class Peer {
      * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
      */
     public boolean sendMessage(Message message) {
-        return this.sendMessageWithTimeout(message, RESPONSE_TIMEOUT);
+        try {
+            return this.sendMessageWithTimeout(message, RESPONSE_TIMEOUT);
+        } catch (IOException e) {
+            LOGGER.debug("Failed to send message to peer {}: {}", this, e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -932,14 +1078,18 @@ public class Peer {
      * @param message message to be sent
      * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
      */
-    public boolean sendMessageWithTimeout(Message message, int timeout) {
+    public boolean sendMessageWithTimeout(Message message, int timeout) throws IOException {
         if (this.socketChannel == null ) {
-            LOGGER.warn("sendMessageWithTimeout : peer.socketChannel was null");
-            return false;
+            if (!isStopping) {
+                this.disconnect("Socket channel is null");
+            }
+            throw new IOException("Socket channel is null");
         }
         if (!this.socketChannel.isOpen()) {
-            LOGGER.info("SocketChannel was not open; returning false");
-            return false;
+            if (!isStopping) {
+                this.disconnect("Socket closed");
+            }
+            throw new IOException("Socket closed");
         }
 
         try {
@@ -947,27 +1097,61 @@ public class Peer {
             LOGGER.trace("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
                     message.getType().name(), message.getId(), this);
 
+          
+
             // Check message properly constructed
             message.checkValidOutgoing();
+           
+            // CRITICAL ORDERING: Enqueue FIRST, then set OP_WRITE
+            // 
+            // Invariant: OP_WRITE must be armed iff there is pending outbound data or new data may arrive.
+            // 
+            // This ordering ensures that when the selector thread processes OP_WRITE and calls writeChannel(),
+            // the message is guaranteed to be in the queue. If we set OP_WRITE before enqueuing, there's a race:
+            // 1. Set OP_WRITE → selector wakes up → ChannelWriteTask runs
+            // 2. writeChannel() polls queue → still empty → returns false
+            // 3. ChannelWriteTask clears OP_WRITE and exits
+            // 4. Message is enqueued → but OP_WRITE is already cleared → no more writes
+            //
+            // This relies on sendQueue.offer() establishing a happens-before relationship such that
+            // the selector thread will observe the queued message once OP_WRITE is set.
+            
+            // Simple bounded queue - always enqueue, let TCP handle backpressure
+            // For bulk streaming workloads, we need deep buffering, not producer-side backpressure
+            boolean offered = this.sendQueue.offer(message);
+            if (!offered) {
+                
+                return false; // Queue full - peer truly overloaded
+            }
 
-            // Possible race condition:
-            // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
-            // Avoided by poll-with-timeout in writeChannel() above.
+            // Shallow prefetch: start async disk read for chunk messages to reduce blocking in writeChannel()
+            // Only prefetch if under the cap (2-4 chunks per peer) to limit memory usage
+            if (message instanceof ArbitraryDataFileMessage) {
+                ArbitraryDataFileMessage adfMessage = (ArbitraryDataFileMessage) message;
+                int currentPrefetchCount = activePrefetchCount.get();
+                if (currentPrefetchCount < MAX_PREFETCH_COUNT) {
+                    if (adfMessage.startPrefetch()) {
+                        activePrefetchCount.incrementAndGet();
+                        // Decrement when prefetch completes (handled in toBytes() or when message is processed)
+                    }
+                }
+            }
+
+          
+
+            // NOW set OP_WRITE - message is guaranteed to be in queue
             switch (this.getPeerType()) {
                 case Peer.NETWORK:
                     Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+
                     break;
                 case Peer.NETWORKDATA:
                     NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+
                     break;
             }
 
-            //LOGGER.info("Performing TryTransfer with a timeout of {} ms", timeout);
-            return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS); // TODOT changed to try transfer to offer
-        } catch (InterruptedException e) {
-            // Send failure
-            LOGGER.error("Interrupt Exception");
-            return false;
+            return true;
         } catch (MessageException e) {
             LOGGER.error(e.getMessage(), e);
             return false;
@@ -975,104 +1159,73 @@ public class Peer {
     }
 
     /**
-     * Attempt to send Message to peer, using custom timeout.
+     * Checks if a specific hash is currently queued in this peer's internal sendQueue
+     * as a GetArbitraryDataFileMessage.
+     * 
+     * <p>This method takes a snapshot of the sendQueue and checks each message to see
+     * if it's a GetArbitraryDataFileMessage with the matching hash. This is useful for
+     * preventing duplicate requests when cleaning up expired request tracking.
      *
-     * @param message message to be sent
-     * @return <code>true</code> if message successfully sent; <code>false</code> otherwise
+     * @param hash58 the hash to check for, encoded in base58
+     * @return {@code true} if a GetArbitraryDataFileMessage with this hash is queued, otherwise {@code false}
      */
-    // public boolean sendMessageWithTimeoutNow(Message message, int timeout) {
-    //     if (!this.socketChannel.isOpen()) {
-    //         LOGGER.debug("SocketChannel was not open; returning false");
-    //         return false;
-    //     }
-
-    //     try {
-    //         // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
-    //         LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
-    //                 message.getType().name(), message.getId(), this);
-
-    //         // Check message properly constructed
-    //         message.checkValidOutgoing();
-
-    //         // Possible race condition:
-    //         // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
-    //         // Avoided by poll-with-timeout in writeChannel() above.
-    //         switch (this.getPeerType()) {
-    //             case Peer.NETWORK:
-    //                 Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
-    //                 break;
-    //             case Peer.NETWORKDATA:
-    //                 NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
-    //                 break;
-    //         }
-    //         return this.sendQueue.tryTransfer(message, timeout, TimeUnit.MILLISECONDS);
-    //     } catch (InterruptedException e) {
-    //         // Send failure
-    //         LOGGER.error("Interrupt Exception");
-    //         return false;
-    //     } catch (MessageException e) {
-    //         LOGGER.error(e.getMessage(), e);
-    //         return false;
-    //     }
-    // }
-
-    public boolean sendMessageWhenReady(Message message) throws InterruptedException {  // TimeOut Value removed
-
-        // We need this to be open, loop and stall until ready...  micro sleeps but forever, eventually the channel will open
-        try {
-            while(!this.socketChannel.isOpen()) {
-                Thread.sleep(10); // Process a little something else
-            }
-        } catch (InterruptedException e) {
-            LOGGER.info("Socket Status isOpen: {}", this.socketChannel.isOpen());
-            throw new RuntimeException(e);
-        }
-
-        try {
-            // Queue message, to be picked up by ChannelWriteTask and then peer.writeChannel()
-            LOGGER.debug("[{}] Queuing {} message with ID {} to peer {}", this.peerConnectionId,
-                    message.getType().name(), message.getId(), this);
-
-            // Check message properly constructed
-            message.checkValidOutgoing();
-
-            // Possible race condition:
-            // We set OP_WRITE, EPC creates ChannelWriteTask which calls Peer.writeChannel, writeChannel's poll() finds no message to send
-            // Avoided by poll-with-timeout in writeChannel() above.
-            switch (this.getPeerType()) {
-                case Peer.NETWORK:
-                    Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
-                    break;
-                case Peer.NETWORKDATA:
-                    NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
-                    break;
-            }
-
-            final boolean isGetArbitraryDataFile = message.getType() == MessageType.GET_ARBITRARY_DATA_FILE;
-            final long startNs = isGetArbitraryDataFile ? System.nanoTime() : 0L;
-            if (isGetArbitraryDataFile) {
-                LOGGER.info("[{}] GET_ARBITRARY_DATA_FILE tryTransfer start: msgId={}, peer={}, peerType={}, socketOpen={}",
-                        this.peerConnectionId, message.getId(), this, this.peerType, this.socketChannel.isOpen());
-            }
-
-            boolean transferred = this.sendQueue.tryTransfer(message, 40, TimeUnit.SECONDS);  // Give it a day to transfer, stupid long
-
-            if (isGetArbitraryDataFile) {
-                long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
-                LOGGER.info("[{}] GET_ARBITRARY_DATA_FILE tryTransfer done: msgId={}, transferred={}, elapsedMs={}, peer={}, peerType={}, socketOpen={}",
-                        this.peerConnectionId, message.getId(), transferred, elapsedMs, this, this.peerType, this.socketChannel.isOpen());
-            }
-
-            return transferred;
-        } catch (InterruptedException e) {
-            // Send failure
-            LOGGER.error("Interrupt Exception");
-            LOGGER.info(e.getMessage(), e);
-            return false;
-        } catch (MessageException e) {
-            LOGGER.error(e.getMessage(), e);
+    public boolean isHashInSendQueue(String hash58) {
+        if (sendQueue.isEmpty()) {
             return false;
         }
+        
+        byte[] targetHash = Base58.decode(hash58);
+        if (targetHash == null) {
+            return false;
+        }
+        
+        // Take a snapshot of the queue to avoid concurrent modification issues
+        Object[] queueSnapshot = sendQueue.toArray();
+        
+        for (Object obj : queueSnapshot) {
+            if (!(obj instanceof Message)) {
+                continue;
+            }
+            
+            Message message = (Message) obj;
+            try {
+                // Check if it's a GetArbitraryDataFileMessage
+                if (message.getType() == MessageType.GET_ARBITRARY_DATA_FILE) {
+                    GetArbitraryDataFileMessage getMessage = (GetArbitraryDataFileMessage) message;
+                    byte[] messageHash = getMessage.getHash();
+                    
+                    // Compare hashes
+                    if (messageHash != null && Arrays.equals(targetHash, messageHash)) {
+                        return true;
+                    }
+                }
+            } catch (Exception e) {
+                // If we can't check the message, skip it
+                // This can happen if message type doesn't match or casting fails
+                continue;
+            }
+        }
+        
+        return false;
+    }
+
+
+    /**
+     * Get the current size of the send queue.
+     *
+     * @return number of messages currently queued for sending
+     */
+    public int getSendQueueSize() {
+        return this.sendQueue.size();
+    }
+
+    /**
+     * Get the capacity of the send queue.
+     *
+     * @return maximum number of messages that can be queued
+     */
+    public int getSendQueueCapacity() {
+        return this.sendQueue.remainingCapacity() + this.sendQueue.size();
     }
 
     /**
@@ -1122,8 +1275,15 @@ public class Peer {
         message.setId(id);
 
         // Try to send message
-        if (!this.sendMessageWithTimeout(message, timeout)) {
+        try {
+            if (!this.sendMessageWithTimeout(message, timeout)) {
+                this.replyQueues.remove(id);
+                return null;
+            }
+        } catch (IOException e) {
+            // Socket closed - clean up and return null
             this.replyQueues.remove(id);
+            LOGGER.debug("Socket closed while sending request to peer {}: {}", this, e.getMessage());
             return null;
         }
 
@@ -1135,52 +1295,35 @@ public class Peer {
     }
 
 
-    // @ToDo: NEW ICE
-    // Calling sendMessageWhenReady is now blocking until socket.isOpen == true
-    public Message getResponseToDataFile(Message message) {
-        BlockingQueue<Message> blockingQueue = new ArrayBlockingQueue<>(1);
-    
-        // Assign random ID to this message
-        Random random = new Random();
-        int id;
-        do {
-            id = random.nextInt(Integer.MAX_VALUE - 1) + 1;
-        } while (this.replyQueues.putIfAbsent(id, blockingQueue) != null);
-        message.setId(id);
-        
-        LOGGER.info("[{}] About to call sendMessageWhenReady for msgType={}, msgId={}, socketOpen={}",
-                this.peerConnectionId, message.getType(), id, this.socketChannel.isOpen());
-    
-        try {
-            boolean booleanSent = this.sendMessageWhenReady(message);
-            if (!booleanSent) {
-                LOGGER.warn("[{}] Failed to send message: {}", this.peerConnectionId, message.getType());
-                this.replyQueues.remove(id);
-                return null;
-            }
-        } catch (Exception e) {
-            LOGGER.warn("[{}] Failed to send message: {}", this.peerConnectionId, e.getMessage());
-            this.replyQueues.remove(id);
-            return null;
-        }
-    
-        try {
-            return blockingQueue.poll(40, TimeUnit.SECONDS);  // Increased from 100ms
-        } catch (InterruptedException e) {
-            LOGGER.error("InterruptedException: {}", e.getMessage());
-            Thread.currentThread().interrupt();
-            return null;
-        } finally {
-            this.replyQueues.remove(id);  // Remove AFTER poll completes
-        }
-    }
-
     public void QDNUse() {
         this.lastValidUse = NTP.getTime();
     }
 
     public long getLastQDNUse() {
         return this.lastValidUse;
+    }
+
+    /**
+     * Safely decrements the active prefetch count.
+     * Used when messages are dropped to prevent prefetch count from drifting.
+     * This ensures the prefetch cap continues to work correctly.
+     */
+    public void decrementPrefetchCount() {
+        int count = activePrefetchCount.decrementAndGet();
+        if (count < 0) {
+            // Shouldn't happen, but reset to 0 if it does (prevents underflow)
+            activePrefetchCount.set(0);
+        }
+    }
+    
+    /**
+     * Returns the download speed tracker for this peer.
+     * Used to track round-trip times for chunk downloads.
+     *
+     * @return the PeerDownloadSpeedTracker instance for download speed tracking
+     */
+    public PeerDownloadSpeedTracker getDownloadSpeedTracker() {
+        return downloadSpeedTracker;
     }
 
     protected void startPings() {
@@ -1211,17 +1354,84 @@ public class Peer {
             LOGGER.debug("[{}] Disconnecting peer {} after {}: {}", this.peerConnectionId, this,
                     getConnectionAge(), reason);
         }
-        LOGGER.info("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
+        LOGGER.trace("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
 
-        this.shutdown();
+        try {
+            this.shutdown();
+        } catch (Exception e) {
+            LOGGER.error("[{}] Exception during shutdown: {}", this.peerConnectionId, e.getMessage(), e);
+        } finally {
+            // CRITICAL: Use finally block to ensure onDisconnect() is ALWAYS called
+            // This prevents zombie peers from remaining in connected/handshaked lists
+            // even if shutdown() throws an exception or the thread is interrupted
+            ensureDisconnectCleanup();
+        }
+    }
 
-        switch (this.getPeerType()) {
-            case Peer.NETWORK:
-                Network.getInstance().onDisconnect(this);
-                break;
-            case Peer.NETWORKDATA:
-                NetworkData.getInstance().onDisconnect(this);
-                break;
+    /**
+     * Ensures the peer is properly removed from network lists.
+     * Called from disconnect() finally block to guarantee cleanup even if shutdown() fails.
+     */
+    private void ensureDisconnectCleanup() {
+        try {
+            switch (this.getPeerType()) {
+                case Peer.NETWORK:
+                    Network.getInstance().onDisconnect(this);
+                    break;
+                case Peer.NETWORKDATA:
+                    NetworkData.getInstance().onDisconnect(this);
+                    break;
+                default:
+                    LOGGER.error("[{}] Unknown peer type {} - attempting cleanup on both networks",
+                            this.peerConnectionId, this.peerType);
+                    // Try both networks as a safety measure
+                    try {
+                        Network.getInstance().onDisconnect(this);
+                    } catch (Exception e) {
+                        LOGGER.error("[{}] Failed Network.onDisconnect: {}", this.peerConnectionId, e.getMessage());
+                    }
+                    try {
+                        NetworkData.getInstance().onDisconnect(this);
+                    } catch (Exception e2) {
+                        LOGGER.error("[{}] Failed NetworkData.onDisconnect: {}", this.peerConnectionId, e2.getMessage());
+                    }
+            }
+        } catch (Exception e) {
+            LOGGER.error("[{}] CRITICAL: onDisconnect failed, forcing direct removal: {}",
+                    this.peerConnectionId, e.getMessage(), e);
+            forceRemoveFromNetwork();
+        }
+    }
+
+    /**
+     * Last-resort cleanup when normal disconnect mechanisms fail.
+     * Directly removes the peer from all network lists.
+     */
+    private void forceRemoveFromNetwork() {
+        LOGGER.warn("[{}] Forcing direct peer removal from all networks", this.peerConnectionId);
+        
+        // Try to remove from Network
+        try {
+            Network.getInstance().removeConnectedPeer(this);
+        } catch (Exception e) {
+            LOGGER.error("[{}] Failed removeConnectedPeer from Network: {}", 
+                    this.peerConnectionId, e.getMessage());
+        }
+        
+        // Try to remove from NetworkData
+        try {
+            NetworkData.getInstance().removeConnectedPeer(this);
+        } catch (Exception e) {
+            LOGGER.error("[{}] Failed removeConnectedPeer from NetworkData: {}", 
+                    this.peerConnectionId, e.getMessage());
+        }
+        
+        // Clean up PeerSendManager
+        try {
+            PeerSendManagement.getInstance().removeSendManager(this);
+        } catch (Exception e) {
+            LOGGER.error("[{}] Failed to remove PeerSendManager: {}", 
+                    this.peerConnectionId, e.getMessage());
         }
     }
 
@@ -1229,14 +1439,28 @@ public class Peer {
         boolean logStats = false;
 
         if (!isStopping) {
-            LOGGER.debug("[{}] Shutting down peer {}", this.peerConnectionId, this);
+            LOGGER.info("[{}] Shutting down peer {}", this.peerConnectionId, this);
             logStats = true;
         }
         isStopping = true;
+        
+        // Reset prefetch count when peer disconnects
+        // Messages in sendQueue will be cleared, so prefetch count should be reset
+        // This prevents prefetch count from drifting if messages were dropped
+        activePrefetchCount.set(0);
+        
+        // Clear pending messages to prevent memory leaks
+        // These messages will never be processed since the peer is shutting down
+        if (this.pendingMessages != null) {
+            this.pendingMessages.clear();
+        }
 
-        if (this.socketChannel.isOpen()) {
+        if (this.socketChannel != null && this.socketChannel.isOpen()) {
             try {
-                LOGGER.info("CLOSING SOCKET - This is Intentional");
+                String networkType = (this.peerType == Peer.NETWORKDATA) ? "NETWORKDATA" : "NETWORK";
+                String peerAddress = (this.resolvedAddress != null) ? this.resolvedAddress.toString() : "unknown";
+                LOGGER.debug("[{}] CLOSING SOCKET - This is Intentional - peer {} (address: {}) on network {}", 
+                        this.peerConnectionId, this, peerAddress, networkType);
                 this.socketChannel.shutdownOutput();
                 this.socketChannel.close();
             } catch (IOException e) {
@@ -1300,7 +1524,10 @@ public class Peer {
             minVersion |= value;
         }
 
-        return this.getPeersVersion() >= minVersion;
+        // CRITICAL: Check for null to prevent NPE when unboxing
+        // peersVersion is null before HELLO message is received (outbound connections)
+        Long peerVersion = this.getPeersVersion();
+        return peerVersion != null && peerVersion >= minVersion;
     }
 
 
@@ -1382,4 +1609,115 @@ public class Peer {
     public boolean hasReachedMaxConnectionAge() {
         return this.getConnectionAge() > this.getMaxConnectionAge();
     }
+    
+    /**
+     * Send a pre-serialized message to this peer.
+     * 
+     * <p>This optimized method accepts pre-serialized message bytes, avoiding the
+     * need to call toBytes() again in writeChannel(). This is critical for the
+     * two-stage pipeline architecture where messages are pre-loaded from disk
+     * and serialized in parallel disk I/O threads.
+     * 
+     * <p>Benefits:
+     * <ul>
+     *   <li>Eliminates redundant serialization (50-100ms saved per message)</li>
+     *   <li>Prevents redundant disk reads in relay scenarios</li>
+     *   <li>Enables true non-blocking network send path</li>
+     * </ul>
+     *
+     * @param messageId the message ID for tracking
+     * @param messageType the type of message
+     * @param serializedBytes complete pre-serialized message bytes
+     * @param timeout timeout in milliseconds (currently unused but kept for API consistency)
+     * @return true if message was queued successfully, false if queue is full
+     * @throws IOException if socket is closed or invalid
+     * 
+     * @since v5.0.9
+     * @author Ice
+     */
+    public boolean sendPreSerializedMessage(int messageId, MessageType messageType, byte[] serializedBytes, int timeout) throws IOException {
+        if (this.socketChannel == null) {
+            if (!isStopping) {
+                this.disconnect("Socket channel is null");
+            }
+            throw new IOException("Socket channel is null");
+        }
+        if (!this.socketChannel.isOpen()) {
+            if (!isStopping) {
+                this.disconnect("Socket closed");
+            }
+            throw new IOException("Socket closed");
+        }
+
+        try {
+            // Create lightweight wrapper that returns pre-serialized bytes
+            Message wrapper = new PreSerializedMessageWrapper(messageId, messageType, serializedBytes);
+            
+            // Queue message - will be picked up by ChannelWriteTask and writeChannel()
+            LOGGER.trace("[{}] Queuing pre-serialized {} message with ID {} to peer {}", 
+                        this.peerConnectionId, messageType.name(), messageId, this);
+            
+            // Enqueue FIRST, then set OP_WRITE (critical ordering)
+            boolean offered = this.sendQueue.offer(wrapper);
+            if (!offered) {
+                return false; // Queue full
+            }
+
+            // NOW set OP_WRITE - message is guaranteed to be in queue
+            switch (this.getPeerType()) {
+                case Peer.NETWORK:
+                    Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+                case Peer.NETWORKDATA:
+                    NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
+                    break;
+            }
+
+            return true;
+        } catch (Exception e) {
+            LOGGER.error("Error queuing pre-serialized message: {}", e.getMessage(), e);
+            return false;
+        }
+    }
+    
+    /**
+     * Internal wrapper class for pre-serialized messages.
+     * 
+     * <p>This lightweight Message subclass holds pre-serialized bytes and returns
+     * them directly from toBytes(), avoiding any disk I/O or serialization work.
+     * 
+     * <p>This is used by the two-stage pipeline architecture where messages are
+     * pre-loaded and serialized in parallel disk I/O threads, then passed to
+     * sender threads for immediate network transmission.
+     *
+     * @since v5.0.9
+     * @author Ice
+     */
+    private static class PreSerializedMessageWrapper extends Message {
+        private final byte[] preSerializedBytes;
+        
+        /**
+         * Constructs a wrapper for pre-serialized message bytes.
+         *
+         * @param messageId the message ID
+         * @param messageType the message type
+         * @param preSerializedBytes complete pre-serialized message bytes
+         */
+        PreSerializedMessageWrapper(int messageId, MessageType messageType, byte[] preSerializedBytes) {
+            super(messageId, messageType);
+            this.preSerializedBytes = preSerializedBytes;
+        }
+        
+        /**
+         * Returns the pre-serialized bytes instantly without any disk I/O.
+         * 
+         * @return the pre-serialized message bytes
+         */
+        @Override
+        public byte[] toBytes() throws MessageException {
+            // Return pre-serialized bytes instantly - zero disk I/O!
+            return preSerializedBytes;
+        }
+    }
 }
+

@@ -29,16 +29,20 @@ public class PingTask implements Task {
 
     @Override
     public void perform() throws InterruptedException {
+        LOGGER.trace("[{}] Sending PING to peer {}", peer.getPeerConnectionId(), peer);
+        
         PingMessage pingMessage = new PingMessage();
         Message message = peer.getResponse(pingMessage);
 
         if (message == null || message.getType() != MessageType.PING) {
-            LOGGER.debug("[{}] Didn't receive reply from {} for PING ID {}",
+            LOGGER.trace("[{}] Didn't receive reply from {} for PING ID {}",
                     peer.getPeerConnectionId(), peer, pingMessage.getId());
             peer.disconnect("no ping received");
             return;
         }
 
-        peer.setLastPing(NTP.getTime() - now);
+        long rtt = NTP.getTime() - now;
+        LOGGER.trace("[{}] Received PONG from peer {} (RTT: {}ms)", peer.getPeerConnectionId(), peer, rtt);
+        peer.setLastPing(rtt);
     }
 }

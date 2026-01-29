@@ -227,35 +227,85 @@ public class Synchronizer extends Thread {
 		if (this.isSynchronizing)
 			return true;
 
+	
+
 		// Needs a mutable copy of the unmodifiableList
 		List<Peer> peers = new ArrayList<>(Network.getInstance().getImmutableHandshakedPeers());
+		final int initialPeerCount = peers.size();
+		LOGGER.trace(String.format("Starting sync attempt with %d handshaked peer(s)", initialPeerCount));
 
 		// Disregard peers that have "misbehaved" recently
+		int beforeCount = peers.size();
+		List<Peer> misbehavedPeers = peers.stream().filter(Controller.hasMisbehaved).collect(Collectors.toList());
 		peers.removeIf(Controller.hasMisbehaved);
+		if (!misbehavedPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d misbehaved peer(s): %s", misbehavedPeers.size(), 
+					misbehavedPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		// Disregard peers that only have genesis block
+		beforeCount = peers.size();
+		List<Peer> genesisOnlyPeers = peers.stream().filter(Controller.hasOnlyGenesisBlock).collect(Collectors.toList());
 		peers.removeIf(Controller.hasOnlyGenesisBlock);
+		if (!genesisOnlyPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d peer(s) with only genesis block: %s", genesisOnlyPeers.size(),
+					genesisOnlyPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		// Disregard peers that don't have a recent block
+		beforeCount = peers.size();
+		List<Peer> noRecentBlockPeers = peers.stream().filter(Controller.hasNoRecentBlock).collect(Collectors.toList());
 		peers.removeIf(Controller.hasNoRecentBlock);
+		if (!noRecentBlockPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d peer(s) without recent block: %s", noRecentBlockPeers.size(),
+					noRecentBlockPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		// Disregard peers that are on an old version
+		beforeCount = peers.size();
+		List<Peer> oldVersionPeers = peers.stream().filter(Controller.hasOldVersion).collect(Collectors.toList());
 		peers.removeIf(Controller.hasOldVersion);
+		if (!oldVersionPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d peer(s) with old version: %s", oldVersionPeers.size(),
+					oldVersionPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		checkRecoveryModeForPeers(peers);
 
 		// Check we have enough peers to potentially synchronize
-		if (peers.size() < Settings.getInstance().getMinBlockchainPeers())
+		final int minBlockchainPeers = Settings.getInstance().getMinBlockchainPeers();
+		if (peers.size() < minBlockchainPeers) {
+			LOGGER.trace(String.format("Not enough peers for sync. Required: %d, Available: %d (filtered from %d handshaked peers)", 
+					minBlockchainPeers, peers.size(), initialPeerCount));
 			return true;
+		}
 
 		// Disregard peers that have no block signature or the same block signature as us
+		beforeCount = peers.size();
+		List<Peer> noOrSameBlockPeers = peers.stream().filter(Controller.hasNoOrSameBlock).collect(Collectors.toList());
 		peers.removeIf(Controller.hasNoOrSameBlock);
+		if (!noOrSameBlockPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d peer(s) with no or same block signature: %s", noOrSameBlockPeers.size(),
+					noOrSameBlockPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		// Disregard peers that are on the same block as last sync attempt and we didn't like their chain
+		beforeCount = peers.size();
+		List<Peer> inferiorChainPeers = peers.stream().filter(Controller.hasInferiorChainTip).collect(Collectors.toList());
 		peers.removeIf(Controller.hasInferiorChainTip);
+		if (!inferiorChainPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d peer(s) with inferior chain tip: %s", inferiorChainPeers.size(),
+					inferiorChainPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		// Disregard peers that have a block with an invalid signer
+		beforeCount = peers.size();
+		List<Peer> invalidSignerPeers = peers.stream().filter(Controller.hasInvalidSigner).collect(Collectors.toList());
 		peers.removeIf(Controller.hasInvalidSigner);
+		if (!invalidSignerPeers.isEmpty()) {
+			LOGGER.trace(String.format("Filtered out %d peer(s) with invalid signer: %s", invalidSignerPeers.size(),
+					invalidSignerPeers.stream().map(Peer::toString).collect(Collectors.joining(", "))));
+		}
 
 		final int peersBeforeComparison = peers.size();
 
@@ -273,10 +323,12 @@ public class Synchronizer extends Thread {
 
 		final int peersRemoved = peersBeforeComparison - peers.size();
 		if (peersRemoved > 0 && !peers.isEmpty())
-			LOGGER.debug(String.format("Ignoring %d peers on inferior chains. Peers remaining: %d", peersRemoved, peers.size()));
+			LOGGER.info(String.format("Ignoring %d peers on inferior chains. Peers remaining: %d", peersRemoved, peers.size()));
 
-		if (peers.isEmpty())
+		if (peers.isEmpty()) {
+			LOGGER.trace(String.format("No suitable peers available for synchronization after filtering. Started with %d handshaked peer(s), filtered down to 0", initialPeerCount));
 			return true;
+		}
 
 		if (peers.size() > 1) {
 			StringBuilder finalPeersString = new StringBuilder();
@@ -288,6 +340,8 @@ public class Synchronizer extends Thread {
 		// Pick random peer to sync with
 		int index = new SecureRandom().nextInt(peers.size());
 		Peer peer = peers.get(index);
+		
+	
 
 		SynchronizationResult syncResult = actuallySynchronize(peer, false);
 		if (syncResult == SynchronizationResult.NO_BLOCKCHAIN_LOCK) {
@@ -1549,26 +1603,29 @@ public class Synchronizer extends Thread {
             repository.setSavepoint();
 
             for (Block newBlock : blocks) {
-                ++ourHeight;
-
                 if (Controller.isStopping()){
                     errorInBatch = true;
                     errorCode = SynchronizationResult.SHUTTING_DOWN;
                     break;
                 }
 
+                // Increment height at the start, but we'll only use it if block processing succeeds
+                int expectedHeight = ourHeight + 1;
+
                 if (newBlock == null) {
                     LOGGER.debug(String.format("Peer %s failed to respond with block for height %d, sig %.8s", peer,
-                            ourHeight, Base58.encode(latestPeerSignature)));
+                            expectedHeight, Base58.encode(latestPeerSignature)));
                     errorInBatch = true;
                     errorCode = SynchronizationResult.NO_REPLY;
+                    break; // Stop processing batch - can't trust subsequent blocks
                 }
 
                 if (!newBlock.isSignatureValid()) {
                     LOGGER.debug(String.format("Peer %s sent block with invalid signature for height %d, sig %.8s", peer,
-                            ourHeight, Base58.encode(latestPeerSignature)));
+                            expectedHeight, Base58.encode(latestPeerSignature)));
                     errorInBatch = true;
                     errorCode = SynchronizationResult.INVALID_DATA;
+                    break; // Stop processing batch - can't trust subsequent blocks
                 }
 
                 // Set the repository, because we couldn't do that when originally constructing the Block
@@ -1582,10 +1639,14 @@ public class Synchronizer extends Thread {
                 ValidationResult blockResult = newBlock.isValid();
                 if (blockResult != ValidationResult.OK) {
                     LOGGER.warn(String.format("Peer %s sent invalid block for height %d, sig %.8s: %s", peer,
-                            ourHeight, Base58.encode(latestPeerSignature), blockResult.name()));
+                            expectedHeight, Base58.encode(latestPeerSignature), blockResult.name()));
                     errorInBatch = true;
                     errorCode = SynchronizationResult.INVALID_DATA;
+                    break; // Stop processing batch - can't trust subsequent blocks
                 }
+
+                // Block is valid - now we can increment height and process it
+                ++ourHeight;
 
                 // Save transactions attached to this block
                 for (Transaction transaction : newBlock.getTransactions()) {

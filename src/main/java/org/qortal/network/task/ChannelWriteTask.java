@@ -32,29 +32,12 @@ public class ChannelWriteTask implements Task {
     @Override
     public void perform() throws InterruptedException {
         try {
-			
-			boolean isSocketClogged;
-			int clogCounter = 0;
-            do {
-                isSocketClogged = peer.writeChannel();
+            // Call writeChannel() once - do NOT loop
+            // In non-blocking IO, selector decides when to call us again
+            boolean needsMoreWriting = peer.writeChannel();
 
-				if (clogCounter > 9) {
-					LOGGER.warn("10 Socket Clogs - GIVING UP");
-					break;
-				}
-                if (isSocketClogged) {
-                    LOGGER.debug(
-                            "socket is clogged: peer = {} {}, retrying",
-                            peer.getPeerData().getAddress().toString(),
-                            Thread.currentThread().getName()
-                    );
-                    Thread.sleep(1000);
-					clogCounter++;
-                }
-				
-            } while( isSocketClogged );
-			
-            // Tell Network that we've finished
+            // ALWAYS remove from pending first (task is about to exit)
+            // This allows new tasks to be created for this channel
             switch (peer.getPeerType()) {
                 case Peer.NETWORKDATA:
                     NetworkData.getInstance().notifyChannelNotWriting(socketChannel);
@@ -64,7 +47,9 @@ public class ChannelWriteTask implements Task {
                     break;
             }
 
-            if (isSocketClogged) {
+            // Then re-arm OP_WRITE if we still have pending data
+            // The wakeup() call in setInterestOps() ensures selector wakes immediately
+            if (needsMoreWriting) {
                 switch (peer.getPeerType()) {
                     case Peer.NETWORKDATA:
                         NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_WRITE);
@@ -75,12 +60,26 @@ public class ChannelWriteTask implements Task {
                 }
             }
         } catch (IOException e) {
+            // On error, ensure we remove from pending to avoid deadlock
+            try {
+                switch (peer.getPeerType()) {
+                    case Peer.NETWORKDATA:
+                        NetworkData.getInstance().notifyChannelNotWriting(socketChannel);
+                        break;
+                    default:
+                        Network.getInstance().notifyChannelNotWriting(socketChannel);
+                        break;
+                }
+            } catch (Exception cleanupError) {
+                LOGGER.warn("Error during cleanup: {}", cleanupError.getMessage());
+            }
+            
             if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
                 peer.disconnect("Connection reset");
                 return;
             }
 
-            LOGGER.trace("[{}] Network thread {} encountered I/O error: {}", peer.getPeerConnectionId(),
+            LOGGER.warn("[{}] Network thread {} encountered I/O error: {}", peer.getPeerConnectionId(),
                     Thread.currentThread().getId(), e.getMessage(), e);
             peer.disconnect("I/O error");
         }

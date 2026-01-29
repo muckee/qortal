@@ -31,11 +31,18 @@ import org.eclipse.persistence.jaxb.UnmarshallerProperties;
 import org.qortal.block.BlockChain;
 import org.qortal.controller.arbitrary.ArbitraryDataStorageManager.StoragePolicy;
 import org.qortal.crosschain.Bitcoin.BitcoinNet;
+//import org.qortal.controller.BitcoinWalletController;
 import org.qortal.crosschain.Digibyte.DigibyteNet;
+//import org.qortal.controller.DigibyteWalletController;
 import org.qortal.crosschain.Dogecoin.DogecoinNet;
-import org.qortal.crosschain.Litecoin.LitecoinNet;
+//import org.qortal.controller.DogecoinWalletController;
+//import org.qortal.crosschain.Litecoin.LitecoinNet;
+import org.qortal.crosschain.Litecoin.*;
+import org.qortal.crosschain.Litecoin; 
 import org.qortal.crosschain.PirateChain.PirateChainNet;
+import org.qortal.controller.PirateChainWalletController;
 import org.qortal.crosschain.Ravencoin.RavencoinNet;
+//import org.qortal.controller.RavencoinWalletController;
 import org.qortal.network.message.MessageType;
 import org.qortal.utils.EnumUtils;
 
@@ -982,7 +989,7 @@ public class Settings {
 
 	public int getQDNListenPort() {
 		if (this.listenDataPort != null)
-			return this.listenPort;
+			return this.listenDataPort;
 		return this.isTestNet ? TESTNET_QDN_LISTEN_PORT : MAINNET_QDN_LISTEN_PORT;
 	}
 
@@ -1059,6 +1066,57 @@ public class Settings {
 
         return this.wallets.get(coinKey);
     }
+
+	public boolean enableWallet(String coinKey) {
+		this.wallets.put(coinKey, true);	// Next call to wallet.getInstance() will create it if needed
+		return true;		
+	}
+
+	public boolean disableWallet(String coinKey) {
+		switch (coinKey) {
+			case "BTC":
+				// BitcoinWallet bitcoinWallet = BitcoinWallet.getInstance();
+				// if (bitcoinWallet != null) {
+				// 	bitcoinWallet.shutdown();
+				// }
+				break;
+			case "LTC":
+				if (Litecoin.getInstance() != null) {
+					//Litecoin.getInstance().shutdown();
+				}
+				break;
+			case "DOGE":
+				// DogecoinWallet dogecoinWallet = DogecoinWalletController.getInstance();
+				// if (dogecoinWallet != null) {
+				// 	dogecoinWallet.shutdown();
+				// }
+				break;
+			case "DGB":
+				// DigibyteWallet digibyteWallet = DigibyteWalletController.getInstance();
+				// if (digibyteWallet != null) {
+				// 	digibyteWallet.shutdown();
+				// }
+				break;
+			case "RVN":
+				// RavencoinWallet ravencoinWallet = RavencoinWalletController.getInstance();
+				// if (ravencoinWallet != null) {
+				// 	ravencoinWallet.shutdown();
+				// }
+				break;
+			case "ARRR":
+				PirateChainWalletController pirateWalletController = PirateChainWalletController.getInstance();
+				if (pirateWalletController != null) {
+					pirateWalletController.shutdown();
+				}
+				break;
+			default:
+				// Unknown coinKey, nothing to do
+				LOGGER.warn("Unknown coinKey: " + coinKey);
+				return false;
+		}  
+		this.wallets.put(coinKey, false);
+		return true;		
+	}
 
 	public String getBlockchainConfig() {
 		return this.blockchainConfig;

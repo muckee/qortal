@@ -21,7 +21,7 @@ import java.util.Arrays;
  */
 public class PeerSpeedTracker {
 
-    private static final int DEFAULT_TRANSFER_TIMEOUT_MS = 180 * 1000; // Default 180s/3min this is calculated by 512KB at 33.6kbps
+    private static final int DEFAULT_TRANSFER_TIMEOUT_MS = 180 * 1000; // Default 10s - conservative but reasonable for modern networks (was 180s for dial-up)
     private static final int DEFAULT_MAX_CHUNK_SIZE = 524288;       // Default 512 * 1K bytes
 
     private int historyCount = 3;

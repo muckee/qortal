@@ -47,7 +47,8 @@
 		<maven-dependency-plugin.version>3.6.1</maven-dependency-plugin.version>
 		<maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
 		<maven-package-info-plugin.version>1.1.0</maven-package-info-plugin.version>
-		<maven-plugin.version>2.18.0</maven-plugin.version>
+		<!-- <maven-plugin.version>2.18.0</maven-plugin.version> Updated 25-Jan-26 -->
+		<versions-maven-plugin.version>2.21.0</versions-maven-plugin.version>
 		<maven-reproducible-build-plugin.version>0.17</maven-reproducible-build-plugin.version>
 		<maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
 		<maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
@@ -57,10 +58,11 @@
 		<replacer.version>1.5.3</replacer.version>
 		<simplemagic.version>1.17</simplemagic.version>
 		<slf4j.version>1.7.36</slf4j.version>
-		<!-- <swagger-api.version>2.2.30</swagger-api.version> need code upgrade -->
-		<!-- <swagger-api.version>2.1.13</swagger-api.version> need code upgrade -->
-		<swagger-api.version>2.0.10</swagger-api.version>
+		<!-- <swagger-api.version>2.2.30</swagger-api.version> Future Update -->
+		<swagger-api.version>2.1.13</swagger-api.version>
+		<!-- <swagger-api.version>2.0.10</swagger-api.version> Updated 25-Jan-26  -->
 		<swagger-ui.version>5.18.2</swagger-ui.version>
+		<tika-core.version>3.1.0</tika-core.version>
 		<upnp.version>1.3</upnp.version>
 		<xz.version>1.10</xz.version>
 	</properties>
@@ -77,7 +79,7 @@
 			<plugin>
 				<groupId>org.codehaus.mojo</groupId>
 				<artifactId>versions-maven-plugin</artifactId>
-				<version>${maven-plugin.version}</version>
+				<version>${versions-maven-plugin.version}</version>
 				<configuration>
 					<generateBackupPoms>false</generateBackupPoms>
 				</configuration>
@@ -253,10 +255,6 @@
 							<template>${project.build.sourceDirectory}/org/qortal/data/package-info.java</template>
 						</package>
 						<package>
-							<pattern>org.qortal.api.model**</pattern>
-							<template>${project.build.sourceDirectory}/org/qortal/data/package-info.java</template>
-						</package>
-						<package>
 							<pattern>org.qortal.api.model.**</pattern>
 							<template>${project.build.sourceDirectory}/org/qortal/data/package-info.java</template>
 						</package>
@@ -427,7 +425,7 @@
 									<pluginExecutionFilter>
 										<groupId>org.apache.maven.plugins</groupId>
 										<artifactId>maven-dependency-plugin</artifactId>
-										<version>${maven-dependency-plugin.version}</version>
+										<!-- <version>${maven-dependency-plugin.version}</version> Not Valid here -->
 										<goals>
 											<goal>unpack</goal>
 										</goals>
@@ -440,7 +438,7 @@
 									<pluginExecutionFilter>
 										<groupId>com.google.code.maven-replacer-plugin</groupId>
 										<artifactId>replacer</artifactId>
-										<version>${replacer.version}</version>
+										<!-- <version>${replacer.version}</version> Not valid here -->
 										<goals>
 											<goal>replace</goal>
 										</goals>
@@ -660,7 +658,7 @@
 			<groupId>org.eclipse.jetty</groupId>
 			<artifactId>jetty-server</artifactId>
 			<version>${jetty.version}</version>
-			<classifier>config</classifier>
+			<!-- <classifier>config</classifier> 25-Jan Removed as there is no config classifier -->
 		</dependency>
 		<dependency>
 			<groupId>org.eclipse.jetty</groupId>
@@ -811,9 +809,9 @@
 			<version>${jaxb-runtime.version}</version>
 		</dependency>
 		<dependency>
-<groupId>org.apache.tika</groupId>
-<artifactId>tika-core</artifactId>
-<version>3.1.0</version> 
-</dependency>
+			<groupId>org.apache.tika</groupId>
+			<artifactId>tika-core</artifactId>
+			<version>${tika-core.version}</version>
+		</dependency>
 	</dependencies>
 </project>

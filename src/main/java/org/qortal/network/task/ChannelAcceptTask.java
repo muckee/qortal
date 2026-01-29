@@ -133,7 +133,7 @@ public class ChannelAcceptTask implements Task {
 
             newPeer = new Peer(socketChannel, this.networkType);
 
-            if (isDataPeer) { // This check is not enough
+            if (isDataPeer) {
                 newPeer.setMaxConnectionAge(Settings.getInstance().getMaxDataPeerConnectionTime() * 1000L);
             }
             newPeer.setIsDataPeer(isDataPeer);

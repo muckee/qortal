@@ -40,6 +40,7 @@ public class ChannelReadTask implements Task {
                 peer.setPeerType(Peer.NETWORKDATA);
 
             peer.readChannel();
+           
 
             LOGGER.trace("Performing Read for {} on {}", peer.getPeerType(), port);
 
@@ -49,6 +50,7 @@ public class ChannelReadTask implements Task {
                     break;
                 default:
                     Network.getInstance().setInterestOps(socketChannel, SelectionKey.OP_READ);
+                    break;
             }
 
         } catch (IOException e) {

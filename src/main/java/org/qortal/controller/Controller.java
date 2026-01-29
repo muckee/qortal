@@ -125,7 +125,7 @@ public class Controller extends Thread {
 	private long repositoryBackupTimestamp = startTime; // ms
 	private long repositoryMaintenanceTimestamp = startTime; // ms
 	private long repositoryCheckpointTimestamp = startTime; // ms
-	private long prunePeersTimestamp = startTime; // ms
+	private long prunePeersTimestamp = startTime + 120000; // ms
 	private long ntpCheckTimestamp = startTime; // ms
 	private long deleteExpiredTimestamp = startTime + DELETE_EXPIRED_INTERVAL; // ms
 
@@ -775,7 +775,7 @@ public class Controller extends Thread {
 		final long repositoryBackupInterval = Settings.getInstance().getRepositoryBackupInterval();
 		final long repositoryCheckpointInterval = Settings.getInstance().getRepositoryCheckpointInterval();
 		long repositoryMaintenanceInterval = getRandomRepositoryMaintenanceInterval();
-		final long prunePeersInterval = 5 * 60 * 1000L; // Every 5 minutes
+		final long prunePeersInterval = 90 * 1000L; // Every 90 seconds (1.5 minutes)
 
 		// Start executor service for trimming or pruning
 		PruneManager.getInstance().start();
@@ -881,6 +881,22 @@ public class Controller extends Thread {
 						NetworkData.getInstance().prunePeers();
 					} catch (DataException e) {
 						LOGGER.warn(String.format("Repository issue when trying to prune peers: %s", e.getMessage()));
+					}
+					
+					// Check EPC health to detect critical thread issues
+					try {
+						ExecuteProduceConsume.StatsSnapshot networkStats = Network.getInstance().getStatsSnapshot();
+						ExecuteProduceConsume.StatsSnapshot networkDataStats = NetworkData.getInstance().getStatsSnapshot();
+						
+						// CRITICAL: Warn if either EPC has no active threads
+						if (networkStats.activeThreadCount == 0) {
+							LOGGER.error("CRITICAL: Network EPC has 0 active threads! Network processing has stopped!");
+						}
+						if (networkDataStats.activeThreadCount == 0) {
+							LOGGER.error("CRITICAL: NetworkData EPC has 0 active threads! Data network processing has stopped!");
+						}
+					} catch (Exception e) {
+						LOGGER.warn("Failed to get EPC stats: {}", e.getMessage());
 					}
 				}
 
@@ -1152,16 +1168,17 @@ public class Controller extends Thread {
 					AutoUpdate.getInstance().shutdown();
 				}
 
-				// Arbitrary data controllers
-				LOGGER.info("Shutting down arbitrary-transaction controllers");
-				ArbitraryDataManager.getInstance().shutdown();
-				ArbitraryDataFileManager.getInstance().shutdown();
-				ArbitraryDataCacheManager.getInstance().shutdown();
-				ArbitraryDataBuildManager.getInstance().shutdown();
-				ArbitraryDataCleanupManager.getInstance().shutdown();
-				ArbitraryDataStorageManager.getInstance().shutdown();
-				ArbitraryDataRenderManager.getInstance().shutdown();
-				ArbitraryDataHostMonitor.getInstance().shutdown();
+			// Arbitrary data controllers
+			LOGGER.info("Shutting down arbitrary-transaction controllers");
+			ArbitraryDataManager.getInstance().shutdown();
+			ArbitraryDataFileManager.getInstance().shutdown();
+			ArbitraryDataFileListManager.getInstance().shutdown();
+			ArbitraryDataCacheManager.getInstance().shutdown();
+			ArbitraryDataBuildManager.getInstance().shutdown();
+			ArbitraryDataCleanupManager.getInstance().shutdown();
+			ArbitraryDataStorageManager.getInstance().shutdown();
+			ArbitraryDataRenderManager.getInstance().shutdown();
+			ArbitraryDataHostMonitor.getInstance().shutdown();
 
 				LOGGER.info("Shutting down online accounts manager");
 				OnlineAccountsManager.getInstance().shutdown();
@@ -1542,15 +1559,9 @@ public class Controller extends Thread {
 				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFileMessage(peer, message);
 				break;
 
-			case PEER_RELAY_DATA:	// We got information about a peer that has what we want
-				LOGGER.info("We were told to go get our files else where");
-				//ArbitraryDataFileManager.getInstance().onNetworkRelayData(peer, message);
-				//
-				break;
-
-			case GET_ARBITRARY_DATA_FILE_LIST:
-				ArbitraryDataFileListManager.getInstance().onNetworkGetArbitraryDataFileListMessage(peer, message);
-				break;
+		case GET_ARBITRARY_DATA_FILE_LIST:
+			ArbitraryDataFileListManager.getInstance().onNetworkGetArbitraryDataFileListMessage(peer, message);
+			break;
 
 			case ARBITRARY_SIGNATURES:
 				// Not currently supported
@@ -1760,8 +1771,13 @@ public class Controller extends Thread {
 
             Message blocksMessage = new BlocksMessage(blocks);
             blocksMessage.setId(message.getId());
-            if (!peer.sendMessageWithTimeout(blocksMessage, FETCH_BLOCKS_TIMEOUT))
-                peer.disconnect("failed to send blocks");
+            try {
+                if (!peer.sendMessageWithTimeout(blocksMessage, FETCH_BLOCKS_TIMEOUT))
+                    peer.disconnect("failed to send blocks");
+            } catch (java.io.IOException e) {
+                // Socket closed - peer already disconnected
+                LOGGER.debug("Socket closed while sending blocks to peer {}: {}", peer, e.getMessage());
+            }
 
         } catch (DataException e) {
             LOGGER.error(String.format("Repository issue while sending blocks after %s to peer %s", Base58.encode(parentSignature), peer), e);
