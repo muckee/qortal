@@ -389,7 +389,7 @@ public class Settings {
 	private boolean directDataRetrievalEnabled = true;
 
 	/** Expiry time (ms) for (unencrypted) built/cached data */
-	private Long builtDataExpiryInterval = 30 * 24 * 60 * 60 * 1000L; // 30 days
+	private Long builtDataExpiryInterval = 7 * 24 * 60 * 60 * 1000L; // 7 days
 
 	/** Whether to validate every layer when building arbitrary data, or just the final layer */
 	private boolean validateAllDataLayers = false;
@@ -547,9 +547,9 @@ public class Settings {
 	/**
 	 * Arbitrary Indexing Priority
 	 *
-	 * The thread priority when indexing arbirary resources.
+	 * The thread priority when indexing arbitrary resources.
 	 */
-    private int arbitraryIndexingPriority = 5;
+    private int arbitraryIndexingPriority = 1;
 
 	/**
 	 * Arbitrary Indexing Frequency (In Minutes)

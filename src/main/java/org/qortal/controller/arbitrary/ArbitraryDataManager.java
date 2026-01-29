@@ -464,6 +464,10 @@ public class ArbitraryDataManager extends Thread {
 				);
 			} catch (DataException e) {
 				LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
+			} catch (InterruptedException e) {
+				// Thread interrupted during shutdown - restore interrupt status and exit
+				Thread.currentThread().interrupt();
+				return;
 			} catch (Exception e) {
 				LOGGER.error(e.getMessage(), e);
 			}
@@ -656,9 +660,7 @@ public class ArbitraryDataManager extends Thread {
 		this.arbitraryDataCachedResources.put(key, timestamp);
 	}
 
-	public void invalidateCache(ArbitraryTransactionData arbitraryTransactionData) {
-		String signature58 = Base58.encode(arbitraryTransactionData.getSignature());
-
+	public void invalidateCache(ArbitraryTransactionData arbitraryTransactionData, boolean hasAllFiles) {
 		if (arbitraryTransactionData.getName() != null && arbitraryTransactionData.getService() != null) {
 			String resourceId = arbitraryTransactionData.getName().toLowerCase();
 			Service service = arbitraryTransactionData.getService();
@@ -679,8 +681,12 @@ public class ArbitraryDataManager extends Thread {
 				buildManager.arbitraryDataFailedBuilds.remove(key);
 			}
 
-			// Remove from the signature requests list now that we have all files for this signature
-			ArbitraryDataFileListManager.getInstance().removeFromSignatureRequests(signature58);
+			if( hasAllFiles ) {
+				String signature58 = Base58.encode(arbitraryTransactionData.getSignature());
+
+				// Remove from the signature requests list now that we have all files for this signature
+				ArbitraryDataFileListManager.getInstance().removeFromSignatureRequests(signature58);
+			}
 
 			// Delete cached files themselves
 			try {

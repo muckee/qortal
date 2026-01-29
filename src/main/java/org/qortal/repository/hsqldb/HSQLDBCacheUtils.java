@@ -62,6 +62,9 @@ public class HSQLDBCacheUtils {
     };
     private static final String DEFAULT_IDENTIFIER = "default";
     private static final int ZERO = 0;
+    private static Timer dbCacheTimer;
+    private static Timer balanceRecorderTimer;
+    
     public static final String DB_CACHE_TIMER = "DB Cache Timer";
     public static final String DB_CACHE_TIMER_TASK = "DB Cache Timer Task";
     public static final String BALANCE_RECORDER_TIMER = "Balance Recorder Timer";
@@ -81,8 +84,8 @@ public class HSQLDBCacheUtils {
      * @param defaultResource true to query filter identifier on the default identifier and use the query terms to match candidates names only
      * @param mode LATEST or ALL
      * @param minLevel the minimum account level for resource creators
-     * @param includeOnly names to retain, exclude all others
-     * @param exclude names to exclude, retain all others
+     * @param followedOnly names to retain, exclude all others
+     * @param excludeBlocked names to exclude, retain all others
      * @param includeMetadata true to include resource metadata in the results, false to exclude metadata
      * @param includeStatus true to include resource status in the results, false to exclude status
      * @param before the latest creation timestamp for any candidate
@@ -193,6 +196,10 @@ public class HSQLDBCacheUtils {
 
         if(exclude.isPresent())
             stream = stream.filter( candidate -> !exclude.get().get().contains( candidate.name ));
+
+        if( includeOnly.isPresent()) {
+            stream = stream.filter( candidate -> includeOnly.get().get().contains( candidate.name ));
+        }
 
         // filter by service
         if( service.isPresent() )
@@ -460,13 +467,18 @@ public class HSQLDBCacheUtils {
      */
     public static void startCaching(int priorityRequested, int frequency) {
 
-        Timer timer = buildTimer(DB_CACHE_TIMER, priorityRequested);
+        dbCacheTimer = buildTimer(DB_CACHE_TIMER, priorityRequested);
 
         TimerTask task = new TimerTask() {
             @Override
             public void run() {
 
                 Thread.currentThread().setName(DB_CACHE_TIMER_TASK);
+
+                // Exit gracefully if shutting down
+                if (Controller.isStopping()) {
+                    return;
+                }
 
                 try (final Repository respository = RepositoryManager.getRepository()) {
                     fillCache(ArbitraryResourceCache.getInstance(), respository);
@@ -478,7 +490,7 @@ public class HSQLDBCacheUtils {
         };
 
         // delay 1 second
-        timer.scheduleAtFixedRate(task, 1000, frequency * 1000);
+        dbCacheTimer.scheduleAtFixedRate(task, 1000, frequency * 1000);
     }
 
     /**
@@ -497,13 +509,18 @@ public class HSQLDBCacheUtils {
             int frequency,
             int capacity) {
 
-        Timer timer = buildTimer(BALANCE_RECORDER_TIMER, priorityRequested);
+        balanceRecorderTimer = buildTimer(BALANCE_RECORDER_TIMER, priorityRequested);
 
         TimerTask task = new TimerTask() {
             @Override
             public void run() {
 
                 Thread.currentThread().setName(BALANCE_RECORDER_TIMER_TASK);
+
+                // Exit gracefully if shutting down
+                if (Controller.isStopping()) {
+                    return;
+                }
 
                 int currentHeight = recordCurrentBalances(balancesByHeight);
 
@@ -542,7 +559,7 @@ public class HSQLDBCacheUtils {
         };
 
         // wait 5 minutes
-        timer.scheduleAtFixedRate(task, 300_000, frequency * 60_000);
+        balanceRecorderTimer.scheduleAtFixedRate(task, 300_000, frequency * 60_000);
     }
 
     private static void produceBalanceDynamics(int currentHeight, Optional<Integer> priorHeight, boolean isRewardDistribution, ConcurrentHashMap<Integer, List<AccountBalanceData>> balancesByHeight, CopyOnWriteArrayList<BlockHeightRangeAddressAmounts> balanceDynamics, int capacity) {
@@ -859,5 +876,30 @@ public class HSQLDBCacheUtils {
         LOGGER.info("Retrieved account balances: count = " + data.size());
 
         return data;
+    }
+
+    /**
+     * Shutdown all timers
+     *
+     * Cancels all running Timer tasks to allow clean shutdown
+     */
+    public static void shutdown() {
+        LOGGER.info("Shutting down HSQLDBCacheUtils timers...");
+
+        if (dbCacheTimer != null) {
+            dbCacheTimer.cancel();
+            dbCacheTimer.purge();
+            dbCacheTimer = null;
+            LOGGER.debug("DB Cache Timer shutdown");
+        }
+
+        if (balanceRecorderTimer != null) {
+            balanceRecorderTimer.cancel();
+            balanceRecorderTimer.purge();
+            balanceRecorderTimer = null;
+            LOGGER.debug("Balance Recorder Timer shutdown");
+        }
+
+        LOGGER.info("HSQLDBCacheUtils timers shutdown complete");
     }
 }
