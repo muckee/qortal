@@ -2261,7 +2261,7 @@ public String finalizeUpload(
 	
 		} catch (IOException e) {
 			// Streaming errors should not rethrow — just log
-			LOGGER.warn(String.format("Streaming error for %s %s: %s", service, name, e.getMessage()));
+			LOGGER.trace(String.format("Streaming error for %s %s: %s", service, name, e.getMessage()));
 		}
 		
 	
