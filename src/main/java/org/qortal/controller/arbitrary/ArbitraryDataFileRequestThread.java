@@ -730,7 +730,7 @@ public class ArbitraryDataFileRequestThread {
             long roundTripTime = (transferTime != null && transferTime > 0) ? transferTime : Long.MAX_VALUE;
             
             // Skip peers with RTT > 10 seconds - they're too slow and would block download progress
-            // Peer will automatically get another chance after 20 seconds of inactivity (RTT reset)
+            // Peer will automatically get another chance after 10 seconds of inactivity (RTT reset)
             final long MAX_USABLE_RTT_MS = 10_000L; // 10 seconds
             if (roundTripTime != Long.MAX_VALUE && roundTripTime > MAX_USABLE_RTT_MS) {
                 LOGGER.debug("Skipping peer {} for chunk {} - RTT {}ms exceeds maximum usable threshold of {}ms (will retry after idle reset)",
@@ -1064,7 +1064,7 @@ public class ArbitraryDataFileRequestThread {
             // Minimum of 1 chunk ensures even slow peers can make progress without blocking downloads
             int maxChunksForThisPeer = Math.max(1, Math.min(Math.min(maxChunks, maxSafeChunks), availableQueueSpace));
             
-            LOGGER.trace("REQUESTER QUEUE STATUS: peer={}, PeerSendMgr={}, Peer.sendQueue={}/{}, queue={}, RTT={}ms, drainTime={}s, sendingChunks={}", 
+            LOGGER.info("REQUESTER QUEUE STATUS: peer={}, PeerSendMgr={}, Peer.sendQueue={}/{}, queue={}, RTT={}ms, drainTime={}s, sendingChunks={}", 
                 peer, sendManagerQueueSize, peerSendQueueSize, peerSendQueueCapacity, 
                 totalPendingMessages, effectiveRTT, queueDrainTimeMs / 1000, maxChunksForThisPeer);
             
@@ -1115,6 +1115,11 @@ public class ArbitraryDataFileRequestThread {
                 try {
                     GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(
                             transactionData.getSignature(), fileHashBytes);
+                    
+                    // Record that we're assigning work to this peer
+                    // This helps RTT reset work correctly - even if in-flight requests are slow,
+                    // the peer can recover after 10s of no new assignments
+                    peer.getDownloadSpeedTracker().recordChunkAssigned();
                     
                     // Pass fileHash for tracking in PeerSendManager pipeline
                     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessage(message, fileHash);
