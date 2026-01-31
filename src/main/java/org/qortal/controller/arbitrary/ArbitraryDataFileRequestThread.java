@@ -436,6 +436,28 @@ public class ArbitraryDataFileRequestThread {
                             LOGGER.trace("Skipping hash {} - file already exists on disk", fileHash);
                             continue;
                         }
+                        
+                        // Check relay cache before network request
+                        byte[] cachedChunk = arbitraryDataFileManager.loadFromRelayCache(fileHash);
+                        if (cachedChunk != null) {
+                            LOGGER.debug("Hash {} found in relay cache, skipping network request (cache hit!)", fileHash);
+                            // Save from cache to permanent storage
+                            try {
+                                ArbitraryDataFile cachedFile = new ArbitraryDataFile(cachedChunk, data.getSignature(), false);
+                                if (cachedFile.validateHash(fileHashBytes)) {
+                                    cachedFile.save();
+                                    LOGGER.trace("Saved chunk {} from relay cache to permanent storage", fileHash);
+                                    continue; // Skip adding to batch
+                                } else {
+                                    LOGGER.warn("Cached chunk {} failed hash validation, removing from cache and will re-request", fileHash);
+                                    // Let it fall through to network request
+                                }
+                            } catch (Exception e) {
+                                LOGGER.warn("Failed to save chunk {} from relay cache: {}", fileHash, e.getMessage());
+                                // Fall through to network request
+                            }
+                        }
+                        
                     } catch (DataException e) {
                         LOGGER.warn("Error checking if file exists for hash {}: {}", fileHash, e.getMessage());
                         // Continue anyway - better to request than to skip on error

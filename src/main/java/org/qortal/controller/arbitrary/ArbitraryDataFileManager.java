@@ -214,7 +214,7 @@ public class ArbitraryDataFileManager extends Thread {
      * @param hash58 The hash of the chunk
      * @return The chunk data, or null if not found
      */
-    private byte[] loadFromRelayCache(String hash58) {
+    public byte[] loadFromRelayCache(String hash58) {
         if (relayCacheDir == null) {
             return null;
         }
@@ -1419,36 +1419,36 @@ public class ArbitraryDataFileManager extends Thread {
                 LOGGER.debug("Hash {} does not exist in permanent storage, queueing send to {}", hash58, peer);
             }
             
-            // Priority 2: Check relay cache (before checking relayInfo) TODO: PUT BACK
-            // byte[] cachedData = loadFromRelayCache(hash58);
-            // if (cachedData != null) {
-            //     LOGGER.debug("Hash {} found in relay cache, sending directly to {} (cache hit!)", hash58, peer);
+            // Priority 2: Check relay cache (before checking relayInfo)
+            byte[] cachedData = loadFromRelayCache(hash58);
+            if (cachedData != null) {
+                LOGGER.debug("Hash {} found in relay cache, sending directly to {} (cache hit!)", hash58, peer);
                 
-            //     int messageId = originalMessage.getId();
-            //     MessageFactory factory = () -> {
-            //         try {
-            //             byte[] data = loadFromRelayCache(hash58);
-            //             if (data == null) {
-            //                 LOGGER.warn("Chunk {} disappeared from relay cache between check and send", hash58);
-            //                 return null;
-            //             }
-            //             ArbitraryDataFile adf = new ArbitraryDataFile(data, sig, false);
-            //             ArbitraryDataFileMessage msg = new ArbitraryDataFileMessage(sig, adf);
-            //             msg.setId(messageId);
-            //             // Note: We don't clear fileContent here because ArbitraryDataFile created from byte array
-            //             // doesn't have a filePath, so prefetch can't reload it. The prefetch mechanism will
-            //             // use fileContent directly if available, avoiding double-loading.
-            //             return msg;
-            //         } catch (DataException e) {
-            //             LOGGER.warn("Failed to load chunk {} from relay cache: {}", hash58, e.getMessage());
-            //             return null;
-            //         }
-            //     };
+                int messageId = originalMessage.getId();
+                MessageFactory factory = () -> {
+                    try {
+                        byte[] data = loadFromRelayCache(hash58);
+                        if (data == null) {
+                            LOGGER.warn("Chunk {} disappeared from relay cache between check and send", hash58);
+                            return null;
+                        }
+                        ArbitraryDataFile adf = new ArbitraryDataFile(data, sig, false);
+                        ArbitraryDataFileMessage msg = new ArbitraryDataFileMessage(sig, adf);
+                        msg.setId(messageId);
+                        // Note: We don't clear fileContent here because ArbitraryDataFile created from byte array
+                        // doesn't have a filePath, so prefetch can't reload it. The prefetch mechanism will
+                        // use fileContent directly if available, avoiding double-loading.
+                        return msg;
+                    } catch (DataException e) {
+                        LOGGER.warn("Failed to load chunk {} from relay cache: {}", hash58, e.getMessage());
+                        return null;
+                    }
+                };
                 
-            //     int estimatedSize = 512 * 1024;
-            //     PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageFactory(factory, estimatedSize);
-            //     return; // Early return - found in relay cache, skip all relay logic
-            // }
+                int estimatedSize = 512 * 1024;
+                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageFactory(factory, estimatedSize);
+                return; // Early return - found in relay cache, skip all relay logic
+            }
             
             // Priority 3: Check relay info (cache miss - need to fetch from network)
             // First, log all available relay options to diagnose potential issues

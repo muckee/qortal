@@ -36,6 +36,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 import static org.qortal.network.Peer.FETCH_BLOCKS_TIMEOUT;
+import static org.qortal.network.Peer.SYNC_RESPONSE_TIMEOUT;
 
 public class Synchronizer extends Thread {
 
@@ -1765,7 +1766,8 @@ public class Synchronizer extends Thread {
 	private List<BlockSummaryData> getBlockSummaries(Peer peer, byte[] parentSignature, int numberRequested) throws InterruptedException {
 		Message getBlockSummariesMessage = new GetBlockSummariesMessage(parentSignature, numberRequested);
 
-		Message message = peer.getResponse(getBlockSummariesMessage);
+		// Use shorter timeout for sync operations to avoid blocking transaction processing
+		Message message = peer.getResponseWithTimeout(getBlockSummariesMessage, SYNC_RESPONSE_TIMEOUT);
 		if (message == null)
 			return null;
 
@@ -1784,7 +1786,8 @@ public class Synchronizer extends Thread {
 	private List<byte[]> getBlockSignatures(Peer peer, byte[] parentSignature, int numberRequested) throws InterruptedException {
 		Message getSignaturesMessage = new GetSignaturesV2Message(parentSignature, numberRequested);
 
-		Message message = peer.getResponse(getSignaturesMessage);
+		// Use shorter timeout for sync operations to avoid blocking transaction processing
+		Message message = peer.getResponseWithTimeout(getSignaturesMessage, SYNC_RESPONSE_TIMEOUT);
 		if (message == null || message.getType() != MessageType.SIGNATURES)
 			return null;
 
@@ -1796,7 +1799,8 @@ public class Synchronizer extends Thread {
 	private Block fetchBlock(Repository repository, Peer peer, byte[] signature) throws InterruptedException {
 		Message getBlockMessage = new GetBlockMessage(signature);
 
-		Message message = peer.getResponse(getBlockMessage);
+		// Use shorter timeout for sync operations to avoid blocking transaction processing
+		Message message = peer.getResponseWithTimeout(getBlockMessage, SYNC_RESPONSE_TIMEOUT);
 		if (message == null) {
 			peer.getPeerData().incrementFailedSyncCount();
 			if (peer.getPeerData().getFailedSyncCount() >= MAX_CONSECUTIVE_FAILED_SYNC_ATTEMPTS) {

@@ -67,22 +67,28 @@ public class Peer {
      */
     private static final int CONNECT_TIMEOUT = 2000; // ms
 
-    /**
+ /**
      * Maximum time to wait for a message reply to arrive from peer. (ms)
      */
-    private static final int RESPONSE_TIMEOUT = 180_000; // ms, was 3000
+	private static final int RESPONSE_TIMEOUT = 10_000; // ms
 
-    /**
-     * Interval between PING messages to a peer. (ms)
-     * <p>
-     * Just under every 30s is usually ideal to keep NAT mappings refreshed.
-     */
-    private static final int PING_INTERVAL = 20_000; // ms
+	/**
+	 * Timeout for blockchain synchronization operations (ms)
+	 * Shorter timeout to avoid blocking transaction processing during sync.
+	 */
+	public static final int SYNC_RESPONSE_TIMEOUT = 4_000; // ms
 
-    /**
-     * Maximum time to wait for a peer to respond with blocks (ms)
-     */
-    public static final int FETCH_BLOCKS_TIMEOUT = 10000;
+	/**
+	 * Interval between PING messages to a peer. (ms)
+	 * <p>
+	 * Just under every 30s is usually ideal to keep NAT mappings refreshed.
+	 */
+	private static final int PING_INTERVAL = 20_000; // ms
+
+	/**
+	 * Maximum time to wait for a peer to respond with blocks (ms)
+	 */
+	public static final int FETCH_BLOCKS_TIMEOUT = 10000;
 
     private volatile boolean isStopping = false;
 

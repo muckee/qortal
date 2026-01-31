@@ -687,6 +687,38 @@ public class ArbitraryDataFileListManager {
                         for (byte[] hash : hashes) {
                             String hash58 = Base58.encode(hash);
 
+                            // Skip if we already have this hash (check permanent storage first, then relay cache)
+                            try {
+                                ArbitraryDataFile existingFile = ArbitraryDataFile.fromHash(hash, signature);
+                                if (existingFile.exists()) {
+                                    LOGGER.trace("Skipping hash {} from file list - already exists in permanent storage", hash58);
+                                    continue;
+                                }
+                                
+                                // Check relay cache
+                                byte[] cachedData = ArbitraryDataFileManager.getInstance().loadFromRelayCache(hash58);
+                                if (cachedData != null) {
+                                    LOGGER.debug("Hash {} found in relay cache while processing file list - saving to permanent storage", hash58);
+                                    try {
+                                        ArbitraryDataFile cachedFile = new ArbitraryDataFile(cachedData, signature, false);
+                                        if (cachedFile.validateHash(hash)) {
+                                            cachedFile.save();
+                                            LOGGER.trace("Saved hash {} from relay cache to permanent storage", hash58);
+                                            continue; // Skip adding to response tracking
+                                        } else {
+                                            LOGGER.warn("Cached chunk {} failed validation, will re-request", hash58);
+                                            // Fall through to add to tracking
+                                        }
+                                    } catch (Exception e) {
+                                        LOGGER.warn("Failed to save hash {} from relay cache: {}", hash58, e.getMessage());
+                                        // Fall through to add to tracking
+                                    }
+                                }
+                            } catch (DataException e) {
+                                LOGGER.warn("Error checking if hash {} exists: {}", hash58, e.getMessage());
+                                // Fall through to add to tracking
+                            }
+
                             // Treat null request hops as 100, so that they are able to be sorted (and put to the end of the list)
                             int requestHops = arbitraryDataFileListMessage.getRequestHops() != null ? arbitraryDataFileListMessage.getRequestHops() : 100;
 
@@ -920,9 +952,19 @@ public class ArbitraryDataFileListManager {
                                     hashes.add(requestedHash);
                                     //LOGGER.trace("Added hash {}", hash58);
                                 } else {
-                                    LOGGER.trace("Couldn't add hash {} because it doesn't exist", hash58);
-                                    allChunksExist = false;
-                                    computedMissingRequestedHashes.add(requestedHash);
+                                    // Check relay cache before marking as missing
+                                    byte[] cachedData = ArbitraryDataFileManager.getInstance().loadFromRelayCache(hash58);
+                                    if (cachedData != null) {
+                                        LOGGER.debug("Hash {} found in relay cache - including in response to peer", hash58);
+                                        hashes.add(requestedHash);
+                                        // Mark that not all chunks are in permanent storage (some only in cache)
+                                        allChunksExist = false;
+                                        // Don't add to missing list - we can serve it from cache
+                                    } else {
+                                        LOGGER.trace("Couldn't add hash {} because it doesn't exist", hash58);
+                                        allChunksExist = false;
+                                        computedMissingRequestedHashes.add(requestedHash);
+                                    }
                                 }
                             }
                         } else {
@@ -934,9 +976,20 @@ public class ArbitraryDataFileListManager {
                                     hashes.add(chunk.getHash());
                                     //LOGGER.trace("Added hash {}", chunk.getHash58());
                                 } else {
-                                    LOGGER.trace("Couldn't add hash {} because it doesn't exist", chunk.getHash58());
-                                    allChunksExist = false;
-                                    computedMissingRequestedHashes.add(requestedHash);
+                                    // Check relay cache before marking as missing
+                                    String hash58 = Base58.encode(requestedHash);
+                                    byte[] cachedData = ArbitraryDataFileManager.getInstance().loadFromRelayCache(hash58);
+                                    if (cachedData != null) {
+                                        LOGGER.debug("Hash {} found in relay cache - including in response to peer", hash58);
+                                        hashes.add(requestedHash);
+                                        // Mark that not all chunks are in permanent storage (some only in cache)
+                                        allChunksExist = false;
+                                        // Don't add to missing list - we can serve it from cache
+                                    } else {
+                                        LOGGER.trace("Couldn't add hash {} because it doesn't exist", chunk.getHash58());
+                                        allChunksExist = false;
+                                        computedMissingRequestedHashes.add(requestedHash);
+                                    }
                                 }
                             }
                         }
