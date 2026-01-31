@@ -26,7 +26,7 @@ public class DataResource {
 
 	@GET
 	@Path("/cache/size")
-	@Produces(MediaType.APPLICATION_JSON)
+	@Produces(MediaType.TEXT_PLAIN)
 	@Operation(
 		summary = "Get relay cache size",
 		description = "Returns the total size of the relay cache in bytes",
@@ -34,7 +34,7 @@ public class DataResource {
 			@ApiResponse(
 				description = "Cache size in bytes",
 				content = @Content(
-					mediaType = MediaType.APPLICATION_JSON,
+					mediaType = MediaType.TEXT_PLAIN,
 					schema = @Schema(
 						type = "number"
 					)
@@ -53,7 +53,7 @@ public class DataResource {
 
 	@POST
 	@Path("/cache/erase")
-	@Produces(MediaType.APPLICATION_JSON)
+	@Produces(MediaType.TEXT_PLAIN)
 	@Operation(
 		summary = "Erase relay cache",
 		description = "Deletes all files from the relay cache",
@@ -61,7 +61,7 @@ public class DataResource {
 			@ApiResponse(
 				description = "true if successful, false otherwise",
 				content = @Content(
-					mediaType = MediaType.APPLICATION_JSON,
+					mediaType = MediaType.TEXT_PLAIN,
 					schema = @Schema(
 						type = "boolean"
 					)
