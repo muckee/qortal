@@ -1043,9 +1043,21 @@ public class ArbitraryDataFileListManager {
                     }
 
                     if (allChunksExist) {
-                        // Nothing left to do, so return to prevent any unnecessary forwarding from occurring
-                        LOGGER.trace("No need for any forwarding because file list request is fully served");
-                        continue;
+                        // Only skip forwarding if we have complete knowledge (metadata loaded with chunks)
+                        // We have complete knowledge if:
+                        // 1. The original request was empty (we expanded it), AND
+                        // 2. We actually loaded chunk hashes (requestedHashes has more than just metadata + file hash)
+                        // If requestedHashes only has 2 items (metadata + file hash), we didn't load chunk info
+                        boolean expandedFromEmpty = originalRequestedHashes == null || originalRequestedHashes.isEmpty();
+                        boolean hasLoadedChunkHashes = expandedFromEmpty && requestedHashes.size() > 2;
+                        boolean hasCompleteKnowledge = hasLoadedChunkHashes && !hashes.isEmpty() && missingRequestedHashes != null && missingRequestedHashes.isEmpty();
+                        
+                        if (hasCompleteKnowledge) {
+                            // Nothing left to do, so return to prevent any unnecessary forwarding from occurring
+                            LOGGER.trace("No need for any forwarding because file list request is fully served with complete knowledge");
+                            continue;
+                        }
+                        LOGGER.trace("Have some chunks but may have incomplete knowledge - will still forward request");
                     }
                 }
 
@@ -1074,8 +1086,10 @@ public class ArbitraryDataFileListManager {
                         if (requestHops < SEARCH_DEPTH_MAX_HOPS) { // 6 Hops
                             // Relay request hasn't reached the maximum number of hops yet, so can be rebroadcast
 
-                            // If we couldn't compute what's missing (e.g. we didn't check local availability), relay the original request unchanged.
-                            List<byte[]> relayHashes = missingRequestedHashes != null ? missingRequestedHashes : originalRequestedHashes;
+                            // When relaying, always forward the original request unchanged to preserve the requester's intent.
+                            // Using missingRequestedHashes would filter based on our incomplete knowledge (we may not have metadata).
+                            // This ensures the origin node can provide the complete picture directly to the requester.
+                            List<byte[]> relayHashes = originalRequestedHashes;
                             Message relayGetArbitraryDataFileListMessage = new GetArbitraryDataFileListMessage(signature, relayHashes, requestTime, requestHops, requestingPeer);
                             relayGetArbitraryDataFileListMessage.setId(message.getId());
 
