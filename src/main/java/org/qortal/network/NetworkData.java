@@ -1316,7 +1316,9 @@ public class NetworkData {
             && (peerData.getLastConnected() == null ));
 
         peers.removeIf(peerData ->
-            peerData.getLastConnected() < peerData.getLastAttempted()
+            peerData.getLastAttempted() != null
+            && peerData.getLastConnected() != null
+            && peerData.getLastConnected() < peerData.getLastAttempted()
             && peerData.getLastAttempted() > lastAttemptedThreshold);
 
         // Don't consider peers that we know loop back to self

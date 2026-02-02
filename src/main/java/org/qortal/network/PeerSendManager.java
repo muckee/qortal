@@ -368,7 +368,7 @@ public class PeerSendManager {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     int lostMessages = preloadedQueue.size();
-                    LOGGER.error("ERROR - Caught InterruptedException in sender stage for peer {} - {} preloaded messages lost", 
+                    LOGGER.debug("Caught InterruptedException in sender stage for peer {} - {} preloaded messages lost", 
                                 peer, lostMessages);
                     break;
                 } catch (Exception e) {
