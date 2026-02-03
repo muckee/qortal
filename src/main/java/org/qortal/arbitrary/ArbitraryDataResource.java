@@ -20,6 +20,7 @@ import org.qortal.utils.ArbitraryTransactionUtils;
 import org.qortal.utils.FilesystemUtils;
 import org.qortal.utils.ListUtils;
 import org.qortal.utils.NTP;
+import org.qortal.utils.StringUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -216,7 +217,7 @@ public class ArbitraryDataResource {
 
         String baseDir = Settings.getInstance().getTempDataPath();
         String identifier = this.identifier != null ?  this.identifier : "default";
-        Path cachePath = Paths.get(baseDir, "reader", this.resourceIdType.toString(), this.resourceId, this.service.toString(), identifier);
+        Path cachePath = Paths.get(baseDir, "reader", this.resourceIdType.toString(), StringUtils.sanitizeString(this.resourceId), this.service.toString(), StringUtils.sanitizeString(identifier));
         if (cachePath.toFile().exists()) {
             boolean success = FilesystemUtils.safeDeleteDirectory(cachePath, true);
             if (success) {
