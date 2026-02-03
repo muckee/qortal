@@ -324,7 +324,7 @@ public class Synchronizer extends Thread {
 
 		final int peersRemoved = peersBeforeComparison - peers.size();
 		if (peersRemoved > 0 && !peers.isEmpty())
-			LOGGER.info(String.format("Ignoring %d peers on inferior chains. Peers remaining: %d", peersRemoved, peers.size()));
+			LOGGER.debug(String.format("Ignoring %d peers on inferior chains. Peers remaining: %d", peersRemoved, peers.size()));
 
 		if (peers.isEmpty()) {
 			LOGGER.trace(String.format("No suitable peers available for synchronization after filtering. Started with %d handshaked peer(s), filtered down to 0", initialPeerCount));
