@@ -217,7 +217,7 @@ public class NetworkData {
 
     private final List<String> ourExternalIpAddressHistory = new ArrayList<>();
     private String ourExternalIpAddress = null;
-    private int ourExternalPort = Settings.getInstance().getListenPort();
+    private int ourExternalPort = Settings.getInstance().getQDNListenPort();
     private boolean canAcceptInbound = false; 
     private volatile boolean isShuttingDown = false;
 
@@ -292,10 +292,12 @@ public class NetworkData {
         int qdnPort = Settings.getInstance().getQDNListenPort();
         if (Settings.getInstance().isUPnPEnabled()) {
             UPnP.openPortTCP(qdnPort);
-            if (UPnP.isMappedTCP(qdnPort))
+            if (UPnP.isMappedTCP(qdnPort)) {
+                this.ourExternalIpAddress = UPnP.getExternalAddress();
                 LOGGER.info("UPnP Mapped for QDN, port: {}", qdnPort);
-            else
+            } else {
                 LOGGER.warn("Unable to map QDN port: {} with UPnP, port in use?", qdnPort);
+            }
         }
         else {
             UPnP.closePortTCP(qdnPort);
