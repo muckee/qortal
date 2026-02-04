@@ -1973,13 +1973,13 @@ public class Network {
             } else {
                 // Inbound: respond "in kind"
                 
-                // For old peers (< 5.5.0), use the old protocol pattern for ALL transitions
+                // For old peers (< 6.0.0), use the old protocol pattern for ALL transitions
                 // Old protocol: always respond with current state's action (alternating pattern)
-                if (!peer.isAtLeastVersion("5.5.0")) {
+                if (!peer.isAtLeastVersion("6.0.0")) {
                     // Backward compatibility: respond in kind with old state's action
                     handshakeStatus.action(peer);
                 }
-                // For new peers (>= 5.5.0), use new protocol with HELLO_V2
+                // For new peers (>= 6.0.0), use new protocol with HELLO_V2
                 else {
                     // Special case: HELLO -> HELLO_V2 transition.
                     // HELLO_V2.action() sends nothing; HELLO.action() is responsible for sending HELLO_V2 when awaiting.
@@ -2200,7 +2200,7 @@ public class Network {
         // Push to NetworkData for ALL peers (inbound or outbound)
         // We want to discover all QDN-capable peers regardless of who initiated Network connection
         // Duplicate detection and direction invariant enforcement handle any race conditions
-        if (peer.isAtLeastVersion("5.5.0"))
+        if (peer.isAtLeastVersion("6.0.0"))
             NetworkData.getInstance().addPeer(peer);
 
         // Update repository for outbound peers only

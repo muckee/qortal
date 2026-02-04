@@ -33,7 +33,7 @@ public class ArbitraryDataFileListMessage extends Message {
 //        this(signature, hashes, null, null, null, null);
 //    }
 
-    /** Pre v5.5.0 version **/
+    /** Pre v6.0.0 version **/
     public ArbitraryDataFileListMessage(byte[] signature, List<byte[]> hashes, Long requestTime,
                                         Integer requestHops, String peerAddress, Boolean isRelayPossible) {
         this(signature, hashes,  requestTime, requestHops,  peerAddress,  isRelayPossible, false);
