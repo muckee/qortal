@@ -40,8 +40,8 @@ public class ChannelAcceptTask implements Task {
         NetworkData datanetwork = NetworkData.getInstance();
         SocketChannel socketChannel;
 
-        try {
-            if (network.getImmutableConnectedPeers().size() >= network.getMaxPeers()) {
+        try {  // Only Check maxPeers for P2P
+            if (this.networkType == Peer.NETWORK && network.getImmutableConnectedPeers().size() >= network.getMaxPeers()) {
                 // We have enough peers
                 LOGGER.debug("Ignoring pending incoming connections because the server is full");
                 return;
@@ -49,10 +49,15 @@ public class ChannelAcceptTask implements Task {
 
             socketChannel = serverSocketChannel.accept();
 
-            if (this.networkType == Peer.NETWORKDATA)
-                datanetwork.setInterestOps(serverSocketChannel, SelectionKey.OP_ACCEPT);
-            else
-                network.setInterestOps(serverSocketChannel, SelectionKey.OP_ACCEPT);
+            switch (this.networkType) {
+                case Peer.NETWORK:
+                    network.setInterestOps(serverSocketChannel, SelectionKey.OP_ACCEPT);
+                    break;
+                case Peer.NETWORKDATA:
+                    datanetwork.setInterestOps(serverSocketChannel, SelectionKey.OP_ACCEPT);
+                    break;
+            }
+                
         } catch (IOException e) {
             return;
         }
@@ -78,47 +83,6 @@ public class ChannelAcceptTask implements Task {
             }
         }
 
-        // We allow up to a maximum of maxPeers connected peers, of which...
-        // - maxDataPeers must be prearranged data connections (these are intentionally short-lived)
-        // - the remainder can be any regular peers
-
-        // Firstly, determine the maximum limits
-        int maxPeers = Settings.getInstance().getMaxPeers();
-        int maxDataPeers = Settings.getInstance().getMaxDataPeers();
-        int maxRegularPeers = maxPeers - maxDataPeers;
-
-        // Next, obtain the current state
-        int connectedDataPeerCount = datanetwork.getImmutableConnectedPeers().size();
-        int connectedRegularPeerCount = Network.getInstance().getImmutableConnectedNonDataPeers().size();
-
-        // Check if the incoming connection should be considered a data or regular peer
-        boolean isDataPeer = ArbitraryDataFileManager.getInstance().isPeerRequestingData(address.getHost());
-
-        // Finally, decide if we have any capacity for this incoming peer
-        boolean connectionLimitReached;
-        if (isDataPeer) {
-            connectionLimitReached = (connectedDataPeerCount >= maxDataPeers);
-        }
-        else {
-            connectionLimitReached = (connectedRegularPeerCount >= maxRegularPeers);
-        }
-
-        // Extra maxPeers check just to be safe
-        if (Network.getInstance().getImmutableConnectedPeers().size() >= maxPeers) {
-            connectionLimitReached = true;
-        }
-
-        if (connectionLimitReached) {
-            try {
-                // We have enough peers
-                LOGGER.debug("Connection discarded from peer {} because the server is full", address);
-                socketChannel.close();
-            } catch (IOException e) {
-                // IGNORE
-            }
-            return;
-        }
-
         final Long now = NTP.getTime();
         Peer newPeer;
 
@@ -133,15 +97,14 @@ public class ChannelAcceptTask implements Task {
 
             newPeer = new Peer(socketChannel, this.networkType);
 
-            if (isDataPeer) {
-                newPeer.setMaxConnectionAge(Settings.getInstance().getMaxDataPeerConnectionTime() * 1000L);
+            switch (this.networkType) {
+                case Peer.NETWORK:
+                    network.addConnectedPeer(newPeer);
+                    break;
+                case Peer.NETWORKDATA:
+                    datanetwork.addConnectedPeer(newPeer);
+                    break;
             }
-            newPeer.setIsDataPeer(isDataPeer);
-
-            if (this.networkType == Peer.NETWORK)
-                network.addConnectedPeer(newPeer);
-            else
-                datanetwork.addConnectedPeer(newPeer);
 
         } catch (IOException e) {
             if (socketChannel.isOpen()) {
@@ -154,9 +117,13 @@ public class ChannelAcceptTask implements Task {
             }
             return;
         }
-        if (this.networkType == Peer.NETWORKDATA)
-            datanetwork.onPeerReady(newPeer);
-        else
-            network.onPeerReady(newPeer);
+        switch (this.networkType) {
+            case Peer.NETWORK:
+                network.onPeerReady(newPeer);
+                break;
+            case Peer.NETWORKDATA:
+                datanetwork.onPeerReady(newPeer);
+                break;
+        }
     }
 }

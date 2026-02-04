@@ -162,20 +162,30 @@ public class PeersResource {
 
 			boolean addResult = NetworkData.getInstance().mergePeers("API", addedWhen, newPeerAddresses);
 
-			if (addResult) {
-				// Find the peer we just added and connect immediately
-				PeerData peerData = NetworkData.getInstance().getAllKnownPeers().stream()
-						.filter(pd -> pd.getAddress().equals(peerAddress))
-						.findFirst()
-						.orElse(null);
+			// Check if already connected to this peer address
+			boolean alreadyConnected = NetworkData.getInstance().getImmutableConnectedPeers().stream()
+					.anyMatch(peer -> peer.getPeerData().getAddress().equals(peerAddress));
 
-				if (peerData != null) {
-					Peer newPeer = new Peer(peerData, Peer.NETWORKDATA);
-					newPeer.setIsDataPeer(true);
-					
-					// Force connect immediately (same pattern as ArbitraryDataFileRequestThread)
-					NetworkData.getInstance().forceConnectPeer(newPeer);
-				}
+			if (alreadyConnected) {
+				// Peer is already connected, no need to force connect
+				return "true";
+			}
+
+			// Not connected yet - attempt to force connect
+			PeerData peerData = NetworkData.getInstance().getAllKnownPeers().stream()
+					.filter(pd -> pd.getAddress().equals(peerAddress))
+					.findFirst()
+					.orElse(null);
+
+			if (peerData != null) {
+				Peer newPeer = new Peer(peerData, Peer.NETWORKDATA);
+				newPeer.setIsDataPeer(true);
+				
+				// Force connect immediately (same pattern as ArbitraryDataFileRequestThread)
+				boolean connectResult = NetworkData.getInstance().forceConnectPeer(newPeer);
+				
+				// Return true if either the peer was newly added or connection succeeded
+				return (addResult || connectResult) ? "true" : "false";
 			}
 
 			return addResult ? "true" : "false";

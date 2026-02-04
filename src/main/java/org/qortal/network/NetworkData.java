@@ -217,7 +217,7 @@ public class NetworkData {
 
     private final List<String> ourExternalIpAddressHistory = new ArrayList<>();
     private String ourExternalIpAddress = null;
-    private int ourExternalPort = Settings.getInstance().getListenPort();
+    private int ourExternalPort = Settings.getInstance().getQDNListenPort();
     private boolean canAcceptInbound = false; 
     private volatile boolean isShuttingDown = false;
 
@@ -292,10 +292,12 @@ public class NetworkData {
         int qdnPort = Settings.getInstance().getQDNListenPort();
         if (Settings.getInstance().isUPnPEnabled()) {
             UPnP.openPortTCP(qdnPort);
-            if (UPnP.isMappedTCP(qdnPort))
+            if (UPnP.isMappedTCP(qdnPort)) {
+                this.ourExternalIpAddress = UPnP.getExternalAddress();
                 LOGGER.info("UPnP Mapped for QDN, port: {}", qdnPort);
-            else
+            } else {
                 LOGGER.warn("Unable to map QDN port: {} with UPnP, port in use?", qdnPort);
+            }
         }
         else {
             UPnP.closePortTCP(qdnPort);
@@ -1001,8 +1003,7 @@ public class NetworkData {
 
                     if (nextSelectionKey.isAcceptable()) {
                         clearInterestOps(nextSelectionKey, SelectionKey.OP_ACCEPT);
-                        if (getImmutableConnectedPeers().size() >= getMaxPeers())
-                                return null;
+                      
 
                         // Need to pass in a reference to the network type
                         return new ChannelAcceptTask((ServerSocketChannel) socketChannel, Peer.NETWORKDATA);
@@ -2373,8 +2374,7 @@ public class NetworkData {
             peer.disconnect("write stuck: " + stuckInfo);
         }
 
-        // Disconnect peers that have exceeded their maximum connection age
-        this.checkLongestConnection(now);
+
 
         // Prune 'old' peers from if we are over the count
         // getImmutableHandshakedPeers().size() works fine as PeerList has a size() method.
@@ -2487,6 +2487,11 @@ public class NetworkData {
             LOGGER.warn("Interrupted while waiting for networking threads to terminate");
         }
 
+        try {  // DeMap QDN uPnP so other nodes can use it when we are done
+            UPnP.closePortTCP(Settings.getInstance().getQDNListenPort());
+        } catch (Exception e) {
+            // do nothing
+        }
         // Close all peer connections
         for (Peer peer : this.getImmutableConnectedPeers()) {
             peer.shutdown();

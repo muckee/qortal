@@ -1971,16 +1971,24 @@ public class Network {
                 // Outbound: act first for the NEXT state
                 newHandshakeStatus.action(peer);
             } else {
-                // Inbound: respond "in kind".
-                //
-                // Most of the time call the NEW state's action.
-                // Special case: HELLO -> HELLO_V2 transition.
-                // HELLO_V2.action() sends nothing; HELLO.action() is responsible for sending HELLO_V2 when awaiting.
-                // Also skip RESPONDING because it's just a holding state while PoW runs.
-                if (newHandshakeStatus == Handshake.HELLO_V2) {
+                // Inbound: respond "in kind"
+                
+                // For old peers (< 6.0.0), use the old protocol pattern for ALL transitions
+                // Old protocol: always respond with current state's action (alternating pattern)
+                if (!peer.isAtLeastVersion("6.0.0")) {
+                    // Backward compatibility: respond in kind with old state's action
                     handshakeStatus.action(peer);
-                } else if (newHandshakeStatus != Handshake.RESPONDING) {
-                    newHandshakeStatus.action(peer);
+                }
+                // For new peers (>= 6.0.0), use new protocol with HELLO_V2
+                else {
+                    // Special case: HELLO -> HELLO_V2 transition.
+                    // HELLO_V2.action() sends nothing; HELLO.action() is responsible for sending HELLO_V2 when awaiting.
+                    // Also skip RESPONDING because it's just a holding state while PoW runs.
+                    if (newHandshakeStatus == Handshake.HELLO_V2) {
+                        handshakeStatus.action(peer);
+                    } else if (newHandshakeStatus != Handshake.RESPONDING) {
+                        newHandshakeStatus.action(peer);
+                    }
                 }
             }
     
@@ -2192,7 +2200,7 @@ public class Network {
         // Push to NetworkData for ALL peers (inbound or outbound)
         // We want to discover all QDN-capable peers regardless of who initiated Network connection
         // Duplicate detection and direction invariant enforcement handle any race conditions
-        if (peer.isAtLeastVersion("5.5.0"))
+        if (peer.isAtLeastVersion("6.0.0"))
             NetworkData.getInstance().addPeer(peer);
 
         // Update repository for outbound peers only
@@ -2836,6 +2844,12 @@ public class Network {
             LOGGER.error(e.getMessage(), e);
         }
 
+        // Release uPnP if it was enabled
+        try {
+            UPnP.closePortTCP(Settings.getInstance().getListenPort());
+        } catch (Exception e) {
+            // do nothing
+        }
         // Close all peer connections
         for (Peer peer : this.getImmutableConnectedPeers()) {
             peer.shutdown();
