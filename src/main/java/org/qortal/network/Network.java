@@ -1971,16 +1971,24 @@ public class Network {
                 // Outbound: act first for the NEXT state
                 newHandshakeStatus.action(peer);
             } else {
-                // Inbound: respond "in kind".
-                //
-                // Most of the time call the NEW state's action.
-                // Special case: HELLO -> HELLO_V2 transition.
-                // HELLO_V2.action() sends nothing; HELLO.action() is responsible for sending HELLO_V2 when awaiting.
-                // Also skip RESPONDING because it's just a holding state while PoW runs.
-                if (newHandshakeStatus == Handshake.HELLO_V2) {
+                // Inbound: respond "in kind"
+                
+                // For old peers (< 5.5.0), use the old protocol pattern for ALL transitions
+                // Old protocol: always respond with current state's action (alternating pattern)
+                if (!peer.isAtLeastVersion("5.5.0")) {
+                    // Backward compatibility: respond in kind with old state's action
                     handshakeStatus.action(peer);
-                } else if (newHandshakeStatus != Handshake.RESPONDING) {
-                    newHandshakeStatus.action(peer);
+                }
+                // For new peers (>= 5.5.0), use new protocol with HELLO_V2
+                else {
+                    // Special case: HELLO -> HELLO_V2 transition.
+                    // HELLO_V2.action() sends nothing; HELLO.action() is responsible for sending HELLO_V2 when awaiting.
+                    // Also skip RESPONDING because it's just a holding state while PoW runs.
+                    if (newHandshakeStatus == Handshake.HELLO_V2) {
+                        handshakeStatus.action(peer);
+                    } else if (newHandshakeStatus != Handshake.RESPONDING) {
+                        newHandshakeStatus.action(peer);
+                    }
                 }
             }
     

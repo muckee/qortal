@@ -1003,8 +1003,7 @@ public class NetworkData {
 
                     if (nextSelectionKey.isAcceptable()) {
                         clearInterestOps(nextSelectionKey, SelectionKey.OP_ACCEPT);
-                        if (getImmutableConnectedPeers().size() >= getMaxPeers())
-                                return null;
+                      
 
                         // Need to pass in a reference to the network type
                         return new ChannelAcceptTask((ServerSocketChannel) socketChannel, Peer.NETWORKDATA);
