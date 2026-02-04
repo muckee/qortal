@@ -2836,6 +2836,12 @@ public class Network {
             LOGGER.error(e.getMessage(), e);
         }
 
+        // Release uPnP if it was enabled
+        try {
+            UPnP.closePortTCP(Settings.getInstance().getListenPort());
+        } catch (Exception e) {
+            // do nothing
+        }
         // Close all peer connections
         for (Peer peer : this.getImmutableConnectedPeers()) {
             peer.shutdown();

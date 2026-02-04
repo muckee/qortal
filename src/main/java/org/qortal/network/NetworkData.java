@@ -2487,6 +2487,11 @@ public class NetworkData {
             LOGGER.warn("Interrupted while waiting for networking threads to terminate");
         }
 
+        try {  // DeMap QDN uPnP so other nodes can use it when we are done
+            UPnP.closePortTCP(Settings.getInstance().getQDNListenPort());
+        } catch (Exception e) {
+            // do nothing
+        }
         // Close all peer connections
         for (Peer peer : this.getImmutableConnectedPeers()) {
             peer.shutdown();
