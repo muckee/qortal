@@ -215,7 +215,7 @@ public class ArbitraryDataFileRequestThread {
                             peer = new Peer(peerData, Peer.NETWORKDATA);
                             // Mark as data peer and set appropriate connection age timeout (30 minutes)
                             peer.setIsDataPeer(true);
-                            peer.setMaxConnectionAge(Settings.getInstance().getMaxDataPeerConnectionTime() * 1000L);
+                          
                         } else {
                             LOGGER.warn("Cannot create Peer: PeerData is null for responseInfo with hash {}", responseInfo.getHash58());
                             continue;

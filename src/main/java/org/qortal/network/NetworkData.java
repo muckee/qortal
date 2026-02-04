@@ -2375,8 +2375,7 @@ public class NetworkData {
             peer.disconnect("write stuck: " + stuckInfo);
         }
 
-        // Disconnect peers that have exceeded their maximum connection age
-        this.checkLongestConnection(now);
+
 
         // Prune 'old' peers from if we are over the count
         // getImmutableHandshakedPeers().size() works fine as PeerList has a size() method.

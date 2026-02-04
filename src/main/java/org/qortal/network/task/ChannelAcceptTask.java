@@ -85,7 +85,7 @@ public class ChannelAcceptTask implements Task {
         // Firstly, determine the maximum limits
         int maxPeers = Settings.getInstance().getMaxPeers();
         int maxDataPeers = Settings.getInstance().getMaxDataPeers();
-        int maxRegularPeers = maxPeers - maxDataPeers;
+      
 
         // Next, obtain the current state
         int connectedDataPeerCount = datanetwork.getImmutableConnectedPeers().size();
@@ -95,18 +95,14 @@ public class ChannelAcceptTask implements Task {
         boolean isDataPeer = ArbitraryDataFileManager.getInstance().isPeerRequestingData(address.getHost());
 
         // Finally, decide if we have any capacity for this incoming peer
-        boolean connectionLimitReached;
-        if (isDataPeer) {
-            connectionLimitReached = (connectedDataPeerCount >= maxDataPeers);
+        boolean connectionLimitReached = false
+        if (this.networkType == Peer.NETWORK) {
+            connectionLimitReached = (connectedRegularPeerCount >= maxPeers);
         }
-        else {
-            connectionLimitReached = (connectedRegularPeerCount >= maxRegularPeers);
-        }
+        // data peers don't check maxSize because of auto prunning
+        
 
-        // Extra maxPeers check just to be safe
-        if (Network.getInstance().getImmutableConnectedPeers().size() >= maxPeers) {
-            connectionLimitReached = true;
-        }
+      
 
         if (connectionLimitReached) {
             try {
@@ -133,9 +129,7 @@ public class ChannelAcceptTask implements Task {
 
             newPeer = new Peer(socketChannel, this.networkType);
 
-            if (isDataPeer) {
-                newPeer.setMaxConnectionAge(Settings.getInstance().getMaxDataPeerConnectionTime() * 1000L);
-            }
+         
             newPeer.setIsDataPeer(isDataPeer);
 
             if (this.networkType == Peer.NETWORK)
