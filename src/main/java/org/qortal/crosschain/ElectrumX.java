@@ -613,6 +613,15 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 			throw new ForeignBlockchainException.NetworkException("Unexpected response from ElectrumX blockchain.transaction.broadcast RPC");
 	}
 
+	 // Class utility methods for status
+	 public int getConnectedServerCount() {
+        return this.servers.size();
+    }
+
+    public int getKnownServerCount() {
+        return this.connections.size();
+    }
+
 	// Class-private utility methods
 
 	/**

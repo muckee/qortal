@@ -1239,7 +1239,7 @@ public class Network {
                         if (stillInConnected && stillNotInHandshaked) {
                             // Normal case: handshake completed but peer missing from handshakedPeers
                             // This can happen due to race conditions in duplicate handling
-                            LOGGER.warn("[{}] Repairing orphaned peer {} - in connectedPeers with COMPLETED status but not in handshakedPeers",
+                            LOGGER.debug("[{}] Repairing orphaned peer {} - in connectedPeers with COMPLETED status but not in handshakedPeers",
                                     peer.getPeerConnectionId(), peer);
                             this.addHandshakedPeer(peer);
                         }
@@ -1251,7 +1251,7 @@ public class Network {
                     // 2. Never properly completed handshake but stayed in connectedPeers
                     // 3. Had its status reset by a bug
                     // Collect for disconnect outside lock to avoid holding lock during cleanup
-                    LOGGER.warn("[{}] Detected zombie peer {} - in connectedPeers but not in handshakedPeers (status={}, age={}ms)",
+                    LOGGER.debug("[{}] Detected zombie peer {} - in connectedPeers but not in handshakedPeers (status={}, age={}ms)",
                             peer.getPeerConnectionId(), peer, peer.getHandshakeStatus(), peer.getConnectionAge());
                     zombiesToDisconnect.add(peer);
                 }
@@ -1336,7 +1336,7 @@ public class Network {
                 
                 if (peer.isOutbound() != weShouldBeOutbound 
                         && peer.getConnectionAge() > DIRECTION_GRACE_PERIOD) {
-                    LOGGER.warn("[{}] Will disconnect single peer {} with wrong direction (outbound={}, shouldBeOutbound={}, age={}ms)",
+                    LOGGER.debug("[{}] Will disconnect single peer {} with wrong direction (outbound={}, shouldBeOutbound={}, age={}ms)",
                             peer.getPeerConnectionId(), peer.getPeerData().getAddress(),
                             peer.isOutbound(), weShouldBeOutbound, peer.getConnectionAge());
                     

@@ -10,6 +10,7 @@ import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
 import org.qortal.controller.arbitrary.ArbitraryDataFileManager;
+import org.qortal.controller.arbitrary.ArbitraryMetadataManager;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.message.*;
@@ -68,6 +69,7 @@ public class NetworkData {
     private final Ed25519PrivateKeyParameters edPrivateKeyParams = new Ed25519PrivateKeyParameters(new SecureRandom());
     private final Ed25519PublicKeyParameters edPublicKeyParams = edPrivateKeyParams.generatePublicKey();
     private final String ourNodeId = Crypto.toNodeAddress(edPublicKeyParams.getEncoded());
+    public final static int MAX_NODEID_SIZE = 34;
 
     private final int maxMessageSize;
     private final int minOutboundPeers;
@@ -1056,7 +1058,7 @@ public class NetworkData {
                         if (stillInConnected && stillNotInHandshaked) {
                             // Normal case: handshake completed but peer missing from handshakedPeers
                             // This can happen due to race conditions in duplicate handling
-                            LOGGER.warn("[{}] Repairing orphaned data peer {} - in connectedPeers with COMPLETED status but not in handshakedPeers",
+                            LOGGER.debug("[{}] Repairing orphaned data peer {} - in connectedPeers with COMPLETED status but not in handshakedPeers",
                                     peer.getPeerConnectionId(), peer);
                             this.addHandshakedPeer(peer);
                         }
@@ -1068,7 +1070,7 @@ public class NetworkData {
                     // 2. Never properly completed handshake but stayed in connectedPeers
                     // 3. Had its status reset by a bug
                     // Collect for disconnect outside lock to avoid holding lock during cleanup
-                    LOGGER.warn("[{}] Detected zombie data peer {} - in connectedPeers but not in handshakedPeers (status={}, age={}ms)",
+                    LOGGER.debug("[{}] Detected zombie data peer {} - in connectedPeers but not in handshakedPeers (status={}, age={}ms)",
                             peer.getPeerConnectionId(), peer, peer.getHandshakeStatus(), peer.getConnectionAge());
                     zombiesToDisconnect.add(peer);
                 }
@@ -1143,7 +1145,7 @@ public class NetworkData {
                 Peer peer = peers.get(0);
                 if (peer.isOutbound() != weShouldBeOutbound 
                         && peer.getConnectionAge() > DIRECTION_GRACE_PERIOD) {
-                    LOGGER.warn("[NetworkData: {}] Will disconnect single peer {} with wrong direction (outbound={}, shouldBeOutbound={}, age={}ms)",
+                    LOGGER.debug("[NetworkData: {}] Will disconnect single peer {} with wrong direction (outbound={}, shouldBeOutbound={}, age={}ms)",
                             peer.getPeerConnectionId(), peer.getPeerData().getAddress(),
                             peer.isOutbound(), weShouldBeOutbound, peer.getConnectionAge());
                     
@@ -1732,6 +1734,26 @@ public class NetworkData {
                     }
                 });
                 break;
+
+			case ARBITRARY_DATA_FILE_LIST:
+				ArbitraryDataFileListManager.getInstance().onNetworkArbitraryDataFileListMessage(peer, message);
+				break;
+
+			case GET_ARBITRARY_DATA_FILE:
+				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFileMessage(peer, message);
+				break;
+
+            case GET_ARBITRARY_DATA_FILE_LIST:
+                ArbitraryDataFileListManager.getInstance().onNetworkGetArbitraryDataFileListMessage(peer, message);
+                break;
+
+			case GET_ARBITRARY_METADATA:
+				ArbitraryMetadataManager.getInstance().onNetworkGetArbitraryMetadataMessage(peer, message);
+				break;
+
+			case ARBITRARY_METADATA:
+				ArbitraryMetadataManager.getInstance().onNetworkArbitraryMetadataMessage(peer, message);
+				break;
             default:
                 // Bump up to controller for possible action
                 Controller.getInstance().onNetworkMessage(peer, message);

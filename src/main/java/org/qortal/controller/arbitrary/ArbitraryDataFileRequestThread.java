@@ -197,16 +197,18 @@ public class ArbitraryDataFileRequestThread {
             }
             Peer connectedPeer = peer;
 
-            // Check if the peer we want a chunk from is directly connected?
-            if (connectedPeer != null) {
-                // We have a connected peer
-                LOGGER.trace("Found connected peer for responseInfo: {}", connectedPeer);
-            } else {
-                LOGGER.trace("We did not find a directly connected peer for : {}", responseInfo.getPeerData());
-            }
-
             // INSERT LOGIC FORK HERE....
             if (isDirectlyConnectable) {
+                //Check if we have a connected peer with a matching NodeID 
+                String nodeId = responseInfo.getNodeId();
+                connectedPeer =  NetworkData.getInstance().getImmutableConnectedPeers().stream()
+                    .filter(peerEa ->
+                        peerEa.getPeersNodeId() != null &&
+                        peerEa.getPeersNodeId().equals(nodeId)
+                    )
+                    .findFirst()
+                    .orElse(null);
+
                 if (connectedPeer == null) { // Peer is not connected
                     // Create a Peer from PeerData if peer is null (peer not in connected list yet)
                     if (peer == null) {
@@ -474,6 +476,7 @@ public class ArbitraryDataFileRequestThread {
                             responseInfo.getHash58(),
                             responseInfo.getSignature58(),
                             finalPeer,  // Use the final connected peer
+                            responseInfo.getNodeId(),
                             responseInfo.getTimestamp(),
                             responseInfo.getRequestTime(),
                             responseInfo.getRequestHops(),

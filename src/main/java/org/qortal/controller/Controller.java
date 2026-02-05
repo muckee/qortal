@@ -1563,37 +1563,6 @@ public class Controller extends Thread {
 				ForeignFeesManager.getInstance().onNetworkForeignFeesMessage(peer, message);
 				break;
 
-			case GET_ARBITRARY_DATA:
-				// Not currently supported
-				break;
-
-			case ARBITRARY_DATA_FILE_LIST:
-				ArbitraryDataFileListManager.getInstance().onNetworkArbitraryDataFileListMessage(peer, message);
-				break;
-// @ToDo: Future Message Type to get an entire list of file Hashes
-//			case GET_ARBITRARY_DATA_FILES:
-//				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFilesMessage(peer, message);
-//				break;
-
-			case GET_ARBITRARY_DATA_FILE:
-				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFileMessage(peer, message);
-				break;
-
-		case GET_ARBITRARY_DATA_FILE_LIST:
-			ArbitraryDataFileListManager.getInstance().onNetworkGetArbitraryDataFileListMessage(peer, message);
-			break;
-
-			case ARBITRARY_SIGNATURES:
-				// Not currently supported
-				break;
-
-			case GET_ARBITRARY_METADATA:
-				ArbitraryMetadataManager.getInstance().onNetworkGetArbitraryMetadataMessage(peer, message);
-				break;
-
-			case ARBITRARY_METADATA:
-				ArbitraryMetadataManager.getInstance().onNetworkArbitraryMetadataMessage(peer, message);
-				break;
 
 			case GET_TRADE_PRESENCES:
 				TradeBot.getInstance().onGetTradePresencesMessage(peer, message);

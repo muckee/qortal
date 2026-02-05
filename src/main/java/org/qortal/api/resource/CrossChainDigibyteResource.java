@@ -15,6 +15,7 @@ import org.qortal.api.ApiExceptionFactory;
 import org.qortal.api.Security;
 import org.qortal.api.model.crosschain.AddressRequest;
 import org.qortal.api.model.crosschain.DigibyteSendRequest;
+import org.qortal.api.model.crosschain.ForeignCoinStatus;
 import org.qortal.crosschain.AddressInfo;
 import org.qortal.crosschain.ChainableServer;
 import org.qortal.crosschain.ElectrumX;
@@ -44,21 +45,35 @@ public class CrossChainDigibyteResource {
     @GET
     @Path("/status")
     @Operation(
-        summary = "Returns true if the wallet is enabled",
-        description = "Returns the status of the wallet as a boolean",
+        summary = "Returns wallet status, connected server count and known server count",
+        description = "Returns the status of the wallet and the number of electrumX servers connected",
         responses = {
            @ApiResponse(
               content = @Content(
                  schema = @Schema(
-                    type = "boolean"
+                    implementation = ForeignCoinStatus.class
                  )
               )
            )
         }
-    )
-    public boolean getDigibyteStatus() {
+    )	
+	public ForeignCoinStatus getDigibyteStatus() {
         Digibyte digibyte = Digibyte.getInstance();
-        return digibyte != null;
+        boolean isEnabled = digibyte != null;
+		int connections = 0;
+        int known = 0;
+        int height = 0;
+		if (isEnabled && digibyte.getBlockchainProvider() instanceof ElectrumX) {
+			connections = ((ElectrumX) digibyte.getBlockchainProvider()).getConnectedServerCount();
+            known = ((ElectrumX) digibyte.getBlockchainProvider()).getKnownServerCount();
+            try {
+                height = ((ElectrumX) digibyte.getBlockchainProvider()).getCurrentHeight();
+            } catch (ForeignBlockchainException e ) {
+                // ignore, leave set to 0
+            }
+		}
+
+		return new ForeignCoinStatus(isEnabled, connections, known, height);
     }
 
 	@GET
