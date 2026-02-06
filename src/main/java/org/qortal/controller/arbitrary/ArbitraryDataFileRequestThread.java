@@ -189,44 +189,40 @@ public class ArbitraryDataFileRequestThread {
 
             Boolean isDirectlyConnectable = responseInfo.isDirectConnectable();
             LOGGER.trace("Is Directly Connectable: {}", isDirectlyConnectable);
-            // Resolve Peer from connected peers - getPeer() returns null for lightweight storage
-            Peer peer = responseInfo.getPeer(completeConnectedPeers);
-            if (peer == null) {
-                // Try to find peer by PeerData
-                peer = completeConnectedPeers.get(responseInfo.getPeerData());
-            }
-            Peer connectedPeer = peer;
 
-            // INSERT LOGIC FORK HERE....
-            if (isDirectlyConnectable) {
-                //Check if we have a connected peer with a matching NodeID 
-                String nodeId = responseInfo.getNodeId();
-                connectedPeer =  NetworkData.getInstance().getImmutableConnectedPeers().stream()
+            // Always resolve peer by nodeId when present (nodeId is always present for file list responses)
+            String nodeId = responseInfo.getNodeId();
+            Peer connectedPeer = null;
+            if (nodeId != null) {
+                connectedPeer = NetworkData.getInstance().getImmutableConnectedPeers().stream()
                     .filter(peerEa ->
                         peerEa.getPeersNodeId() != null &&
-                        peerEa.getPeersNodeId().equals(nodeId)
-                    )
+                        peerEa.getPeersNodeId().equals(nodeId))
                     .findFirst()
                     .orElse(null);
+            }
 
-                if (connectedPeer == null) { // Peer is not connected
-                    // Create a Peer from PeerData if peer is null (peer not in connected list yet)
+            // Address-based peer only for connect path when we need a Peer object for pending/forceConnect
+            Peer peer = responseInfo.getPeer(completeConnectedPeers);
+            if (peer == null) {
+                peer = completeConnectedPeers.get(responseInfo.getPeerData());
+            }
+
+            if (isDirectlyConnectable) {
+                if (connectedPeer == null) {
+                    // Peer not connected - create Peer from PeerData if needed for pending/connect
                     if (peer == null) {
                         PeerData peerData = responseInfo.getPeerData();
                         if (peerData != null) {
                             peer = new Peer(peerData, Peer.NETWORKDATA);
-                            // Mark as data peer and set appropriate connection age timeout (30 minutes)
                             peer.setIsDataPeer(true);
-                          
                         } else {
                             LOGGER.warn("Cannot create Peer: PeerData is null for responseInfo with hash {}", responseInfo.getHash58());
                             continue;
                         }
                     }
-                    // put the response info into a queue tied to this peers connection completed
                     arbitraryDataFileManager.addResponseToPending(peer, responseInfo);
-
-                    if (!arbitraryDataFileManager.getIsConnectingPeer(peer.toString())) {  // If not tracking the peer in adfm
+                    if (!arbitraryDataFileManager.getIsConnectingPeer(peer.toString())) {
                         LOGGER.trace("Forcing Connect for QDN to: {}", peer);
                         arbitraryDataFileManager.setIsConnecting(peer.toString(), true);
                         NetworkData.getInstance().forceConnectPeer(peer);
@@ -251,17 +247,28 @@ public class ArbitraryDataFileRequestThread {
             byte[] hash = Base58.decode(responseInfo.getHash58());
             byte[] signature = Base58.decode(responseInfo.getSignature58());
 
-            // check for null
-            if (signature == null || hash == null || peer == null) {
-                LOGGER.trace("Signature was null or hash was null or peer was null");
+            // We resolve by nodeId only; nodeId is always present, so we need connectedPeer to fetch
+            if (signature == null || hash == null || connectedPeer == null) {
+                LOGGER.trace("Signature was null or hash was null or no connected peer for fetch (by nodeId)");
                 continue;
             }
+
+            // Store responseInfo that carries the nodeId-resolved peer so getPeer/getAvailablePeers use the same connection
+            ArbitraryFileListResponseInfo infoToAdd = new ArbitraryFileListResponseInfo(
+                    responseInfo.getHash58(),
+                    responseInfo.getSignature58(),
+                    connectedPeer,
+                    responseInfo.getNodeId(),
+                    responseInfo.getTimestamp(),
+                    responseInfo.getRequestTime(),
+                    responseInfo.getRequestHops(),
+                    responseInfo.isDirectConnectable());
 
             // We want to process this file, store and map data to process later
             signatureBySignature58.put(responseInfo.getSignature58(), signature);
             responseInfoBySignature58 // Can contain different peers
                     .computeIfAbsent(responseInfo.getSignature58(), signature58 -> new ArrayList<>())
-                    .add(responseInfo);
+                    .add(infoToAdd);
         }
 
         // if there are no signatures, then there is nothing to process and nothing query the database
