@@ -151,7 +151,17 @@ public enum Handshake {
 
 			// If public key matches our public key then we've connected to self
 			// CRITICAL: Check for null to prevent NPE during Network initialization
-			byte[] ourPublicKey = Network.getInstance().getOurPublicKey();
+			// Use the key for this connection type (Network vs NetworkData)
+			byte[] ourPublicKey;
+			switch (peer.getPeerType()) {
+				case Peer.NETWORKDATA:
+					ourPublicKey = NetworkData.getInstance().getOurPublicKey();
+					break;
+				case Peer.NETWORK:
+				default:
+					ourPublicKey = Network.getInstance().getOurPublicKey();
+					break;
+			}
 			if (ourPublicKey != null && Arrays.equals(ourPublicKey, peersPublicKey)) {
 				// If outgoing connection then record destination as self so we don't try again
 				if (peer.isOutbound()) {
@@ -365,7 +375,17 @@ public enum Handshake {
 		public void action(Peer peer) {
 			// Send challenge
 			LOGGER.debug("STARTING CHALLENGE SEND - RESPONSE TO HELLO on {}", peer.getPeerType());
-			byte[] publicKey = Network.getInstance().getOurPublicKey();
+			// Use NetworkData's public key for NetworkData connections, Network's for Network
+			byte[] publicKey;
+			switch (peer.getPeerType()) {
+				case Peer.NETWORKDATA:
+					publicKey = NetworkData.getInstance().getOurPublicKey();
+					break;
+				case Peer.NETWORK:
+				default:
+					publicKey = Network.getInstance().getOurPublicKey();
+					break;
+			}
 			byte[] challenge = peer.getOurChallenge();
 
 			Message challengeMessage = new ChallengeMessage(publicKey, challenge);
