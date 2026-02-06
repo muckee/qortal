@@ -30,7 +30,12 @@ public class ArbitraryDataFileListMessage extends Message {
     private static final int DC_ONLY = 7;
     private static final int DC_AND_RELAY = 8;
 
-    /** Pre v5.5.0 version **/
+//    /** Legacy version v3.2 **/
+//    public ArbitraryDataFileListMessage(byte[] signature, List<byte[]> hashes) {
+//        this(signature, hashes, null, null, null, null);
+//    }
+
+    /** Pre v6.0.0 version **/
     public ArbitraryDataFileListMessage(byte[] signature, List<byte[]> hashes, Long requestTime,
                                         Integer requestHops, String peerAddress, String nodeId, Boolean isRelayPossible) {
         this(signature, hashes,  requestTime, requestHops,  peerAddress, nodeId, isRelayPossible, false);
