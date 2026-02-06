@@ -16,8 +16,10 @@ public class ForeignCoinStatus {
 
     @Schema(description = "Current chain height")
     public int height;
-    
-    public ForeignCoinStatus(boolean enabled, int connectedServers, int knownservers, int height) {
+
+    public ForeignCoinStatus() {} // To Satisfy JAXB
+
+    public ForeignCoinStatus(boolean enabled, int connectedServers, int knownServers, int height) {
         this.enabled = enabled;
         this.connectedServers = connectedServers;
         this.knownServers = knownServers;
