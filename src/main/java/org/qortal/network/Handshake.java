@@ -409,7 +409,17 @@ public enum Handshake {
 				return null;
 			}
 
-			byte[] sharedSecret = Network.getInstance().getSharedSecret(peersPublicKey);
+			// Use same key as CHALLENGE: NetworkData for NetworkData connections, Network for Network
+			byte[] sharedSecret;
+			switch (peer.getPeerType()) {
+				case Peer.NETWORKDATA:
+					sharedSecret = NetworkData.getInstance().getSharedSecret(peersPublicKey);
+					break;
+				case Peer.NETWORK:
+				default:
+					sharedSecret = Network.getInstance().getSharedSecret(peersPublicKey);
+					break;
+			}
 			final byte[] expectedData = Crypto.digest(Bytes.concat(sharedSecret, ourChallenge));
 
 			byte[] data = responseMessage.getData();
@@ -462,7 +472,17 @@ public enum Handshake {
 				return;
 			}
 
-			byte[] sharedSecret = Network.getInstance().getSharedSecret(peersPublicKey);
+			// Use same key as CHALLENGE: NetworkData for NetworkData connections, Network for Network
+			byte[] sharedSecret;
+			switch (peer.getPeerType()) {
+				case Peer.NETWORKDATA:
+					sharedSecret = NetworkData.getInstance().getSharedSecret(peersPublicKey);
+					break;
+				case Peer.NETWORK:
+				default:
+					sharedSecret = Network.getInstance().getSharedSecret(peersPublicKey);
+					break;
+			}
 			final byte[] data = Crypto.digest(Bytes.concat(sharedSecret, peersChallenge));
 
 			// We do this in a new thread as it can take a while...
