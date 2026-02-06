@@ -2422,7 +2422,7 @@ public class Network {
 
         // Add to the list
         this.ourExternalIpAddressHistory.add(host);
-        LOGGER.info("We were told our address is: {}", host);
+        LOGGER.trace("We were told our address is: {}", host);
         // In the beginning we don't have 10 connections, so assume the first client tells the truth
         if (this.ourExternalIpAddress == null) {
 

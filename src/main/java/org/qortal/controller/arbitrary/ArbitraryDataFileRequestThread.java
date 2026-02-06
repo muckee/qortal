@@ -202,24 +202,16 @@ public class ArbitraryDataFileRequestThread {
                     .orElse(null);
             }
 
-            // Address-based peer only for connect path when we need a Peer object for pending/forceConnect
-            Peer peer = responseInfo.getPeer(completeConnectedPeers);
-            if (peer == null) {
-                peer = completeConnectedPeers.get(responseInfo.getPeerData());
-            }
-
             if (isDirectlyConnectable) {
                 if (connectedPeer == null) {
                     // Peer not connected - create Peer from PeerData if needed for pending/connect
-                    if (peer == null) {
-                        PeerData peerData = responseInfo.getPeerData();
-                        if (peerData != null) {
-                            peer = new Peer(peerData, Peer.NETWORKDATA);
-                            peer.setIsDataPeer(true);
-                        } else {
-                            LOGGER.warn("Cannot create Peer: PeerData is null for responseInfo with hash {}", responseInfo.getHash58());
-                            continue;
-                        }
+                    Peer peer;
+                    PeerData peerData = responseInfo.getPeerData();
+                    if (peerData != null) {
+                        peer = new Peer(peerData, Peer.NETWORKDATA);
+                    } else {
+                        LOGGER.warn("Cannot create Peer: PeerData is null for responseInfo with hash {}", responseInfo.getHash58());
+                        continue;
                     }
                     arbitraryDataFileManager.addResponseToPending(peer, responseInfo);
                     if (!arbitraryDataFileManager.getIsConnectingPeer(peer.toString())) {
@@ -230,7 +222,7 @@ public class ArbitraryDataFileRequestThread {
                     }
                     continue;
                 }
-                if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null || peer == null) {
+                if (now - responseInfo.getTimestamp() >= ArbitraryDataManager.ARBITRARY_RELAY_TIMEOUT || responseInfo.getSignature58() == null) {
                     LOGGER.trace("TIMED OUT in ArbitraryDataFileRequestThread");
                     continue;
                 }
@@ -238,9 +230,6 @@ public class ArbitraryDataFileRequestThread {
 
             // Skip if already requesting, but don't remove, as we might want to retry later
             if (arbitraryDataFileManager.arbitraryDataFileRequests.containsKey(responseInfo.getHash58())) {
-            //     // Already requesting - leave this attempt for later
-            //     // @ToDo : don't think this next statement is true, this is why we are queueing up multiple requests for the same thing
-            //     //arbitraryDataFileManager.addResponse(responseInfo); // don't remove -> adding back, because it was removed already above
                 continue;
             }
 
@@ -340,9 +329,6 @@ public class ArbitraryDataFileRequestThread {
                                     try {
                                         GetArbitraryDataFileMessage message = new GetArbitraryDataFileMessage(
                                             data.getSignature(), metadataHash);
-                                        
-                                        
-                                        
                                         // Queue message through PeerSendManager (same as batch system)
                                         PeerSendManagement.getInstance().getOrCreateSendManager(peer)
                                             .queueMessage(message, metadataHash58);
