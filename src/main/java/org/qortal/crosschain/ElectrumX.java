@@ -614,12 +614,12 @@ public class ElectrumX extends BitcoinyBlockchainProvider {
 	}
 
 	 // Class utility methods for status
-	 public int getConnectedServerCount() {
-        return this.servers.size();
+	public int getConnectedServerCount() {
+		return this.connections.size();
     }
 
     public int getKnownServerCount() {
-        return this.connections.size();
+		return this.servers.size();
     }
 
 	// Class-private utility methods
