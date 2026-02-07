@@ -264,7 +264,7 @@ public class ArbitraryDataReader {
             throw e;
 
         } catch (DataException e) {
-            LOGGER.info("DataException when trying to load QDN resource", e);
+            LOGGER.debug("DataException when trying to load QDN resource", e);
             this.deleteWorkingDirectory();
             throw e;
 

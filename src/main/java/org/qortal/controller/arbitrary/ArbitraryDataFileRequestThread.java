@@ -190,19 +190,30 @@ public class ArbitraryDataFileRequestThread {
             Boolean isDirectlyConnectable = responseInfo.isDirectConnectable();
             LOGGER.trace("Is Directly Connectable: {}", isDirectlyConnectable);
 
-            // Always resolve peer by nodeId when present (nodeId is always present for file list responses)
-            String nodeId = responseInfo.getNodeId();
+            // Direct: we're connected to the content holder — resolve by nodeId.
+            // Relay: we're connected to the sender (relay), not the content holder — resolve by PeerData only.
             Peer connectedPeer = null;
-            if (nodeId != null) {
-                connectedPeer = NetworkData.getInstance().getImmutableConnectedPeers().stream()
-                    .filter(peerEa ->
-                        peerEa.getPeersNodeId() != null &&
-                        peerEa.getPeersNodeId().equals(nodeId))
-                    .findFirst()
-                    .orElse(null);
+            if (Boolean.TRUE.equals(isDirectlyConnectable)) {
+                String nodeId = responseInfo.getNodeId();
+                if (nodeId != null) {
+                    connectedPeer = NetworkData.getInstance().getImmutableConnectedPeers().stream()
+                        .filter(peerEa ->
+                            peerEa.getPeersNodeId() != null &&
+                            peerEa.getPeersNodeId().equals(nodeId))
+                        .findFirst()
+                        .orElse(null);
+                }
+            } else {
+                PeerData peerData = responseInfo.getPeerData();
+                if (peerData != null) {
+                    connectedPeer = NetworkData.getInstance().getPeerByPeerData(peerData);
+                    if (connectedPeer != null) {
+                        LOGGER.trace("Relay: resolved peer by PeerData: {}", peerData.getAddress());
+                    }
+                }
             }
 
-            if (isDirectlyConnectable) {
+            if (Boolean.TRUE.equals(isDirectlyConnectable)) {
                 if (connectedPeer == null) {
                     // Peer not connected - create Peer from PeerData if needed for pending/connect
                     Peer peer;
@@ -288,6 +299,8 @@ public class ArbitraryDataFileRequestThread {
                 
                 String signature58 = Base58.encode(data.getSignature());
                 String metadataHash58 = Base58.encode(metadataHash);
+                // Cache metadata hash so receivedArbitraryDataFile can skip DB fetch for non-metadata chunks
+                arbitraryDataFileManager.setMetadataHashForSignature(data.getSignature(), metadataHash);
                 List<ArbitraryFileListResponseInfo> responseInfoList = responseInfoBySignature58.get(signature58);
                 
                 if (responseInfoList == null || responseInfoList.isEmpty()) {

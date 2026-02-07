@@ -109,7 +109,24 @@ public class ArbitraryDataFileManager extends Thread {
     // Key format: signature58 + "|" + peerAddress, Value: timestamp when validation failed
     private final Map<String, Long> invalidHashCooldowns = new ConcurrentHashMap<>();
     private static final long INVALID_HASH_COOLDOWN_MS = 10 * 60 * 1000L; // 10 minutes
-    
+
+    // Metadata hash by signature (signature58 -> entry). Populated when we have tx data at request time;
+    // used in receivedArbitraryDataFile to avoid DB fetch for every chunk - only fetch when chunk is metadata.
+    // Entry stores hash + last-insert time for TTL cleanup (entries older than 1 hour are removed).
+    private final Map<String, MetadataHashEntry> metadataHashBySignature58 = new ConcurrentHashMap<>();
+    private static final long METADATA_HASH_CACHE_TTL_MS = 60 * 60 * 1000L; // 1 hour
+    private static final long METADATA_HASH_CACHE_CLEANUP_INTERVAL_MS = 15 * 60 * 1000L; // run cleanup every 15 minutes
+
+    private static class MetadataHashEntry {
+        final byte[] metadataHash;
+        final long lastUpdatedMs;
+
+        MetadataHashEntry(byte[] metadataHash, long lastUpdatedMs) {
+            this.metadataHash = metadataHash;
+            this.lastUpdatedMs = lastUpdatedMs;
+        }
+    }
+
     // Relay cache configuration
     private static final String RELAY_CACHE_DIR_NAME = "relay-cache";
     private static final long RELAY_CACHE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000L; // 24 hours
@@ -566,6 +583,11 @@ public class ArbitraryDataFileManager extends Thread {
         cleaner.scheduleAtFixedRate(() -> {
             cleanupRelayCache();
         }, RELAY_CACHE_CLEANUP_INTERVAL_MS, RELAY_CACHE_CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
+
+        // Clean up metadata-hash cache: remove entries older than 1 hour (runs every 15 minutes)
+        cleaner.scheduleAtFixedRate(() -> {
+            cleanupMetadataHashCache();
+        }, METADATA_HASH_CACHE_CLEANUP_INTERVAL_MS, METADATA_HASH_CACHE_CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
     public static ArbitraryDataFileManager getInstance() {
@@ -573,6 +595,49 @@ public class ArbitraryDataFileManager extends Thread {
             instance = new ArbitraryDataFileManager();
 
         return instance;
+    }
+
+    /**
+     * Cache metadata hash for a signature so we can avoid DB fetch for non-metadata chunks.
+     * Call this when we have ArbitraryTransactionData (e.g. when processing file list responses).
+     * Each insertion updates the entry's timestamp so recently requested resources stay in the cache.
+     */
+    public void setMetadataHashForSignature(byte[] signature, byte[] metadataHash) {
+        if (signature == null || metadataHash == null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        metadataHashBySignature58.put(Base58.encode(signature), new MetadataHashEntry(metadataHash, now));
+    }
+
+    /**
+     * Get cached metadata hash for a signature, or null if not cached.
+     */
+    public byte[] getMetadataHashForSignature(byte[] signature) {
+        if (signature == null) {
+            return null;
+        }
+        MetadataHashEntry entry = metadataHashBySignature58.get(Base58.encode(signature));
+        return entry != null ? entry.metadataHash : null;
+    }
+
+    /**
+     * Remove metadata-hash cache entries older than {@link #METADATA_HASH_CACHE_TTL_MS}.
+     */
+    private void cleanupMetadataHashCache() {
+        long now = System.currentTimeMillis();
+        long cutoff = now - METADATA_HASH_CACHE_TTL_MS;
+        int removed = 0;
+        for (Iterator<Map.Entry<String, MetadataHashEntry>> it = metadataHashBySignature58.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, MetadataHashEntry> e = it.next();
+            if (e.getValue().lastUpdatedMs < cutoff) {
+                it.remove();
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            LOGGER.debug("Cleaned up {} stale metadata-hash cache entries (older than 1 hour)", removed);
+        }
     }
 
     @Override
@@ -1051,20 +1116,26 @@ public class ArbitraryDataFileManager extends Thread {
             return;
         }
 
-        ArbitraryTransactionData arbitraryTransactionData = null;
-        // Fetch the transaction data
-        try (final Repository repository = RepositoryManager.getRepository()) {
-            //arbitraryTransactionDataList.addAll(
-            //        ArbitraryTransactionUtils.fetchTransactionDataList(repository, new ArrayList<>(signatureBySignature58.values())));
-            arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
-        } catch (DataException e) {
-            LOGGER.warn("Unable to fetch transaction data from DB: {}", e.getMessage());
-        }
+        // Avoid DB fetch for every chunk: only fetch when this chunk might be the metadata chunk.
+        byte[] cachedMetadataHash = getMetadataHashForSignature(signature);
+        if (cachedMetadataHash != null && !Arrays.equals(cachedMetadataHash, hash)) {
+            // Cached metadata hash exists and this chunk is not it - skip DB entirely
+        } else {
+            ArbitraryTransactionData arbitraryTransactionData = null;
+            // Fetch the transaction data (cache miss, or this chunk is the metadata chunk)
+            try (final Repository repository = RepositoryManager.getRepository()) {
+                arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
+            } catch (DataException e) {
+                LOGGER.warn("Unable to fetch transaction data from DB: {}", e.getMessage());
+            }
 
-        // If this is a metadata file then we need to update the cache
-        if (arbitraryTransactionData != null && arbitraryTransactionData.getMetadataHash() != null) {
-            if (Arrays.equals(arbitraryTransactionData.getMetadataHash(), hash)) {
-                ArbitraryDataCacheManager.getInstance().addToUpdateQueue(arbitraryTransactionData);
+            // If this is a metadata file then we need to update the cache
+            if (arbitraryTransactionData != null && arbitraryTransactionData.getMetadataHash() != null) {
+                if (Arrays.equals(arbitraryTransactionData.getMetadataHash(), hash)) {
+                    ArbitraryDataCacheManager.getInstance().addToUpdateQueue(arbitraryTransactionData);
+                    // Remove from our metadata-hash cache so we don't retain entries forever
+                    metadataHashBySignature58.remove(Base58.encode(signature));
+                }
             }
         }
 
@@ -1185,6 +1256,23 @@ public class ArbitraryDataFileManager extends Thread {
                 // Remove from the list so that a different peer is tried next time
                 removeDirectConnectionInfo(directConnectionInfo);
 
+                // If we have nodeId, try to use an already-connected peer (same logic as ArbitraryDataFileRequestThread)
+                String nodeId = directConnectionInfo.getNodeId();
+                if (nodeId != null) {
+                    Peer connectedPeer = NetworkData.getInstance().getImmutableConnectedPeers().stream()
+                            .filter(peer -> peer.getPeersNodeId() != null && peer.getPeersNodeId().equals(nodeId))
+                            .findFirst()
+                            .orElse(null);
+                    if (connectedPeer != null) {
+                        success = ArbitraryDataFileListManager.getInstance().fetchArbitraryDataFileList(connectedPeer, signature);
+                        if (success) {
+                            ArbitraryDataFileListManager.getInstance().addToSignatureRequests(signature58, false, true);
+                        }
+                        // If not success, fall through to address-based connection attempts below
+                    }
+                }
+
+                if (!success) {
                 String peerAddressString = directConnectionInfo.getPeerAddress();
 
                 // Parse the peer address to find the host and port
@@ -1247,6 +1335,7 @@ public class ArbitraryDataFileManager extends Thread {
                     ArbitraryDataFileListManager.getInstance().addToSignatureRequests(signature58, false, true);
                 }
 
+                } 
             }
         } catch (InterruptedException e) {
             // Do nothing

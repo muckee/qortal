@@ -1845,7 +1845,7 @@ public class NetworkData {
             }
     
             if (unexpectedMessage) {
-                LOGGER.warn("[{}] Unexpected {} message from {}, expected {}",
+                LOGGER.debug("[{}] Unexpected {} message from {}, expected {}",
                         peer.getPeerConnectionId(),
                         message.getType().name(),
                         peer,
@@ -1857,7 +1857,7 @@ public class NetworkData {
             Handshake newHandshakeStatus = effectiveHandshakeStatus.onMessage(peer, message);
     
             if (newHandshakeStatus == null) {
-                LOGGER.warn("[{}] Handshake failure with peer {} message {}",
+                LOGGER.debug("[{}] Handshake failure with peer {} message {}",
                         peer.getPeerConnectionId(), peer, message.getType().name());
                 peer.disconnect("handshake failure");
                 return;
