@@ -626,6 +626,9 @@ public class AddressesResource {
 		}
 	}
 
+	/*
+	@depricated - sponsorship was removed when the ecosystem switched to mintership
+	 */
 	@GET
 	@Path("/sponsorship/{address}")
 	@Operation(
@@ -639,6 +642,7 @@ public class AddressesResource {
 			}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
+	@Deprecated
 	public SponsorshipReport getSponsorshipReport(
 			@PathParam("address") String address,
 			@QueryParam(("realRewardShareRecipient")) String[] realRewardShareRecipients) {
@@ -657,6 +661,9 @@ public class AddressesResource {
 		}
 	}
 
+	/*
+	@depricated - sponsorship was removed when the ecosystem switched to mintership
+	 */
 	@GET
 	@Path("/sponsorship/{address}/sponsor")
 	@Operation(
@@ -669,6 +676,7 @@ public class AddressesResource {
 					)
 			}
 	)
+	@Deprecated
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.ADDRESS_UNKNOWN,  ApiError.REPOSITORY_ISSUE})
 	public SponsorshipReport getSponsorshipReportForSponsor(
 			@PathParam("address") String address,
