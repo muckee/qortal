@@ -14,15 +14,11 @@ public class ForeignCoinStatus {
     @Schema(description = "Number of known ElectrumX servers")
     public int knownServers;
 
-    @Schema(description = "Current chain height")
-    public int height;
-
     public ForeignCoinStatus() {} // To Satisfy JAXB
 
-    public ForeignCoinStatus(boolean enabled, int connectedServers, int knownServers, int height) {
+    public ForeignCoinStatus(boolean enabled, int connectedServers, int knownServers) {
         this.enabled = enabled;
         this.connectedServers = connectedServers;
         this.knownServers = knownServers;
-        this.height = height;
     }
 }

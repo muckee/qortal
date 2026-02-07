@@ -45,7 +45,7 @@ public class CrossChainDigibyteResource {
     @Path("/status")
     @Operation(
         summary = "Returns wallet status, connected server count and known server count",
-        description = "Returns the status of the wallet and the number of electrumX servers available/connected and blockchain height",
+        description = "Returns the status of the wallet and the number of electrumX servers available/connected",
         responses = {
            @ApiResponse(
               content = @Content(
@@ -61,19 +61,49 @@ public class CrossChainDigibyteResource {
         boolean isEnabled = digibyte != null;
 		int connections = 0;
         int known = 0;
-        int height = 0;
 		if (isEnabled && digibyte.getBlockchainProvider() instanceof ElectrumX) {
 			connections = ((ElectrumX) digibyte.getBlockchainProvider()).getConnectedServerCount();
             known = ((ElectrumX) digibyte.getBlockchainProvider()).getKnownServerCount();
-            try {
-                height = ((ElectrumX) digibyte.getBlockchainProvider()).getCurrentHeight();
-            } catch (ForeignBlockchainException e ) {
-                // ignore, leave set to 0
-            }
+
 		}
 
-		return new ForeignCoinStatus(isEnabled, connections, known, height);
+		return new ForeignCoinStatus(isEnabled, connections, known);
     }
+
+	@POST
+	@Path("/start")
+	@Operation(
+			summary = "Start Digibyte Electrum Connections",
+			description = "Start Digibyte Electrum Connections",
+			responses = {
+					@ApiResponse(
+							description = "true if Digibyte Wallet Started",
+							content = @Content(
+									schema = @Schema(
+											type = "string"
+									)
+							)
+					)
+			}
+	)
+	@SecurityRequirement(name = "apiKey")
+	public String startDigibyteSingleton(
+			@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
+
+		Security.checkApiCallAllowed(request);
+		Settings.getInstance().enableWallet("DGB");
+		Digibyte digibyte = Digibyte.getInstance();
+
+		try {
+			Thread.sleep(100);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+
+		boolean started = digibyte != null;
+
+		return Boolean.toString(started);
+	}
 
 	@GET
 	@Path("/height")
@@ -104,43 +134,6 @@ public class CrossChainDigibyteResource {
 		} catch (ForeignBlockchainException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.FOREIGN_BLOCKCHAIN_NETWORK_ISSUE);
 		}
-	}
-
-	@POST
-	@Path("/start")
-	//@Produces(MediaType.TEXT_PLAIN)
-	//@Consumes(MediaType.APPLICATION_JSON) // optional, only if you accept JSON
-	@Operation(
-			summary = "Start Digibyte Electrum Connections",
-			description = "Start Digibyte Electrum Connections",
-			responses = {
-				@ApiResponse(
-					description = "true if Digibyte Wallet Started",
-					content = @Content(
-						schema = @Schema(
-							type = "string"
-						)
-					)
-				)
-			}
-	)
-	@SecurityRequirement(name = "apiKey")
-	public String startDigibyteSingleton(
-			@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
-
-		Security.checkApiCallAllowed(request);
-		Settings.getInstance().enableWallet("DGB");
-		Digibyte digibyte = Digibyte.getInstance();
-
-		try {
-			Thread.sleep(100);
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-		}
-
-		boolean started = digibyte != null;
-
-		return Boolean.toString(started);
 	}
 
 	@POST
