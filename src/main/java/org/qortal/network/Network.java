@@ -34,6 +34,7 @@ import java.nio.channels.*;
 import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -90,6 +91,9 @@ public class Network {
             "node2.qortalnodes.live", "node3.qortalnodes.live", "node4.qortalnodes.live", "node5.qortalnodes.live",
             "node6.qortalnodes.live", "node7.qortalnodes.live", "node8.qortalnodes.live", "ubuntu-monster.qortal.org"
     };
+
+
+ 
 
     private static final long NETWORK_EPC_KEEPALIVE = 5L; // seconds
 
@@ -934,10 +938,15 @@ public class Network {
 
     class NetworkProcessor extends ExecuteProduceConsume {
 
+        /** Max MessageTasks produced in a row before forcing a channel task (select/read/write). Prevents starving I/O. */
+        private static final int MAX_MESSAGE_TASKS_BEFORE_CHANNEL_TASK = 15;
+
         private final Logger LOGGER = LogManager.getLogger(NetworkProcessor.class);
 
         private final AtomicLong nextConnectTaskTimestamp = new AtomicLong(0L); // ms - try first connect once NTP syncs
         private final AtomicLong nextBroadcastTimestamp = new AtomicLong(0L); // ms - try first broadcast once NTP syncs
+        /** Number of MessageTasks produced since last channel task; used for fair scheduling. */
+        private final AtomicInteger messageTasksSinceLastChannelTask = new AtomicInteger(0);
 
         private Iterator<SelectionKey> channelIterator = null;
 
@@ -955,9 +964,17 @@ public class Network {
         protected Task produceTask(boolean canBlock) throws InterruptedException {
             Task task;
 
-            task = maybeProducePeerMessageTask();
-            if (task != null) {
-                return task;
+            // Fair scheduling: cap MessageTasks in a row so select() / ChannelReadTask / ChannelWriteTask get to run.
+            // Prevents task-queue starvation and TCP backpressure under load (e.g. sync, block/transaction flood).
+            if (messageTasksSinceLastChannelTask.get() >= MAX_MESSAGE_TASKS_BEFORE_CHANNEL_TASK) {
+                messageTasksSinceLastChannelTask.set(0);
+                task = null;
+            } else {
+                task = maybeProducePeerMessageTask();
+                if (task != null) {
+                    messageTasksSinceLastChannelTask.incrementAndGet();
+                    return task;
+                }
             }
 
             final Long now = NTP.getTime();
@@ -977,6 +994,8 @@ public class Network {
                 return task;
             }
 
+            // Run channel I/O (select then read or write). Reset so we can produce more MessageTasks next round.
+            messageTasksSinceLastChannelTask.set(0);
             // Only this method can block to reduce CPU spin
             return maybeProduceChannelTask(canBlock);
         }
@@ -1793,7 +1812,7 @@ public class Network {
      */
     public void onMessage(Peer peer, Message message) {
         if (message != null) {
-            LOGGER.trace("[{}} Processing {} message with ID {} from peer {}", peer.getPeerConnectionId(),
+            LOGGER.trace("[{}] Processing {} message with ID {} from peer {}", peer.getPeerConnectionId(),
                     message.getType().name(), message.getId(), peer);
         }
 
@@ -2762,7 +2781,7 @@ public class Network {
 
             // Use PeerSendManager for retry logic and backpressure handling
             try {
-                PeerSendManager sendManager = PeerSendManagement.getInstance().getOrCreateSendManager(peer);
+                PeerSendManager sendManager = PeerSendManagement.getInstance().getOrCreateSendManager(peer, false);
                 
                 
                 // Calculate estimated message size for queue management
