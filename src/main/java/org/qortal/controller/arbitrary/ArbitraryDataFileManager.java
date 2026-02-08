@@ -110,6 +110,20 @@ public class ArbitraryDataFileManager extends Thread {
     private final Map<String, Long> invalidHashCooldowns = new ConcurrentHashMap<>();
     private static final long INVALID_HASH_COOLDOWN_MS = 10 * 60 * 1000L; // 10 minutes
 
+    /** In-flight request: hash58 -> (signature58, peerAddress). Cleared on receive or when cleanup expires the request. */
+    private final Map<String, InFlightRequestInfo> inFlightRequestsByHash = new ConcurrentHashMap<>();
+    /** Peers we already tried for this chunk (timed out or in flight). Key: signature58 + "|" + hash58. Used to retry from another peer. */
+    private final Map<String, Set<String>> triedPeersByChunk = new ConcurrentHashMap<>();
+
+    private static class InFlightRequestInfo {
+        final String signature58;
+        final String peerAddress;
+        InFlightRequestInfo(String signature58, String peerAddress) {
+            this.signature58 = signature58;
+            this.peerAddress = peerAddress;
+        }
+    }
+
     // Metadata hash by signature (signature58 -> entry). Populated when we have tx data at request time;
     // used in receivedArbitraryDataFile to avoid DB fetch for every chunk - only fetch when chunk is metadata.
     // Entry stores hash + last-insert time for TTL cleanup (entries older than 1 hour are removed).
@@ -767,6 +781,38 @@ public class ArbitraryDataFileManager extends Thread {
         return (now - cooldownTime) < INVALID_HASH_COOLDOWN_MS;
     }
 
+    /**
+     * Records that we requested a chunk from a peer. Used so we can retry from a different peer on timeout.
+     */
+    public void recordChunkRequested(String hash58, String signature58, String peerAddress) {
+        inFlightRequestsByHash.put(hash58, new InFlightRequestInfo(signature58, peerAddress));
+        triedPeersByChunk.computeIfAbsent(signature58 + "|" + hash58, k -> ConcurrentHashMap.newKeySet()).add(peerAddress);
+    }
+
+    /**
+     * Clears in-flight and tried state when we successfully receive the chunk.
+     */
+    public void clearChunkReceived(String hash58, String signature58) {
+        inFlightRequestsByHash.remove(hash58);
+        triedPeersByChunk.remove(signature58 + "|" + hash58);
+    }
+
+    /**
+     * Returns peer addresses we already tried for this chunk (so we don't retry from the same peer).
+     */
+    public Set<String> getTriedPeersForChunk(String signature58, String hash58) {
+        Set<String> tried = triedPeersByChunk.get(signature58 + "|" + hash58);
+        return tried != null ? Collections.unmodifiableSet(new HashSet<>(tried)) : Collections.emptySet();
+    }
+
+    /**
+     * Clears tried-peers state for a signature when its batch is removed (prevents memory leak).
+     */
+    public void clearTriedPeersForSignature(String signature58) {
+        String prefix = signature58 + "|";
+        triedPeersByChunk.keySet().removeIf(k -> k != null && k.startsWith(prefix));
+    }
+
     public void cleanupRequestCache(Long now) {
         if (now == null) {
             return;
@@ -781,6 +827,8 @@ public class ArbitraryDataFileManager extends Thread {
                     LOGGER.trace("Not removing expired hash {} from arbitraryDataFileRequests - still queued in peer send queue", hash58);
                     return false;
                 }
+                // Chunk will become re-requestable; peer already in triedPeersByChunk (added when we sent)
+                inFlightRequestsByHash.remove(hash58);
                 return true;
             }
             return false;
@@ -1019,7 +1067,7 @@ public class ArbitraryDataFileManager extends Thread {
                     
                     // Use estimated size WITHOUT loading data into memory
                     int estimatedSize = 512 * 1024;  // Typical chunk size (~500KB)
-                    PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer).queueMessageFactory(factory, estimatedSize);
+                    PeerSendManagement.getInstance().getOrCreateSendManager(requestingPeer, true).queueMessageFactory(factory, estimatedSize);
           
                 } catch (MessageException e) {
                     LOGGER.debug("Failed to queue ArbitraryDataFileMessage for relay: {}", e.getMessage());
@@ -1109,6 +1157,10 @@ public class ArbitraryDataFileManager extends Thread {
             
             // Remove from guard map now that we've successfully validated and saved
             removeGuardTracking(hash58);
+            // Clear in-flight/tried state and notify request thread to remove chunk from batch pending (enables retry on timeout)
+            String signature58 = Base58.encode(signature);
+            clearChunkReceived(hash58, signature58);
+            ArbitraryDataFileRequestThread.getInstance().onChunkReceived(signature58, hash58);
         } catch (DataException de) {
             LOGGER.error("FAILED to write hash chunk to disk!");
             // Clear fileContent even on save failure to free memory
@@ -1502,7 +1554,7 @@ public class ArbitraryDataFileManager extends Thread {
                 
                 // Estimate chunk size (~500KB typical)
                 int estimatedSize = 512 * 1024;
-                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageFactory(factory, estimatedSize);
+                PeerSendManagement.getInstance().getOrCreateSendManager(peer, true).queueMessageFactory(factory, estimatedSize);
                 return; // Early return - found in permanent storage
             } else {
                 LOGGER.debug("Hash {} does not exist in permanent storage, queueing send to {}", hash58, peer);
@@ -1535,7 +1587,7 @@ public class ArbitraryDataFileManager extends Thread {
                 };
                 
                 int estimatedSize = 512 * 1024;
-                PeerSendManagement.getInstance().getOrCreateSendManager(peer).queueMessageFactory(factory, estimatedSize);
+                PeerSendManagement.getInstance().getOrCreateSendManager(peer, true).queueMessageFactory(factory, estimatedSize);
                 return; // Early return - found in relay cache, skip all relay logic
             }
             
@@ -1672,7 +1724,7 @@ public class ArbitraryDataFileManager extends Thread {
                         try {
                             GetArbitraryDataFileMessage getArbitraryDataFileMessage = new GetArbitraryDataFileMessage(sig, hash);
                             getArbitraryDataFileMessage.setId(originalMessage.getId());
-                            PeerSendManagement.getInstance().getOrCreateSendManager(relayPeer).queueMessage(getArbitraryDataFileMessage);
+                            PeerSendManagement.getInstance().getOrCreateSendManager(relayPeer, true).queueMessage(getArbitraryDataFileMessage);
                             LOGGER.debug("Successfully sent GetArbitraryDataFileMessage for hash {} to relay peer {} ({}:{})", 
                                     hash58, relayPeer, 
                                     relayPeer.getPeerData().getAddress().getHost(), 

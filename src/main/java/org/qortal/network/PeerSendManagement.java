@@ -16,8 +16,8 @@ public class PeerSendManagement {
 
     private final Map<String, PeerSendManager> peerSendManagers = new ConcurrentHashMap<>();
 
-    public PeerSendManager getOrCreateSendManager(Peer peer) {
-        return peerSendManagers.computeIfAbsent(peer.toString(), p -> new PeerSendManager(peer));
+    public PeerSendManager getOrCreateSendManager(Peer peer, boolean isNetworkDataPeer) {
+        return peerSendManagers.computeIfAbsent(peer.toString(), p -> new PeerSendManager(peer, isNetworkDataPeer));
     }
 
     /**
