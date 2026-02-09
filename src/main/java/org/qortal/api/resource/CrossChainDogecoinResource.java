@@ -85,7 +85,7 @@ public class CrossChainDogecoinResource {
 			@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
 
 		Security.checkApiCallAllowed(request);
-		Settings.getInstance().enableWallet("LTC");
+		Settings.getInstance().enableWallet("DOGE");
 		Dogecoin doge = Dogecoin.getInstance();
 
 		try {

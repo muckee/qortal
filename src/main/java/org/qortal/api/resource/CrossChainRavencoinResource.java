@@ -85,7 +85,7 @@ public class CrossChainRavencoinResource {
 			@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
 
 		Security.checkApiCallAllowed(request);
-		Settings.getInstance().enableWallet("LTC");
+		Settings.getInstance().enableWallet("RVN");
 		Ravencoin rvn = Ravencoin.getInstance();
 
 		try {
