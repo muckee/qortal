@@ -1,5 +1,6 @@
 package org.qortal.controller.arbitrary;
 
+import java.nio.file.*;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,11 +55,6 @@ import com.google.common.net.InetAddresses;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 
 public class ArbitraryDataFileManager extends Thread {
@@ -144,7 +140,8 @@ public class ArbitraryDataFileManager extends Thread {
     // Relay cache configuration
     private static final String RELAY_CACHE_DIR_NAME = "relay-cache";
     private static final long RELAY_CACHE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000L; // 24 hours
-    private static final int RELAY_CACHE_CLEANUP_TRIGGER = 2000; // Trigger cleanup at ~1GB (assuming 500KB avg per file)
+    // Initially set to 1GB, adjust based on estimated cache size
+    private int RELAY_CACHE_CLEANUP_TRIGGER = 2000; // Trigger cleanup at ~1GB (assuming 500KB avg per file)
     private static final long RELAY_CACHE_MIN_FILE_AGE_MS = 5 * 60 * 1000L; // 5 minutes minimum age before deletion
     private Path relayCacheDir;
     private final AtomicInteger relayCacheFileCount = new AtomicInteger(0);
@@ -164,8 +161,7 @@ public class ArbitraryDataFileManager extends Thread {
      */
     private void initializeRelayCache() {
         try {
-            String tempDir = System.getProperty("java.io.tmpdir");
-            relayCacheDir = Paths.get(tempDir, "qortal", RELAY_CACHE_DIR_NAME);
+            this.relayCacheDir = Paths.get(Settings.getInstance().getDataPath() + File.separator + RELAY_CACHE_DIR_NAME);
             Files.createDirectories(relayCacheDir);
             
             // Count existing files on startup
@@ -177,11 +173,12 @@ public class ArbitraryDataFileManager extends Thread {
                         fileCount++;
                     }
                 }
-                relayCacheFileCount.set(fileCount);
+                this.relayCacheFileCount.set(fileCount);
                 LOGGER.debug("Initialized relay cache directory: {} ({} existing files)", relayCacheDir, fileCount);
             } else {
                 LOGGER.debug("Initialized relay cache directory: {}", relayCacheDir);
             }
+            cleanupRelayCache();  // Run cleanup in case disk conditions changed while node was offline
         } catch (IOException e) {
             LOGGER.error("Failed to initialize relay cache directory: {}", e.getMessage());
             relayCacheDir = null;
@@ -197,7 +194,11 @@ public class ArbitraryDataFileManager extends Thread {
         if (relayCacheDir == null) {
             return null;
         }
-        return relayCacheDir.resolve(hash58 + ".tmp");
+        try {
+            return relayCacheDir.resolve(hash58 + ".tmp");
+        } catch (InvalidPathException e) {
+            return null;
+        }
     }
     
     /**
@@ -207,9 +208,9 @@ public class ArbitraryDataFileManager extends Thread {
      * @param data The chunk data
      * @return true if saved successfully
      */
-    private boolean saveToRelayCache(String hash58, byte[] data) {
+    private void saveToRelayCache(String hash58, byte[] data) {
         if (relayCacheDir == null || data == null) {
-            return false;
+            return;
         }
         
         try {
@@ -231,12 +232,10 @@ public class ArbitraryDataFileManager extends Thread {
                 out.write(data);
                 out.flush();
             }
-            
-            return true;
+
         } catch (IOException e) {
             LOGGER.warn("Failed to save to relay cache for hash {}: {}", hash58, e.getMessage());
             relayCacheFileCount.decrementAndGet(); // Rollback counter on failure
-            return false;
         }
     }
     
@@ -252,10 +251,12 @@ public class ArbitraryDataFileManager extends Thread {
         
         try {
             Path cachePath = getRelayCachePath(hash58);
-            if (Files.exists(cachePath)) {
-                byte[] data = Files.readAllBytes(cachePath);
-               
-                return data;
+            try {
+                if (Files.exists(cachePath)) {
+                    return Files.readAllBytes(cachePath);
+                }
+            } catch (SecurityException e) { // unable to read directory or file
+                return null;
             }
         } catch (IOException e) {
             LOGGER.warn("Failed to load from relay cache for hash {}: {}", hash58, e.getMessage());
@@ -322,7 +323,8 @@ public class ArbitraryDataFileManager extends Thread {
                     // Use up to 10% of the headroom, with min/max bounds
                     long calculatedSize = (long)(qortalHeadroom * 0.10);
                     maxAllowedSize = Math.max(500L * 1024 * 1024, // Min 500MB
-                                     Math.min(calculatedSize, 5L * 1024 * 1024 * 1024)); // Max 5GB
+                                              calculatedSize);    // 10% of free Qortal QDN Space
+                    RELAY_CACHE_CLEANUP_TRIGGER = (int)(maxAllowedSize/(5L * 1025 * 1024));
                     LOGGER.debug("Relay cache limit: {} MB (based on {}% of {} MB headroom)", 
                             maxAllowedSize / (1024 * 1024), 
                             (int)(0.10 * 100),
@@ -500,9 +502,9 @@ public class ArbitraryDataFileManager extends Thread {
             });
             
             // Update file count
-            relayCacheFileCount.set(0);
-            
             int failed = failedCount.get();
+            relayCacheFileCount.set(failed);
+
             if (failed > 0) {
                 LOGGER.warn("Erased relay cache: deleted {} files, {} failed", deletedCount - failed, failed);
             } else {
