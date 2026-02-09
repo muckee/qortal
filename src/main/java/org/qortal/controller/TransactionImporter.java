@@ -58,6 +58,7 @@ public class TransactionImporter extends Thread {
     public TransactionImporter() {
         signatureMessageScheduler.scheduleAtFixedRate(this::processNetworkTransactionSignaturesMessage, 60, 1, TimeUnit.SECONDS);
         getTransactionMessageScheduler.scheduleAtFixedRate(this::processNetworkGetTransactionMessages, 60, 1, TimeUnit.SECONDS);
+        getUnconfirmedTransactionsMessageScheduler.scheduleAtFixedRate(this::processNetworkGetUnconfirmedTransactionsMessages, 60, 1, TimeUnit.SECONDS);
     }
 
     public static synchronized TransactionImporter getInstance() {
@@ -91,6 +92,27 @@ public class TransactionImporter extends Thread {
     public void shutdown() {
         isStopping = true;
         this.interrupt();
+
+        // Shutdown all schedulers
+        LOGGER.info("Shutting down TransactionImporter schedulers");
+        try {
+            getTransactionMessageScheduler.shutdownNow();
+            getUnconfirmedTransactionsMessageScheduler.shutdownNow();
+            signatureMessageScheduler.shutdownNow();
+
+            if (!getTransactionMessageScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("getTransactionMessageScheduler did not terminate in time");
+            }
+            if (!getUnconfirmedTransactionsMessageScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("getUnconfirmedTransactionsMessageScheduler did not terminate in time");
+            }
+            if (!signatureMessageScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("signatureMessageScheduler did not terminate in time");
+            }
+        } catch (InterruptedException e) {
+            LOGGER.warn("Interrupted while waiting for TransactionImporter schedulers to terminate", e);
+            Thread.currentThread().interrupt();
+        }
     }
 
 
@@ -244,6 +266,13 @@ public class TransactionImporter extends Thread {
             return;
         }
 
+        // discard general chat transactions, chat transactions with no group and no recipient
+        sigValidTransactions.removeIf(
+                transactionData -> transactionData.getType() == Transaction.TransactionType.CHAT &&
+                        transactionData.getTxGroupId() == 0 &&
+                        transactionData.getRecipient() == null
+        );
+
         if (Synchronizer.getInstance().isSyncRequested() || Synchronizer.getInstance().isSynchronizing()) {
             // Prioritize syncing, and don't attempt to lock
             return;
@@ -396,6 +425,9 @@ public class TransactionImporter extends Thread {
     }
 
     private void processNetworkGetTransactionMessages() {
+        if (Controller.isStopping()) {
+            return;
+        }
 
         try {
             List<PeerMessage> messagesToProcess;
@@ -481,20 +513,50 @@ public class TransactionImporter extends Thread {
         }
     }
 
+    // List to collect messages
+    private final List<PeerMessage> getUnconfirmedTransactionsMessageList = new ArrayList<>();
+    // Lock to synchronize access to the list
+    private final Object getUnconfirmedTransactionsMessageLock = new Object();
+
+    // Scheduled executor service to process messages every second
+    private final ScheduledExecutorService getUnconfirmedTransactionsMessageScheduler = Executors.newScheduledThreadPool(1);
+
     public void onNetworkGetUnconfirmedTransactionsMessage(Peer peer, Message message) {
-        try (final Repository repository = RepositoryManager.getRepository()) {
-            List<byte[]> signatures = Collections.emptyList();
+        synchronized (getUnconfirmedTransactionsMessageLock) {
+            getUnconfirmedTransactionsMessageList.add(new PeerMessage(peer, message));
+        }
+    }
 
-            // If we're NOT up-to-date then don't send out unconfirmed transactions
-            // as it's possible they are already included in a later block that we don't have.
-            if (Controller.getInstance().isUpToDate())
+    private void processNetworkGetUnconfirmedTransactionsMessages() {
+        if (Controller.isStopping()) {
+            return;
+        }
+
+        List<PeerMessage> messagesToProcess;
+        synchronized (getUnconfirmedTransactionsMessageLock) {
+            messagesToProcess = new ArrayList<>(getUnconfirmedTransactionsMessageList);
+            getUnconfirmedTransactionsMessageList.clear();
+        }
+
+        if( messagesToProcess.isEmpty() ) return;
+
+        List<byte[]> signatures = Collections.emptyList();
+
+        // If we're NOT up-to-date then don't send out unconfirmed transactions
+        // as it's possible they are already included in a later block that we don't have.
+        if (Controller.getInstance().isUpToDate()) {
+            try (final Repository repository = RepositoryManager.getRepository()) {
                 signatures = repository.getTransactionRepository().getUnconfirmedTransactionSignatures();
+            } catch (DataException e) {
+                LOGGER.error(String.format("Repository issue while sending unconfirmed transaction signatures to peers"), e);
+            }
+        }
 
-            Message transactionSignaturesMessage = new TransactionSignaturesMessage(signatures);
-            if (!peer.sendMessage(transactionSignaturesMessage))
-                peer.disconnect("failed to send unconfirmed transaction signatures");
-        } catch (DataException e) {
-            LOGGER.error(String.format("Repository issue while sending unconfirmed transaction signatures to peer %s", peer), e);
+        Message transactionSignaturesMessage = new TransactionSignaturesMessage(signatures);
+
+        for( PeerMessage messageToProcess : messagesToProcess ) {
+            if (!messageToProcess.getPeer().sendMessage(transactionSignaturesMessage))
+                messageToProcess.getPeer().disconnect("failed to send unconfirmed transaction signatures");
         }
     }
 
@@ -513,6 +575,9 @@ public class TransactionImporter extends Thread {
     }
 
     public void processNetworkTransactionSignaturesMessage() {
+        if (Controller.isStopping()) {
+            return;
+        }
 
         try {
             List<PeerMessage> messagesToProcess;

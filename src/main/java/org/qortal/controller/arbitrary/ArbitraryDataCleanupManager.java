@@ -35,6 +35,8 @@ public class ArbitraryDataCleanupManager extends Thread {
 
 	private static final Logger LOGGER = LogManager.getLogger(ArbitraryDataCleanupManager.class);
 	private static final List<TransactionType> ARBITRARY_TX_TYPE = Arrays.asList(TransactionType.ARBITRARY);
+	private static final String QORTAL_RAW_DATA_PREFIX = "qortalRawData";
+	private static final String QORTAL_TEMP_DIRECTORY_PREFIX = "qortal-";
 
 	private static ArbitraryDataCleanupManager instance;
 
@@ -93,7 +95,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 			allArbitraryTransactionsInDescendingOrder = new ArrayList<>(0);
 		}
 
-		Set<ArbitraryTransactionData> processedTransactions = new HashSet<>();
+		Set<ArbitraryTransactionDataHashWrapper> processedTransactions = new HashSet<>();
 
 		try {
 			while (!isStopping) {
@@ -112,6 +114,9 @@ public class ArbitraryDataCleanupManager extends Thread {
 				}
 
 				ArbitraryDataStorageManager storageManager = ArbitraryDataStorageManager.getInstance();
+
+				// cleanup system temp directory
+				cleanupSystemTempDirectory(now, STALE_FILE_TIMEOUT);
 
 				// Wait until storage capacity has been calculated
 				if (!storageManager.isStorageCapacityCalculated()) {
@@ -167,7 +172,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 							continue;
 						}
 
-						boolean mostRecentTransaction = processedTransactions.add(arbitraryTransactionData);
+						boolean mostRecentTransaction = processedTransactions.add(new ArbitraryTransactionDataHashWrapper(arbitraryTransactionData));
 
 						// Check if we have the complete file
 						boolean completeFileExists = ArbitraryTransactionUtils.completeFileExists(arbitraryTransactionData);
@@ -215,7 +220,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 
 							ArbitraryTransactionUtils.deleteCompleteFileAndChunks(arbitraryTransactionData);
 
-							Optional<ArbitraryTransactionData> moreRecentPutTransaction
+							Optional<ArbitraryTransactionDataHashWrapper> moreRecentPutTransaction
 								= processedTransactions.stream()
 									.filter(data -> data.equals(arbitraryTransactionData))
 									.findAny();
@@ -229,7 +234,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 										arbitraryTransactionData.getService().name(),
 										"deleting data due to replacement",
 										arbitraryTransactionData.getTimestamp(),
-										moreRecentPutTransaction.get().getTimestamp()
+										moreRecentPutTransaction.get().getData().getTimestamp()
 									)
 								);
 							}
@@ -542,6 +547,27 @@ public class ArbitraryDataCleanupManager extends Thread {
 		}
 	}
 
+	/**
+	 * Cleanup System Temp Directory
+	 *
+	 * Delete all files and directories that the Qortal Core may of stored in the system temp directory.
+	 *
+	 * @param now the timestamp for now
+	 * @param minAge the amount of time to wait for deletion
+	 */
+	public void cleanupSystemTempDirectory(long now, long minAge) {
+
+		// delete temp system files from Qortal, too
+		Path systemTmpDirectory = Paths.get(System.getProperty("java.io.tmpdir"));
+
+		try {
+			ArbitraryTransactionUtils.deleteFilesByPrefix(systemTmpDirectory, QORTAL_RAW_DATA_PREFIX, now, minAge);
+			ArbitraryTransactionUtils.deleteFoldersByPrefix(systemTmpDirectory, QORTAL_TEMP_DIRECTORY_PREFIX, now, minAge);
+		} catch (IOException e) {
+			LOGGER.warn("Unable to delete temp files: {}", systemTmpDirectory);
+		}
+	}
+
 	private void cleanupReaderCache(Long now) {
 		ArbitraryDataStorageManager storageManager = ArbitraryDataStorageManager.getInstance();
 		String baseDir = Settings.getInstance().getTempDataPath();
@@ -576,7 +602,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 		}
 
 		String baseDir = Settings.getInstance().getTempDataPath();
-		Path readerNameCachePath = Paths.get(baseDir, "reader", "NAME", name);
+		Path readerNameCachePath = Paths.get(baseDir, "reader", "NAME", StringUtils.sanitizeString(name));
 
 		// Loop through the contents and check each one
 		final File[] directories = readerNameCachePath.toFile().listFiles();
@@ -597,7 +623,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 			return;
 		}
 
-		Path readerNameServiceCachePath = Paths.get("reader", "NAME", name, service);
+		Path readerNameServiceCachePath = Paths.get("reader", "NAME", StringUtils.sanitizeString(name), service);
 		Long expiry = Settings.getInstance().getBuiltDataExpiryInterval();
 		this.cleanupTempDirectory(readerNameServiceCachePath.toString(), now, expiry);
 	}

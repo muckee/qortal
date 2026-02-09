@@ -1,6 +1,7 @@
 package org.qortal.crypto;
 
 import com.google.common.primitives.Bytes;
+
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters;
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters;
@@ -8,9 +9,11 @@ import org.bouncycastle.math.ec.rfc8032.Ed25519;
 import org.qortal.account.Account;
 import org.qortal.utils.Base58;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -65,6 +68,22 @@ public abstract class Crypto {
 			throw new RuntimeException("SHA-256 message digest not available");
 		}
 	}
+
+	public static byte[] digestFileStream(File file) throws IOException {
+        // Buffer size: 256KB - reduces system calls significantly while remaining memory-friendly
+        final int BUFFER_SIZE = 256 * 1024;
+        try (BufferedInputStream fis = new BufferedInputStream(new FileInputStream(file), BUFFER_SIZE)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[BUFFER_SIZE];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                digest.update(buffer, 0, bytesRead);
+            }
+            return digest.digest();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 algorithm not available", e);
+        }
+    }
 
 	/**
 	 * Returns 32-byte digest of two rounds of SHA-256 on message passed in input.

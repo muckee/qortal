@@ -21,6 +21,9 @@ import org.qortal.utils.BitTwiddling;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class PirateChain extends Bitcoiny {
@@ -51,9 +54,13 @@ public class PirateChain extends Bitcoiny {
 			@Override
 			public Collection<Server> getServers() {
 				return Arrays.asList(
-					// Servers chosen on NO BASIS WHATSOEVER from various sources!
-					new Server("lightd.pirate.black", Server.ConnectionType.SSL, 443)
+						// Servers chosen on NO BASIS WHATSOEVER from various sources!
+						new Server("lightd.pirate.black", Server.ConnectionType.SSL, 443),
+						new Server("arrr.qortal.link", Server.ConnectionType.SSL, 443),
+						new Server("arrr2.qortal.link", Server.ConnectionType.SSL, 443),
+						new Server("arrr3.qortal.link", Server.ConnectionType.SSL, 443)
 				);
+
 			}
 
 			@Override
@@ -133,17 +140,22 @@ public class PirateChain extends Bitcoiny {
 
 	private final PirateChainNet pirateChainNet;
 
+	// Scheduled executor service to check connection to Pirate Chain server
+	private final ScheduledExecutorService pirateChainCheckScheduler = Executors.newScheduledThreadPool(1);
+
 	// Constructors and instance
 
 	private PirateChain(PirateChainNet pirateChainNet, BitcoinyBlockchainProvider blockchain, Context bitcoinjContext, String currencyCode) {
 		super(blockchain, bitcoinjContext, currencyCode, DEFAULT_FEE_PER_KB);
 		this.pirateChainNet = pirateChainNet;
 
+		pirateChainCheckScheduler.scheduleWithFixedDelay(this::establishConnection, 30, 300, TimeUnit.SECONDS);
+
 		LOGGER.info(() -> String.format("Starting Pirate Chain support using %s", this.pirateChainNet.name()));
 	}
 
 	public static synchronized PirateChain getInstance() {
-		if (instance == null) {
+		if (instance == null && Settings.getInstance().isWalletEnabled("ARRR")) {
 			PirateChainNet pirateChainNet = Settings.getInstance().getPirateChainNet();
 
 			BitcoinyBlockchainProvider pirateLightClient = new PirateLightClient("PirateChain-" + pirateChainNet.name(), pirateChainNet.getGenesisHash(), pirateChainNet.getServers(), DEFAULT_LITEWALLET_PORTS);
@@ -272,6 +284,7 @@ public class PirateChain extends Bitcoiny {
 	}
 
 	public Long getWalletBalance(String entropy58) throws ForeignBlockchainException {
+
 		synchronized (this) {
 			PirateChainWalletController walletController = PirateChainWalletController.getInstance();
 			walletController.initWithEntropy58(entropy58);
@@ -290,13 +303,38 @@ public class PirateChain extends Bitcoiny {
 		}
 	}
 
+	/**
+	 * Establish Connection
+	 *
+	 * Some methods in this class need to establish a connection before proceeding and this is the best way
+	 * to do it as far as I know.
+	 */
+	private void establishConnection() {
+		try {
+
+			LOGGER.info("Checking Pirate Chain Connection ... ");
+
+			int height;
+			synchronized( this ) {
+				height = this.blockchainProvider.getCurrentHeight();
+			}
+
+			LOGGER.info("Checked Pirate Chain Connection: height = " + height);
+		} catch (ForeignBlockchainException e) {
+			LOGGER.error(e.getMessage(), e);
+		}
+	}
+
 	public List<SimpleTransaction> getWalletTransactions(String entropy58) throws ForeignBlockchainException {
+
 		synchronized (this) {
 			PirateChainWalletController walletController = PirateChainWalletController.getInstance();
 			walletController.initWithEntropy58(entropy58);
 			walletController.ensureInitialized();
 			walletController.ensureSynchronized();
 			walletController.ensureNotNullSeed();
+
+			String myAddress = getWalletAddress(entropy58);
 
 			List<SimpleTransaction> transactions = new ArrayList<>();
 
@@ -310,9 +348,12 @@ public class PirateChain extends Bitcoiny {
 					if (transactionJson.has("txid")) {
 						String txId = transactionJson.getString("txid");
 						Long timestamp = transactionJson.getLong("datetime");
-						Long amount = transactionJson.getLong("amount");
-						Long fee = transactionJson.getLong("fee");
+						Long amount = 0L;
+						Long fee = 0L;
 						String memo = null;
+
+						List<SimpleTransaction.Input> inputs = new ArrayList<>();
+						List<SimpleTransaction.Output> outputs = new ArrayList<>();
 
 						if (transactionJson.has("incoming_metadata")) {
 							JSONArray incomingMetadatas = transactionJson.getJSONArray("incoming_metadata");
@@ -320,9 +361,16 @@ public class PirateChain extends Bitcoiny {
 								for (int j = 0; j < incomingMetadatas.length(); j++) {
 									JSONObject incomingMetadata = incomingMetadatas.getJSONObject(j);
 									if (incomingMetadata.has("value")) {
-										//String address = incomingMetadata.getString("address");
 										Long value = incomingMetadata.getLong("value");
-										amount = value; // TODO: figure out how to parse transactions with multiple incomingMetadata entries
+										amount += value;
+
+										if(incomingMetadata.has("address")) {
+
+											inputs.add(new SimpleTransaction.Input("[PRIVATE]", value, false));
+
+											String address = incomingMetadata.getString("address");
+											outputs.add(new SimpleTransaction.Output(address, value, address.equals(myAddress)));
+										}
 									}
 
 									if (incomingMetadata.has("memo") && !incomingMetadata.isNull("memo")) {
@@ -337,6 +385,20 @@ public class PirateChain extends Bitcoiny {
 							for (int j = 0; j < outgoingMetadatas.length(); j++) {
 								JSONObject outgoingMetadata = outgoingMetadatas.getJSONObject(j);
 
+								if(outgoingMetadata.has("value")) {
+									Long value = outgoingMetadata.getLong("value");
+									amount -= value;
+									fee += MAINNET_FEE; // add the standard fee for each send
+
+									if(outgoingMetadata.has("address")) {
+
+										inputs.add(new SimpleTransaction.Input(myAddress, value, true));
+
+										String address = outgoingMetadata.getString("address");
+										outputs.add(new SimpleTransaction.Output(address, value, address.equals(myAddress)));
+									}
+								}
+
 								if (outgoingMetadata.has("memo") && !outgoingMetadata.isNull("memo")) {
 									memo = outgoingMetadata.getString("memo");
 								}
@@ -344,11 +406,15 @@ public class PirateChain extends Bitcoiny {
 						}
 
 						long timestampMillis = Math.toIntExact(timestamp) * 1000L;
-						SimpleTransaction transaction = new SimpleTransaction(txId, timestampMillis, amount, fee, null, null, memo);
+						SimpleTransaction transaction = new SimpleTransaction(txId, timestampMillis, amount, fee, inputs, outputs, memo);
 						transactions.add(transaction);
 					}
 				}
 			}
+
+			double sum = transactions.stream().mapToDouble(SimpleTransaction::getTotalAmount).sum() / 100000000.0;
+			double fees = transactions.stream().mapToDouble(SimpleTransaction::getFeeAmount).sum() / 100000000.0;
+			LOGGER.info("balance = " + (sum - fees));
 
 			return transactions;
 		}
