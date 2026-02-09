@@ -7,12 +7,18 @@ RUN mvn clean package
 ###
 FROM openjdk:11
 
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN useradd -r -u 1000 -g users qortal && \
-    mkdir /usr/local/qortal /qortal && \
+    mkdir -p /usr/local/qortal /qortal && \
     chown 1000:100 /qortal
 
 COPY --from=builder /work/log4j2.properties /usr/local/qortal/
 COPY --from=builder /work/target/qortal*.jar /usr/local/qortal/qortal.jar
+COPY ./docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 USER 1000:100
 
@@ -22,5 +28,5 @@ HEALTHCHECK --start-period=5m CMD curl -sf http://127.0.0.1:12391/admin/info || 
 WORKDIR /qortal
 VOLUME /qortal
 
-ENTRYPOINT ["java"]
-CMD ["-Djava.net.preferIPv4Stack=false", "-jar", "/usr/local/qortal/qortal.jar"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD []
