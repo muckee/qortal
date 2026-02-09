@@ -203,39 +203,46 @@ public class ArbitraryDataFileManager extends Thread {
     
     /**
      * Saves chunk data to relay cache using streaming write to avoid holding byte[] reference
-     * Triggers cleanup if file count exceeds threshold
+     * Triggers cleanup if file count exceeds threshold. Overwriting an existing file does not increment the count.
      * @param hash58 The hash of the chunk
      * @param data The chunk data
-     * @return true if saved successfully
      */
     private void saveToRelayCache(String hash58, byte[] data) {
         if (relayCacheDir == null || data == null) {
             return;
         }
-        
+
+        Path cachePath = getRelayCachePath(hash58);
+        if (cachePath == null) {
+            LOGGER.debug("Invalid relay cache path for hash {}", hash58);
+            return;
+        }
+
+        boolean isNewFile = false;
         try {
-            // Check if cleanup is needed based on file count
-            int currentCount = relayCacheFileCount.incrementAndGet();
-            if (currentCount > RELAY_CACHE_CLEANUP_TRIGGER) {
-                LOGGER.trace("Relay cache has {} files (threshold: {}), triggering cleanup", 
-                        currentCount, RELAY_CACHE_CLEANUP_TRIGGER);
-                cleanupRelayCache();
+            isNewFile = !Files.exists(cachePath);
+            if (isNewFile) {
+                int currentCount = relayCacheFileCount.incrementAndGet();
+                if (currentCount > RELAY_CACHE_CLEANUP_TRIGGER) {
+                    LOGGER.trace("Relay cache has {} files (threshold: {}), triggering cleanup",
+                            currentCount, RELAY_CACHE_CLEANUP_TRIGGER);
+                    cleanupRelayCache();
+                }
             }
-            
-            Path cachePath = getRelayCachePath(hash58);
+
             // Use streaming write to avoid holding byte[] reference in memory during I/O
-            // This allows GC to reclaim the original byte[] sooner
-            try (java.io.OutputStream out = Files.newOutputStream(cachePath, 
-                    java.nio.file.StandardOpenOption.CREATE, 
+            try (java.io.OutputStream out = Files.newOutputStream(cachePath,
+                    java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
                     java.nio.file.StandardOpenOption.WRITE)) {
                 out.write(data);
                 out.flush();
             }
-
         } catch (IOException e) {
             LOGGER.warn("Failed to save to relay cache for hash {}: {}", hash58, e.getMessage());
-            relayCacheFileCount.decrementAndGet(); // Rollback counter on failure
+            if (isNewFile) {
+                relayCacheFileCount.decrementAndGet(); // Rollback counter on failure
+            }
         }
     }
     
@@ -324,7 +331,7 @@ public class ArbitraryDataFileManager extends Thread {
                     long calculatedSize = (long)(qortalHeadroom * 0.10);
                     maxAllowedSize = Math.max(500L * 1024 * 1024, // Min 500MB
                                               calculatedSize);    // 10% of free Qortal QDN Space
-                    RELAY_CACHE_CLEANUP_TRIGGER = (int)(maxAllowedSize/(5L * 1025 * 1024));
+                    RELAY_CACHE_CLEANUP_TRIGGER = (int)(maxAllowedSize / (512L * 1024)); // 500KB avg per file
                     LOGGER.debug("Relay cache limit: {} MB (based on {}% of {} MB headroom)", 
                             maxAllowedSize / (1024 * 1024), 
                             (int)(0.10 * 100),
@@ -595,7 +602,7 @@ public class ArbitraryDataFileManager extends Thread {
             }
         }, 30, 30, TimeUnit.SECONDS);
         
-        // Clean up relay cache every hour
+        // Clean up relay cache every 24 hours
         cleaner.scheduleAtFixedRate(() -> {
             cleanupRelayCache();
         }, RELAY_CACHE_CLEANUP_INTERVAL_MS, RELAY_CACHE_CLEANUP_INTERVAL_MS, TimeUnit.MILLISECONDS);
