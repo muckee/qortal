@@ -10,6 +10,7 @@ import org.qortal.block.BlockChain;
 import org.qortal.controller.Controller;
 import org.qortal.controller.arbitrary.ArbitraryDataFileListManager;
 import org.qortal.controller.arbitrary.ArbitraryDataFileManager;
+import org.qortal.controller.arbitrary.ArbitraryMetadataManager;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.network.PeerData;
 import org.qortal.network.message.*;
@@ -33,6 +34,7 @@ import java.nio.channels.*;
 import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -68,6 +70,7 @@ public class NetworkData {
     private final Ed25519PrivateKeyParameters edPrivateKeyParams = new Ed25519PrivateKeyParameters(new SecureRandom());
     private final Ed25519PublicKeyParameters edPublicKeyParams = edPrivateKeyParams.generatePublicKey();
     private final String ourNodeId = Crypto.toNodeAddress(edPublicKeyParams.getEncoded());
+    public final static int MAX_NODEID_SIZE = 34;
 
     private final int maxMessageSize;
     private final int minOutboundPeers;
@@ -831,8 +834,13 @@ public class NetworkData {
 
     class NetworkDataProcessor extends ExecuteProduceConsume {
 
+        /** Max MessageTasks produced in a row before forcing a channel task (select/read/write). Prevents starving I/O. */
+        private static final int MAX_MESSAGE_TASKS_BEFORE_CHANNEL_TASK = 15;
+
         private final Logger LOGGER = LogManager.getLogger(NetworkDataProcessor.class);
         private final AtomicLong nextConnectTaskTimestamp = new AtomicLong(0L); // ms - try first connect once NTP syncs
+        /** Number of MessageTasks produced since last channel task; used for fair scheduling. */
+        private final AtomicInteger messageTasksSinceLastChannelTask = new AtomicInteger(0);
         private Iterator<SelectionKey> channelIterator = null;
 
         NetworkDataProcessor(ExecutorService executor) {
@@ -861,9 +869,17 @@ public class NetworkData {
         protected Task produceTask(boolean canBlock) throws InterruptedException {
             Task task;
 
-            task = maybeProducePeerMessageTask();
-            if (task != null) {
-                return task;
+            // Fair scheduling: cap MessageTasks in a row so select() / ChannelReadTask / ChannelWriteTask get to run.
+            // Otherwise under chunk flood we never run select(), TCP buffers fill, flow control stalls the download.
+            if (messageTasksSinceLastChannelTask.get() >= MAX_MESSAGE_TASKS_BEFORE_CHANNEL_TASK) {
+                messageTasksSinceLastChannelTask.set(0);
+                task = null;
+            } else {
+                task = maybeProducePeerMessageTask();
+                if (task != null) {
+                    messageTasksSinceLastChannelTask.incrementAndGet();
+                    return task;
+                }
             }
 
             final Long now = NTP.getTime();
@@ -874,6 +890,8 @@ public class NetworkData {
                 return task;
             }
 
+            // Run channel I/O (select then read or write). Reset so we can produce more MessageTasks next round.
+            messageTasksSinceLastChannelTask.set(0);
             // Only this method can block to reduce CPU spin
             return maybeProduceChannelTask(canBlock);
         }
@@ -1056,7 +1074,7 @@ public class NetworkData {
                         if (stillInConnected && stillNotInHandshaked) {
                             // Normal case: handshake completed but peer missing from handshakedPeers
                             // This can happen due to race conditions in duplicate handling
-                            LOGGER.warn("[{}] Repairing orphaned data peer {} - in connectedPeers with COMPLETED status but not in handshakedPeers",
+                            LOGGER.debug("[{}] Repairing orphaned data peer {} - in connectedPeers with COMPLETED status but not in handshakedPeers",
                                     peer.getPeerConnectionId(), peer);
                             this.addHandshakedPeer(peer);
                         }
@@ -1068,7 +1086,7 @@ public class NetworkData {
                     // 2. Never properly completed handshake but stayed in connectedPeers
                     // 3. Had its status reset by a bug
                     // Collect for disconnect outside lock to avoid holding lock during cleanup
-                    LOGGER.warn("[{}] Detected zombie data peer {} - in connectedPeers but not in handshakedPeers (status={}, age={}ms)",
+                    LOGGER.debug("[{}] Detected zombie data peer {} - in connectedPeers but not in handshakedPeers (status={}, age={}ms)",
                             peer.getPeerConnectionId(), peer, peer.getHandshakeStatus(), peer.getConnectionAge());
                     zombiesToDisconnect.add(peer);
                 }
@@ -1143,7 +1161,7 @@ public class NetworkData {
                 Peer peer = peers.get(0);
                 if (peer.isOutbound() != weShouldBeOutbound 
                         && peer.getConnectionAge() > DIRECTION_GRACE_PERIOD) {
-                    LOGGER.warn("[NetworkData: {}] Will disconnect single peer {} with wrong direction (outbound={}, shouldBeOutbound={}, age={}ms)",
+                    LOGGER.debug("[NetworkData: {}] Will disconnect single peer {} with wrong direction (outbound={}, shouldBeOutbound={}, age={}ms)",
                             peer.getPeerConnectionId(), peer.getPeerData().getAddress(),
                             peer.isOutbound(), weShouldBeOutbound, peer.getConnectionAge());
                     
@@ -1665,7 +1683,7 @@ public class NetworkData {
      */
     public void onMessage(Peer peer, Message message) {
         if (message != null) {
-            LOGGER.trace("[{}} Processing {} message with ID {} from peer {}", peer.getPeerConnectionId(),
+            LOGGER.trace("[{}] Processing {} message with ID {} from peer {}", peer.getPeerConnectionId(),
                     message.getType().name(), message.getId(), peer);
         }
 
@@ -1732,6 +1750,26 @@ public class NetworkData {
                     }
                 });
                 break;
+
+			case ARBITRARY_DATA_FILE_LIST:
+				ArbitraryDataFileListManager.getInstance().onNetworkArbitraryDataFileListMessage(peer, message);
+				break;
+
+			case GET_ARBITRARY_DATA_FILE:
+				ArbitraryDataFileManager.getInstance().onNetworkGetArbitraryDataFileMessage(peer, message);
+				break;
+
+            case GET_ARBITRARY_DATA_FILE_LIST:
+                ArbitraryDataFileListManager.getInstance().onNetworkGetArbitraryDataFileListMessage(peer, message);
+                break;
+
+			case GET_ARBITRARY_METADATA:
+				ArbitraryMetadataManager.getInstance().onNetworkGetArbitraryMetadataMessage(peer, message);
+				break;
+
+			case ARBITRARY_METADATA:
+				ArbitraryMetadataManager.getInstance().onNetworkArbitraryMetadataMessage(peer, message);
+				break;
             default:
                 // Bump up to controller for possible action
                 Controller.getInstance().onNetworkMessage(peer, message);
@@ -1823,7 +1861,7 @@ public class NetworkData {
             }
     
             if (unexpectedMessage) {
-                LOGGER.warn("[{}] Unexpected {} message from {}, expected {}",
+                LOGGER.debug("[{}] Unexpected {} message from {}, expected {}",
                         peer.getPeerConnectionId(),
                         message.getType().name(),
                         peer,
@@ -1835,7 +1873,7 @@ public class NetworkData {
             Handshake newHandshakeStatus = effectiveHandshakeStatus.onMessage(peer, message);
     
             if (newHandshakeStatus == null) {
-                LOGGER.warn("[{}] Handshake failure with peer {} message {}",
+                LOGGER.debug("[{}] Handshake failure with peer {} message {}",
                         peer.getPeerConnectionId(), peer, message.getType().name());
                 peer.disconnect("handshake failure");
                 return;
@@ -2415,7 +2453,7 @@ public class NetworkData {
 
             // Use PeerSendManager for retry logic and backpressure handling
             try {
-                PeerSendManager sendManager = PeerSendManagement.getInstance().getOrCreateSendManager(peer);
+                PeerSendManager sendManager = PeerSendManagement.getInstance().getOrCreateSendManager(peer, true);
                 
                 
                 // Calculate estimated message size for queue management

@@ -176,7 +176,6 @@ public class Peer {
     // Peer info
 
     private final Object peerInfoLock = new Object();
-
     private String peersNodeId;
     private byte[] peersPublicKey;
     private byte[] peersChallenge;
@@ -302,7 +301,7 @@ public class Peer {
         return this.peerType;
     }
     public Object getPeerCapability(String capName) {
-        return peerCapabilities.getCapability(capName);
+        return peerCapabilities == null ? null : peerCapabilities.getCapability(capName);
     }
 
     public Handshake getHandshakeStatus() {
@@ -1445,7 +1444,7 @@ public class Peer {
         boolean logStats = false;
 
         if (!isStopping) {
-            LOGGER.info("[{}] Shutting down peer {}", this.peerConnectionId, this);
+            LOGGER.debug("[{}] Shutting down peer {}", this.peerConnectionId, this);
             logStats = true;
         }
         isStopping = true;

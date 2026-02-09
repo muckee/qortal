@@ -14,7 +14,6 @@
 		<bouncycastle.version>1.73</bouncycastle.version>
 		<build.timestamp>${maven.build.timestamp}</build.timestamp>
 		<ciyam-at.version>1b731d1</ciyam-at.version> <!-- This is the hash for v1.4.3 -->
-		<!-- <ciyam-at.version>1.4.3</ciyam-at.version> -->
 		<commons-net.version>3.9.0</commons-net.version>
 		<commons-text.version>1.12.0</commons-text.version>
 		<commons-io.version>2.18.0</commons-io.version>
@@ -47,7 +46,6 @@
 		<maven-dependency-plugin.version>3.6.1</maven-dependency-plugin.version>
 		<maven-jar-plugin.version>3.4.2</maven-jar-plugin.version>
 		<maven-package-info-plugin.version>1.1.0</maven-package-info-plugin.version>
-		<!-- <maven-plugin.version>2.18.0</maven-plugin.version> Updated 25-Jan-26 -->
 		<versions-maven-plugin.version>2.21.0</versions-maven-plugin.version>
 		<maven-reproducible-build-plugin.version>0.17</maven-reproducible-build-plugin.version>
 		<maven-resources-plugin.version>3.3.1</maven-resources-plugin.version>
@@ -58,9 +56,7 @@
 		<replacer.version>1.5.3</replacer.version>
 		<simplemagic.version>1.17</simplemagic.version>
 		<slf4j.version>1.7.36</slf4j.version>
-		<!-- <swagger-api.version>2.2.30</swagger-api.version> Future Update -->
-		<swagger-api.version>2.1.13</swagger-api.version>
-		<!-- <swagger-api.version>2.0.10</swagger-api.version> Updated 25-Jan-26  -->
+		<swagger-api.version>2.2.30</swagger-api.version>
 		<swagger-ui.version>5.18.2</swagger-ui.version>
 		<tika-core.version>3.1.0</tika-core.version>
 		<upnp.version>1.3</upnp.version>
