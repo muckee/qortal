@@ -55,7 +55,7 @@ public class MultiPaymentTransaction extends Transaction {
 
 		// Check sender has enough funds for fee
 		if (sender.getConfirmedBalance(Asset.QORT) < this.multiPaymentTransactionData.getFee())
-			return ValidationResult.NO_BALANCE;
+			return ValidationResult.INSUFFICIENT_FEE;
 
 		return new Payment(this.repository).isValid(this.multiPaymentTransactionData.getSenderPublicKey(), payments, this.multiPaymentTransactionData.getFee());
 	}
