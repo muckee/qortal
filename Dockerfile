@@ -1,10 +1,12 @@
 FROM maven:3.9-eclipse-temurin-17 AS builder
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /work
 COPY ./ /work/
 RUN mvn clean package
 
 ###
+FROM eclipse-temurin:17-jre
 FROM eclipse-temurin:17-jre
 
 RUN apt-get update && \
@@ -13,12 +15,14 @@ RUN apt-get update && \
 
 RUN mkdir -p /usr/local/qortal /qortal && \
     chown -R 1000:100 /usr/local/qortal /qortal
+RUN mkdir -p /usr/local/qortal /qortal && \
+    chown -R 1000:100 /usr/local/qortal /qortal
 
 COPY --from=builder /work/log4j2.properties /usr/local/qortal/
 COPY --from=builder /work/target/qortal*.jar /usr/local/qortal/qortal.jar
 COPY ./docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-COPY ./docker-start.sh /usr/local/bin/docker-qortal-start.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-qortal-start.sh
+COPY ./docker-start.sh /usr/local/bin/docker-start.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-start.sh
 
 USER 1000:100
 
