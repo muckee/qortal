@@ -1164,58 +1164,6 @@ public class Peer {
     }
 
     /**
-     * Checks if a specific hash is currently queued in this peer's internal sendQueue
-     * as a GetArbitraryDataFileMessage.
-     * 
-     * <p>This method takes a snapshot of the sendQueue and checks each message to see
-     * if it's a GetArbitraryDataFileMessage with the matching hash. This is useful for
-     * preventing duplicate requests when cleaning up expired request tracking.
-     *
-     * @param hash58 the hash to check for, encoded in base58
-     * @return {@code true} if a GetArbitraryDataFileMessage with this hash is queued, otherwise {@code false}
-     */
-    public boolean isHashInSendQueue(String hash58) {
-        if (sendQueue.isEmpty()) {
-            return false;
-        }
-        
-        byte[] targetHash = Base58.decode(hash58);
-        if (targetHash == null) {
-            return false;
-        }
-        
-        // Take a snapshot of the queue to avoid concurrent modification issues
-        Object[] queueSnapshot = sendQueue.toArray();
-        
-        for (Object obj : queueSnapshot) {
-            if (!(obj instanceof Message)) {
-                continue;
-            }
-            
-            Message message = (Message) obj;
-            try {
-                // Check if it's a GetArbitraryDataFileMessage
-                if (message.getType() == MessageType.GET_ARBITRARY_DATA_FILE) {
-                    GetArbitraryDataFileMessage getMessage = (GetArbitraryDataFileMessage) message;
-                    byte[] messageHash = getMessage.getHash();
-                    
-                    // Compare hashes
-                    if (messageHash != null && Arrays.equals(targetHash, messageHash)) {
-                        return true;
-                    }
-                }
-            } catch (Exception e) {
-                // If we can't check the message, skip it
-                // This can happen if message type doesn't match or casting fails
-                continue;
-            }
-        }
-        
-        return false;
-    }
-
-
-    /**
      * Get the current size of the send queue.
      *
      * @return number of messages currently queued for sending

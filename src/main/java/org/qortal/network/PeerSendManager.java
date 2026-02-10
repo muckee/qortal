@@ -148,6 +148,7 @@ public class PeerSendManager {
                             LOGGER.trace("Peer {} no longer connected in disk I/O stage, clearing {} queued messages", 
                                        peer, queue.size());
                             queue.clear();
+                            queuedHashes.clear(); // Allow request timeout to retry chunks from other peers
                             return;
                         }
                         
@@ -280,6 +281,7 @@ public class PeerSendManager {
                         LOGGER.trace("Peer {} no longer connected in sender stage, clearing {} preloaded messages", 
                                    peer, preloadedQueue.size());
                         preloadedQueue.clear();
+                        queuedHashes.clear(); // Allow request timeout to retry chunks from other peers
                         return;
                     }
                     

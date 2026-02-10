@@ -709,39 +709,6 @@ public class ArbitraryDataFileManager extends Thread {
     }
 
     /**
-     * Checks if a hash is currently queued in any peer's send queue.
-     * 
-     * <p>This method iterates through all handshaked peers and checks their send queues
-     * to see if a GetArbitraryDataFileMessage with the specified hash is queued.
-     * This is useful for preventing duplicate requests when cleaning up expired
-     * request tracking.
-     *
-     * @param hash58 the hash to check for, encoded in base58
-     * @return {@code true} if the hash is queued in any peer's send queue, otherwise {@code false}
-     */
-    private boolean isHashQueuedInAnyPeer(String hash58) {
-        PeerList connectedPeers = NetworkData.getInstance().getImmutableHandshakedPeers();
-        
-        for (Peer peer : connectedPeers) {
-            // Check Stage 3: Peer.sendQueue (final network send queue)
-            if (peer.isHashInSendQueue(hash58)) {
-                LOGGER.trace("Hash {} is queued in peer {} send queue (Stage 3)", hash58, peer);
-                return true;
-            }
-            
-            // Check Stages 1 & 2: PeerSendManager queues (disk I/O and preload queues)
-            // Uses O(1) hash map lookup instead of scanning queues
-            PeerSendManager sendManager = PeerSendManagement.getInstance().getSendManager(peer);
-            if (sendManager != null && sendManager.isHashQueued(hash58)) {
-                LOGGER.trace("Hash {} is queued in PeerSendManager for peer {} (Stage 1/2)", hash58, peer);
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
-    /**
      * Adds a hash to the validation guard map only.
      * The guard map persists longer to validate delayed chunk arrivals.
      * This is separate from the main request tracking to keep concerns separated.
@@ -827,16 +794,11 @@ public class ArbitraryDataFileManager extends Thread {
             return;
         }
         final long requestMinimumTimestamp = now - ArbitraryDataManager.getInstance().ARBITRARY_REQUEST_TIMEOUT;
-        // Only remove if expired AND not queued in any peer's send queue
+        // Always remove after timeout so chunk becomes re-requestable; don't block on queue state (avoids stuck IDLE)
         arbitraryDataFileRequests.entrySet().removeIf(entry -> {
-            if (entry.getValue() == null || entry.getValue() < requestMinimumTimestamp) {
+            Long value = entry.getValue();
+            if (value == null || value < requestMinimumTimestamp) {
                 String hash58 = entry.getKey();
-                // Don't remove if still queued in any peer's send queue
-                if (isHashQueuedInAnyPeer(hash58)) {
-                    LOGGER.trace("Not removing expired hash {} from arbitraryDataFileRequests - still queued in peer send queue", hash58);
-                    return false;
-                }
-                // Chunk will become re-requestable; peer already in triedPeersByChunk (added when we sent)
                 inFlightRequestsByHash.remove(hash58);
                 return true;
             }
