@@ -17,7 +17,8 @@ RUN mkdir -p /usr/local/qortal /qortal && \
 COPY --from=builder /work/log4j2.properties /usr/local/qortal/
 COPY --from=builder /work/target/qortal*.jar /usr/local/qortal/qortal.jar
 COPY ./docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY ./docker-start.sh /usr/local/bin/docker-qortal-start.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-qortal-start.sh
 
 USER 1000:100
 
