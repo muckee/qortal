@@ -1,19 +1,18 @@
-FROM maven:3-openjdk-11 as builder
+FROM maven:3.9-eclipse-temurin-17 AS builder
 
 WORKDIR /work
 COPY ./ /work/
 RUN mvn clean package
 
 ###
-FROM openjdk:11
+FROM eclipse-temurin:17-jre
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN useradd -r -u 1000 -g users qortal && \
-    mkdir -p /usr/local/qortal /qortal && \
-    chown 1000:100 /qortal
+RUN mkdir -p /usr/local/qortal /qortal && \
+    chown -R 1000:100 /usr/local/qortal /qortal
 
 COPY --from=builder /work/log4j2.properties /usr/local/qortal/
 COPY --from=builder /work/target/qortal*.jar /usr/local/qortal/qortal.jar
