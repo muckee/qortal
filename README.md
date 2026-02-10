@@ -63,7 +63,7 @@ If the project interests you, you may learn more from the various web2 and QDN b
 
 https://qortal.org - primary internet presence 
 https://qortal.dev - new primary project site 
-https://qortal.dev - secondary and development focused website with links to many new developments and documentation
 https://wiki.qortal.org - community built and managed wiki with detailed information regarding the project
+https://qortal.dev/wiki - a simpler setup-focused wiki
 
 links to telegram and discord communities are at the top of https://qortal.org as well. 
