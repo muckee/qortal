@@ -58,6 +58,17 @@ public class PeerSendManagement {
 
         ScheduledExecutorService cleaner = Executors.newSingleThreadScheduledExecutor();
 
+        // Clean up stale hash tracking every 60s so isHashQueuedInAnyPeer() doesn't block request timeout forever
+        cleaner.scheduleAtFixedRate(() -> {
+            for (PeerSendManager manager : peerSendManagers.values()) {
+                try {
+                    manager.cleanupStaleHashTracking();
+                } catch (Exception e) {
+                    LOGGER.warn("Error cleaning stale hash tracking for peer {}: {}", manager.getPeer(), e.getMessage());
+                }
+            }
+        }, 60, 60, TimeUnit.SECONDS);
+
         cleaner.scheduleAtFixedRate(() -> {
             long idleCutoff = TimeUnit.MINUTES.toMillis(2);
             Iterator<Map.Entry<String, PeerSendManager>> iterator = peerSendManagers.entrySet().iterator();
