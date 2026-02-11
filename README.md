@@ -39,7 +39,7 @@ Building the future one block at a time. Welcome to Qortal.
   - Edit this file and restart the container to apply memory/runtime argument changes
 - Follow logs: `docker compose logs -f qortal`
 - Network name can be set using `QORTAL_NETWORK_NAME` in `.env`
-- Port source of truth is `./data/qortal/settings.json` (`apiPort` and `listenPort`); keep `.env` `QORTAL_API_PORT` / `QORTAL_P2P_PORT` in sync
+- Port source of truth is `./data/qortal/settings.json`; keep `.env` `QORTAL_API_PORT` / `QORTAL_P2P_PORT` / `QORTAL_QDN_PORT` in sync
 - If other containers need API access, update API whitelist in `settings.json` (by default only loopback is allowed)
 
 ## IntelliJ IDEA Configuration

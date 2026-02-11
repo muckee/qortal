@@ -26,7 +26,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/docker-start.sh
 
 USER 1000:100
 
-EXPOSE 12391 12392
+EXPOSE 12391 12392 12394
 HEALTHCHECK --start-period=5m CMD curl -sf http://127.0.0.1:12391/admin/info || exit 1
 
 WORKDIR /qortal

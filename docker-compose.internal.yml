@@ -8,6 +8,7 @@ services:
     expose:
       - "${QORTAL_API_PORT:-12391}"
       - "${QORTAL_P2P_PORT:-12392}"
+      - "${QORTAL_QDN_PORT:-12394}"
     volumes:
       - ./data/qortal:/qortal
     networks:
