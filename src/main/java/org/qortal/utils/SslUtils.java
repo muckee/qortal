@@ -30,6 +30,7 @@ public class SslUtils {
 
     static {
         Security.addProvider(new BouncyCastleProvider());
+        Security.addProvider(new org.bouncycastle.jsse.provider.BouncyCastleJsseProvider());
     }
 
     public static void generateSsl() {

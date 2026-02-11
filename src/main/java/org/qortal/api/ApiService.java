@@ -106,7 +106,8 @@ public class ApiService {
 				SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
 				sslContextFactory.setSslContext(sslContext);
 				sslContextFactory.setCipherComparator(HTTP2Cipher.COMPARATOR);
-				sslContextFactory.setProvider("BC");
+				//sslContextFactory.setProvider("BC");
+				sslContextFactory.setProvider("BCJSSE");
 
 				this.server = new Server();
 
@@ -117,16 +118,55 @@ public class ApiService {
 				SecureRequestCustomizer src = new SecureRequestCustomizer();
 				httpConfig.addCustomizer(src);
 
+				//HTTP2ServerConnectionFactory http2ConnectionFactory = new HTTP2ServerConnectionFactory(httpConfig);
+				//ALPNServerConnectionFactory alpnConnectionFactory = new ALPNServerConnectionFactory();
+				//alpnConnectionFactory.setDefaultProtocol(HttpVersion.HTTP_1_1.asString());
+
+				// Temporary test: Direct SSL to HTTP/1.1
+				//SslConnectionFactory sslConnectionFactory = new SslConnectionFactory(sslContextFactory, "http/1.1");
+				//ServerConnector portUnifiedConnector = new ServerConnector(this.server, sslConnectionFactory, new HttpConnectionFactory(httpConfig));
+
+				// Next two are commented out to test SSL + HTTP/1.1
+				//SslConnectionFactory sslConnectionFactory = new SslConnectionFactory(sslContextFactory, alpnConnectionFactory.getProtocol());
+
+				//ServerConnector portUnifiedConnector = new ServerConnector(this.server, sslConnectionFactory, alpnConnectionFactory, http2ConnectionFactory, new HttpConnectionFactory(httpConfig));
+				//portUnifiedConnector.setHost(Network.getInstance().getBindAddress());
+				//portUnifiedConnector.setPort(Settings.getInstance().getApiPort());
+				// Written by AI
+				// 1. The standard HTTP connection
+				HttpConnectionFactory httpConnectionFactory = new HttpConnectionFactory(httpConfig);
+
+// 2. The HTTP2 connection (if you still want it)
 				HTTP2ServerConnectionFactory http2ConnectionFactory = new HTTP2ServerConnectionFactory(httpConfig);
+
+// 3. The ALPN connection (bridges SSL/HTTP2/HTTP1)
 				ALPNServerConnectionFactory alpnConnectionFactory = new ALPNServerConnectionFactory();
 				alpnConnectionFactory.setDefaultProtocol(HttpVersion.HTTP_1_1.asString());
 
+// 4. The SSL connection (pointing to ALPN)
 				SslConnectionFactory sslConnectionFactory = new SslConnectionFactory(sslContextFactory, alpnConnectionFactory.getProtocol());
 
-				ServerConnector portUnifiedConnector = new ServerConnector(this.server, sslConnectionFactory, alpnConnectionFactory, http2ConnectionFactory, new HttpConnectionFactory(httpConfig));
+// 5. THE MAGIC: The Optional SSL Factory
+// This detects if the incoming bytes are TLS or Plaintext
+				OptionalSslConnectionFactory optionalSslConnectionFactory = new OptionalSslConnectionFactory(
+						sslConnectionFactory,
+						httpConnectionFactory.getProtocol() // Fallback to plain HTTP if not SSL
+				);
+
+// 6. Assemble the Unified Connector
+				// Note the order: Optional -> SSL -> ALPN -> H2 -> HTTP
+				ServerConnector portUnifiedConnector = new ServerConnector(
+						this.server,
+						optionalSslConnectionFactory, // 1. The Detector
+						sslConnectionFactory,         // 2. The SSL Engine
+						alpnConnectionFactory,        // 3. The ALPN Negotiator
+						http2ConnectionFactory,       // 4. The HTTP/2 Engine
+						httpConnectionFactory         // 5. The Plaintext Engine
+				);
+
 				portUnifiedConnector.setHost(Network.getInstance().getBindAddress());
 				portUnifiedConnector.setPort(Settings.getInstance().getApiPort());
-
+				// End Code
 				this.server.addConnector(portUnifiedConnector);
 			} else {
 				// Non-SSL

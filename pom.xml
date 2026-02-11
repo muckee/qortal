@@ -698,11 +698,11 @@
 			<artifactId>jetty-alpn-server</artifactId>
 			<version>${jetty.version}</version>
 		</dependency>
-<!--		<dependency>-->
-<!--			<groupId>org.eclipse.jetty</groupId>-->
-<!--			<artifactId>jetty-alpn-java-server</artifactId>-->
-<!--			<version>${jetty.version}</version>-->
-<!--		</dependency>-->
+		<dependency> <!-- Needed for HTTP/2 -->
+			<groupId>org.eclipse.jetty</groupId>
+			<artifactId>jetty-alpn-java-server</artifactId>
+			<version>${jetty.version}</version>
+		</dependency>
 		<dependency>
 			<groupId>org.eclipse.jetty.http2</groupId>
 			<artifactId>http2-server</artifactId>
