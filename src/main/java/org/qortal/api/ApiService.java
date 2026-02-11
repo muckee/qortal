@@ -1,7 +1,10 @@
 package org.qortal.api;
 
 import io.swagger.v3.jaxrs2.integration.resources.OpenApiResource;
+import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.http2.HTTP2Cipher;
+import org.eclipse.jetty.http2.server.HTTP2ServerConnectionFactory;
 import org.eclipse.jetty.rewrite.handler.RedirectPatternRule;
 import org.eclipse.jetty.rewrite.handler.RewriteHandler;
 import org.eclipse.jetty.server.*;
@@ -20,16 +23,17 @@ import org.qortal.api.resource.ApiDefinition;
 import org.qortal.api.websocket.*;
 import org.qortal.network.Network;
 import org.qortal.settings.Settings;
+import org.qortal.utils.SslUtils;
 
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.servlet.http.HttpServletRequest;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.security.KeyStore;
 import java.security.SecureRandom;
 
@@ -83,16 +87,16 @@ public class ApiService {
 
 			if (keystorePathname != null && keystorePassword != null) {
 				// SSL version
-				if (!Files.isReadable(Path.of(keystorePathname)))
-					throw new RuntimeException("Failed to start SSL API due to broken keystore");
+				if (!Files.isReadable(Path.of(keystorePathname))) {
+					SslUtils.generateSsl();
+				}
 
 				// BouncyCastle-specific SSLContext build
 				SSLContext sslContext = SSLContext.getInstance("TLSv1.3", "BCJSSE");
 				KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance("PKIX", "BCJSSE");
 
-				KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType(), "BC");
-
-				try (InputStream keystoreStream = Files.newInputStream(Paths.get(keystorePathname))) {
+				KeyStore keyStore = KeyStore.getInstance("PKCS12", "BC");
+				try (InputStream keystoreStream = new FileInputStream(keystorePathname)) {
 					keyStore.load(keystoreStream, keystorePassword.toCharArray());
 				}
 
@@ -101,6 +105,8 @@ public class ApiService {
 
 				SslContextFactory.Server sslContextFactory = new SslContextFactory.Server();
 				sslContextFactory.setSslContext(sslContext);
+				sslContextFactory.setCipherComparator(HTTP2Cipher.COMPARATOR);
+				sslContextFactory.setProvider("BC");
 
 				this.server = new Server();
 
@@ -111,12 +117,13 @@ public class ApiService {
 				SecureRequestCustomizer src = new SecureRequestCustomizer();
 				httpConfig.addCustomizer(src);
 
-				HttpConnectionFactory httpConnectionFactory = new HttpConnectionFactory(httpConfig);
-				SslConnectionFactory sslConnectionFactory = new SslConnectionFactory(sslContextFactory, HttpVersion.HTTP_1_1.asString());
+				HTTP2ServerConnectionFactory http2ConnectionFactory = new HTTP2ServerConnectionFactory(httpConfig);
+				ALPNServerConnectionFactory alpnConnectionFactory = new ALPNServerConnectionFactory();
+				alpnConnectionFactory.setDefaultProtocol(HttpVersion.HTTP_1_1.asString());
 
-				ServerConnector portUnifiedConnector = new ServerConnector(this.server,
-						new DetectorConnectionFactory(sslConnectionFactory),
-						httpConnectionFactory);
+				SslConnectionFactory sslConnectionFactory = new SslConnectionFactory(sslContextFactory, alpnConnectionFactory.getProtocol());
+
+				ServerConnector portUnifiedConnector = new ServerConnector(this.server, sslConnectionFactory, alpnConnectionFactory, http2ConnectionFactory, new HttpConnectionFactory(httpConfig));
 				portUnifiedConnector.setHost(Network.getInstance().getBindAddress());
 				portUnifiedConnector.setPort(Settings.getInstance().getApiPort());
 
