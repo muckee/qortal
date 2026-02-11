@@ -35,6 +35,7 @@ import org.qortal.gui.SysTray;
 import org.qortal.network.Network;
 import org.qortal.network.NetworkData;
 import org.qortal.network.Peer;
+import org.qortal.network.PeerSendManagement;
 import org.qortal.network.PeerAddress;
 import org.qortal.network.message.*;
 import org.qortal.repository.*;
@@ -1215,6 +1216,7 @@ public class Controller extends Thread {
 				LOGGER.info("Shutting down networking");
 				Network.getInstance().shutdown();
 				NetworkData.getInstance().shutdown();
+				PeerSendManagement.getInstance().shutdown();
 
 				LOGGER.info("Shutting down controller");
 				this.interrupt();
