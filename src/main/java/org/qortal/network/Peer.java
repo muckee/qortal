@@ -1307,7 +1307,11 @@ public class Peer {
             LOGGER.debug("[{}] Disconnecting peer {} after {}: {}", this.peerConnectionId, this,
                     getConnectionAge(), reason);
         }
-        LOGGER.trace("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
+        if (this.getPeerType() == Peer.NETWORK) {
+            LOGGER.info("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
+        } else {
+            LOGGER.trace("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
+        }
 
         try {
             this.shutdown();

@@ -49,6 +49,13 @@ public abstract class ExecuteProduceConsume implements Runnable {
 	/** Whether a new thread has already been spawned and is waiting to start. Used to prevent spawning multiple new threads. */
 	private AtomicBoolean hasThreadPending = new AtomicBoolean(false);
 
+	/**
+	 * Log "stall risk" when spawning a new thread and active count >= this.
+	 * Heuristic: typical pool max is 512 (see Settings.maxNetworkThreadPoolSize); we log when we're
+	 * already fairly loaded so operators can correlate with high thread usage / disconnects.
+	 */
+	private static final int STALL_RISK_LOG_THRESHOLD = 50;
+
 	public ExecuteProduceConsume(ExecutorService executor) {
 		this.className = this.getClass().getSimpleName();
 		this.logger = LogManager.getLogger(this.getClass());
@@ -188,6 +195,11 @@ public abstract class ExecuteProduceConsume implements Runnable {
 
 				// If we have no thread pending and no excess of threads then we should spawn a fresh thread
 				if (!this.hasThreadPending.get() && this.activeThreadCount.get() == this.consumerCount.get()) {
+					int active = this.activeThreadCount.get();
+					if (active >= STALL_RISK_LOG_THRESHOLD) {
+						this.logger.info("EPC spawning thread while all {} threads are consuming (stall risk: no thread in select/read/write)",
+								active);
+					}
 
 					this.hasThreadPending.set( true );
 
