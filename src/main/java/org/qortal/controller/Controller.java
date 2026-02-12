@@ -898,10 +898,10 @@ public class Controller extends Thread {
 						
 						// Log high activity for monitoring, but 0 active threads is now normal when idle
 						if (networkStats.activeThreadCount > 50) {
-							LOGGER.info("Network worker pool has high activity: {} active threads", networkStats.activeThreadCount);
+							LOGGER.trace("Network worker pool has high activity: {} active threads", networkStats.activeThreadCount);
 						}
 						if (networkDataStats.activeThreadCount > 15) {
-							LOGGER.info("NetworkData worker pool has high activity: {} active threads", networkDataStats.activeThreadCount);
+							LOGGER.trace("NetworkData worker pool has high activity: {} active threads", networkDataStats.activeThreadCount);
 						}
 					} catch (Exception e) {
 						// This would indicate a more serious problem (e.g., Network not initialized)

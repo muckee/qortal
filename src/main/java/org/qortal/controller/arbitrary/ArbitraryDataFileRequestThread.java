@@ -574,10 +574,17 @@ public class ArbitraryDataFileRequestThread {
     public static class PeerDetails {
         public final Peer peer;
         public final boolean isDirect;
+        /** Number of chunks this peer has available for this request. */
+        public final int chunksAvailable;
         
         public PeerDetails(Peer peer, boolean isDirect) {
+            this(peer, isDirect, 1);
+        }
+        
+        public PeerDetails(Peer peer, boolean isDirect, int chunksAvailable) {
             this.peer = peer;
             this.isDirect = isDirect;
+            this.chunksAvailable = chunksAvailable;
         }
     }
 
@@ -617,13 +624,13 @@ public class ArbitraryDataFileRequestThread {
                 // Make peer effectively final for lambda
                 final Peer finalPeer = peer;
                 
-                // Only add if not already present (or merge isDirect status)
+                // Only add if not already present (or merge isDirect and count chunks)
                 peerDetailsMap.compute(peerData, (key, existing) -> {
                     if (existing != null) {
-                        // Merge: if ANY chunk is direct, mark as direct
-                        return new PeerDetails(finalPeer, existing.isDirect || isDirectFinal);
+                        // Merge: if ANY chunk is direct, mark as direct; sum chunk count
+                        return new PeerDetails(finalPeer, existing.isDirect || isDirectFinal, existing.chunksAvailable + 1);
                     } else {
-                        return new PeerDetails(finalPeer, isDirectFinal);
+                        return new PeerDetails(finalPeer, isDirectFinal, 1);
                     }
                 });
             }
