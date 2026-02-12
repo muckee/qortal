@@ -622,7 +622,7 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 
 		// ensure nothing additional is processed
 		for( Future<Optional<List<TransactionOutput>>> future: futureMap.values()) {
-			future.cancel(false);
+			future.cancel(true);
 		}
 
 		// if there are suppliers that failed, retry if allowed
@@ -650,7 +650,7 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 		try {
 			return Optional.of(this.getUnspentOutputs(address, true));
 		} catch (Exception e) {
-			LOGGER.warn("Failed to fetch outputs for address {}", address);
+			LOGGER.warn("Failed to fetch outputs for address {}: {}", address, e.getMessage());
 			return Optional.empty();
 		}
 	}
@@ -787,7 +787,7 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 		}
 
 		for( Future<Optional<BitcoinyTransaction>> future: futureMap.values()) {
-			future.cancel(false);
+			future.cancel(true);
 		}
 
 		if( !suppliersToRetry.isEmpty() ) {
@@ -964,7 +964,7 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 			}
 
 			for( Future<Optional<AddressInfo>> future: futureMap.values()) {
-				future.cancel(false);
+				future.cancel(true);
 			}
 
 			if( !suppliersToRetry.isEmpty() ) {
@@ -1232,7 +1232,7 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 			}
 
 			for( Future<Boolean> future: futureMap.values()) {
-				future.cancel(false);
+				future.cancel(true);
 			}
 		} catch (Exception e) {
 			throw new ForeignBlockchainException(e.getMessage());
@@ -1659,7 +1659,7 @@ public List<SimpleTransaction> getWalletTransactions(String key58) throws Foreig
 		}
 
 		for( Future<Optional<UTXO>> future: futureMap.values()) {
-			future.cancel(false);
+			future.cancel(true);
 		}
 
 		if( !suppliersToRetry.isEmpty() ) {
