@@ -83,7 +83,7 @@ public class Peer {
 	 * <p>
 	 * Just under every 30s is usually ideal to keep NAT mappings refreshed.
 	 */
-	private static final int PING_INTERVAL = 20_000; // ms
+	private static final int PING_INTERVAL = 40_000; // ms
 
 	/**
 	 * Maximum time to wait for a peer to respond with blocks (ms)
@@ -1308,7 +1308,6 @@ public class Peer {
                     getConnectionAge(), reason);
         }
         LOGGER.trace("peer.disconnect because {} - peer : {} - on Network {}", reason, peersNodeId, peerType);
-
         try {
             this.shutdown();
         } catch (Exception e) {
