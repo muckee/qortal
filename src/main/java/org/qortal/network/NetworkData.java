@@ -188,8 +188,15 @@ public class NetworkData {
 
     private String bindAddress = null;
 
-    private final ExecuteProduceConsume networkDataEPC;
-    
+    /** Dedicated I/O: select/read/write only. Never runs message handling. */
+    private Thread ioThread;
+    /** Produces Connect tasks and submits to worker pool. */
+    private Thread schedulerThread;
+    /** Message handling only (MessageTask, ConnectTask). Never does I/O. */
+    private ExecutorService networkDataWorkerPool;
+    /** Scheduler state: when to try next connect. */
+    private final AtomicLong nextConnectTaskTimestamp = new AtomicLong(0L);
+
     /**
      * Dedicated thread pool for processing ARBITRARY_DATA_FILE messages.
      * This prevents chunk validation and disk I/O from blocking the NetworkProcessor
@@ -233,17 +240,14 @@ public class NetworkData {
 
         int networkDataPriority = Settings.getInstance().getNetworkThreadPriority();
         if (networkDataPriority > 1)
-                networkDataPriority--;  // Create QDN with a lowerThread priority than the primary data
+            networkDataPriority--;  // Create QDN with a lower thread priority than the primary network
 
-        // ToDo: Need to adjust the thread size based on max connections allowed 
-        ExecutorService networkExecutor = new ThreadPoolExecutor(
-                10, // corePoolSize: maintain 10 threads
-                20, // maximumPoolSize
+        // Worker pool: message handling only (MessageTask, ConnectTask). I/O runs on dedicated ioThread.
+        this.networkDataWorkerPool = new ThreadPoolExecutor(
+                10, 20,
                 NETWORK_EPC_KEEPALIVE, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(), // Use an unbounded queue to hold excess tasks
-                new NamedThreadFactory("NetworkData-EPC", networkDataPriority));
-
-        networkDataEPC = new NetworkDataProcessor(networkExecutor);
+                new LinkedBlockingQueue<>(),
+                new NamedThreadFactory("NetworkData-Worker", networkDataPriority));
     }
 
     public void start() throws IOException, DataException {
@@ -306,8 +310,12 @@ public class NetworkData {
             UPnP.closePortTCP(qdnPort);
         }
 
-        // Start up first networking thread
-        networkDataEPC.start();
+        this.ioThread = new Thread(this::runIOLoop, "NetworkData-IO");
+        this.ioThread.setDaemon(false);
+        this.ioThread.start();
+        this.schedulerThread = new Thread(this::runSchedulerLoop, "NetworkData-Scheduler");
+        this.schedulerThread.setDaemon(false);
+        this.schedulerThread.start();
     }
 
     // Getters / setters
@@ -612,7 +620,15 @@ public class NetworkData {
     }
 
     public StatsSnapshot getStatsSnapshot() {
-        return this.networkDataEPC.getStatsSnapshot();
+        StatsSnapshot snapshot = new StatsSnapshot();
+        if (this.networkDataWorkerPool instanceof ThreadPoolExecutor) {
+            ThreadPoolExecutor tpe = (ThreadPoolExecutor) this.networkDataWorkerPool;
+            snapshot.activeThreadCount = tpe.getActiveCount();
+            snapshot.greatestActiveThreadCount = Math.max(snapshot.activeThreadCount, snapshot.greatestActiveThreadCount);
+            snapshot.consumerCount = snapshot.activeThreadCount;
+        }
+        snapshot.spawnFailures = 0;
+        return snapshot;
     }
 
 
@@ -830,214 +846,160 @@ public class NetworkData {
     //     }
     // };
 
-    // Main thread
-
-    class NetworkDataProcessor extends ExecuteProduceConsume {
-
-        /** Max MessageTasks produced in a row before forcing a channel task (select/read/write). Prevents starving I/O. */
-        private static final int MAX_MESSAGE_TASKS_BEFORE_CHANNEL_TASK = 15;
-
-        private final Logger LOGGER = LogManager.getLogger(NetworkDataProcessor.class);
-        private final AtomicLong nextConnectTaskTimestamp = new AtomicLong(0L); // ms - try first connect once NTP syncs
-        /** Number of MessageTasks produced since last channel task; used for fair scheduling. */
-        private final AtomicInteger messageTasksSinceLastChannelTask = new AtomicInteger(0);
-        private Iterator<SelectionKey> channelIterator = null;
-
-        NetworkDataProcessor(ExecutorService executor) {
-            super(executor);
-        }
-
-        @Override
-        protected void onSpawnFailure() {
-            // For debugging:
-            // ExecutorDumper.dump(this.executor, 3, ExecuteProduceConsume.class);
-        }
-
-        public int[] getThreadPoolStats() {
-            if (this.executor instanceof ThreadPoolExecutor) {
-                ThreadPoolExecutor tpe = (ThreadPoolExecutor) this.executor;
-                return new int[]{
-                    tpe.getActiveCount(),
-                    tpe.getQueue().size(),
-                    tpe.getPoolSize()
-                };
-            }
-            return null;
-        }
-
-        @Override
-        protected Task produceTask(boolean canBlock) throws InterruptedException {
-            Task task;
-
-            // Fair scheduling: cap MessageTasks in a row so select() / ChannelReadTask / ChannelWriteTask get to run.
-            // Otherwise under chunk flood we never run select(), TCP buffers fill, flow control stalls the download.
-            if (messageTasksSinceLastChannelTask.get() >= MAX_MESSAGE_TASKS_BEFORE_CHANNEL_TASK) {
-                messageTasksSinceLastChannelTask.set(0);
-                task = null;
-            } else {
-                task = maybeProducePeerMessageTask();
-                if (task != null) {
-                    messageTasksSinceLastChannelTask.incrementAndGet();
-                    return task;
-                }
-            }
-
-            final Long now = NTP.getTime();
-
-            // If it's a new peer we need to connect it on the data port
-            task = maybeProduceConnectPeerTask(now);
-            if (task != null) {
-                return task;
-            }
-
-            // Run channel I/O (select then read or write). Reset so we can produce more MessageTasks next round.
-            messageTasksSinceLastChannelTask.set(0);
-            // Only this method can block to reduce CPU spin
-            return maybeProduceChannelTask(canBlock);
-        }
-
-        private Task maybeProducePeerMessageTask() {
-            return getImmutableConnectedPeers().stream()
-                    .map(peer -> peer.getMessageTask(Peer.NETWORKDATA))
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElse(null);
-        }
-
-        private Task maybeProduceConnectPeerTask(Long now) throws InterruptedException {
-            if(now == null) {
-                return null;
-            }
-            if (now < nextConnectTaskTimestamp.get()) {
-                return null;
-            }
-
-            if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers) {
-                LOGGER.debug("Not going to try to connect, .size() >= {}", minOutboundPeers);
-                return null;
-            }
-
-            // Check if we're isolated (no peers at all, inbound or outbound)
-            boolean hasNoPeers = getImmutableHandshakedPeers().isEmpty();
-            
-            // When isolated AND retrying backoff peers, use longer interval to avoid hammering
-            if (hasNoPeers && lastPeerWasFromBackoff) {
-                nextConnectTaskTimestamp.set(now + ISOLATION_RETRY_INTERVAL);
-            } else {
-                nextConnectTaskTimestamp.set(now + 3000L); // change from 1s to 3s, don't need to get data peers so aggressively
-            }
-
-            Peer targetPeer = getConnectablePeer(now);
-            if (targetPeer == null) {
-                return null;
-            }
-            targetPeer.setPeerType(Peer.NETWORKDATA);      // Make sure we set this to a NetworkData Type
-
-            LOGGER.trace("Time to connect a Peer");
-            // Create connection task
-            return new PeerConnectTask(targetPeer);
-        }
-
-        private Task maybeProduceChannelTask(boolean canBlock) throws InterruptedException {
-            // Synchronization here to enforce thread-safety on channelIterator
+    /**
+     * Dedicated I/O loop: select(), then read/write/accept for all ready channels.
+     * Never runs message handling; after each read, drains peer's pending messages to worker pool.
+     */
+    private void runIOLoop() {
+        final List<Peer> readPeersThisRound = new ArrayList<>(32);
+        while (!isShuttingDown && !Thread.currentThread().isInterrupted()) {
+            readPeersThisRound.clear();
             synchronized (channelSelector) {
-                // anything to do?
-                if (channelIterator == null) {
-                    try {
-                        long selectStart = System.nanoTime();
-                        int selectedCount;
-                        if (canBlock) {
-                            selectedCount = channelSelector.select(50L);  // Reduced from 1000L - wakeups control latency now
-                        } else {
-                            selectedCount = channelSelector.selectNow();
-                        }
-                        long selectTime = System.nanoTime() - selectStart;
-                        
-                        // Log if selector blocked for significant time (> 10ms) or selected many channels
-                        if (selectTime > 10_000_000) { // > 10ms
-                            LOGGER.trace("NetworkData selector blocked for {} ms, selected {} channels",
-                                    selectTime / 1_000_000.0, selectedCount);
-                        }
-                    } catch (IOException e) {
-                        LOGGER.warn("Channel selection threw IOException: {}", e.getMessage());
-                        return null;
-                    }
-
-                    if (Thread.currentThread().isInterrupted()) {
-                        throw new InterruptedException();
-                    }
-
-                    channelIterator = channelSelector.selectedKeys().iterator();
-                    LOGGER.trace("Thread {}, after {} select, channelIterator now {}",
-                            Thread.currentThread().getId(),
-                            canBlock ? "blocking": "non-blocking",
-                            channelIterator);
-                }
-
-                if (!channelIterator.hasNext()) {
-                    channelIterator = null; // Nothing to do so reset iterator to cause new select
-
-                    LOGGER.trace("Thread {}, channelIterator now null", Thread.currentThread().getId());
-                    return null;
-                }
-
-                final SelectionKey nextSelectionKey = channelIterator.next();
-                channelIterator.remove();
-
-                // Just in case underlying socket channel already closed elsewhere, etc.
-                if (!nextSelectionKey.isValid())
-                    return null;
-
-                LOGGER.trace("Thread {}, nextSelectionKey {}", Thread.currentThread().getId(), nextSelectionKey);
-
-                SelectableChannel socketChannel = nextSelectionKey.channel();
-
                 try {
-                    if (nextSelectionKey.isReadable()) {
-                        clearInterestOps(nextSelectionKey, SelectionKey.OP_READ);
-                        Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
-                        if (peer == null)
-                            return null;
-                        return new ChannelReadTask((SocketChannel) socketChannel, peer);
+                    channelSelector.select(50L);
+                } catch (IOException e) {
+                    LOGGER.warn("Channel selection threw IOException: {}", e.getMessage());
+                    continue;
+                }
+                if (Thread.currentThread().isInterrupted())
+                    break;
+                Set<SelectionKey> selected = channelSelector.selectedKeys();
+                Iterator<SelectionKey> it = selected.iterator();
+                while (it.hasNext()) {
+                    SelectionKey key = it.next();
+                    it.remove();
+                    if (!key.isValid())
+                        continue;
+                    SelectableChannel socketChannel = key.channel();
+                    try {
+                        if (key.isReadable()) {
+                            clearInterestOps(key, SelectionKey.OP_READ);
+                            Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
+                            if (peer != null) {
+                                try {
+                                    peer.readChannel();
+                                    readPeersThisRound.add(peer);
+                                    setInterestOps(socketChannel, SelectionKey.OP_READ);
+                                } catch (IOException e) {
+                                    if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
+                                        peer.disconnect("Connection reset");
+                                    } else {
+                                        LOGGER.trace("[{}] NetworkData I/O thread encountered I/O error: {}", peer.getPeerConnectionId(), e.getMessage(), e);
+                                        peer.disconnect("I/O error");
+                                    }
+                                }
+                            }
+                        } else if (key.isWritable()) {
+                            clearInterestOps(key, SelectionKey.OP_WRITE);
+                            Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
+                            if (peer != null && channelsPendingWrite.add(socketChannel)) {
+                                try {
+                                    boolean needsMoreWriting = peer.writeChannel();
+                                    if (needsMoreWriting)
+                                        setInterestOps(socketChannel, SelectionKey.OP_WRITE);
+                                } catch (IOException e) {
+                                    if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
+                                        peer.disconnect("Connection reset");
+                                    } else {
+                                        LOGGER.debug("[{}] NetworkData I/O thread encountered I/O error on write: {}", peer.getPeerConnectionId(), e.getMessage(), e);
+                                        peer.disconnect("I/O error");
+                                    }
+                                } finally {
+                                    channelsPendingWrite.remove(socketChannel);
+                                }
+                            }
+                        } else if (key.isAcceptable()) {
+                            clearInterestOps(key, SelectionKey.OP_ACCEPT);
+                            try {
+                                new ChannelAcceptTask(serverChannel, Peer.NETWORKDATA).perform();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                break;
+                            }
+                            setInterestOps(serverSelectionKey.channel(), SelectionKey.OP_ACCEPT);
+                        }
+                    } catch (CancelledKeyException e) {
                     }
-
-                    if (nextSelectionKey.isWritable()) {
-                        clearInterestOps(nextSelectionKey, SelectionKey.OP_WRITE);
-
-                        Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
-        
-                        if (peer == null)
-                            return null;
-
-                        // Any thread that queues a message to send can set OP_WRITE,
-                        // but we only allow one pending/active ChannelWriteTask per Peer
-                        if (!channelsPendingWrite.add(socketChannel)) {
-                            // Another ChannelWriteTask is already running for this channel.  
-                            return null;
-                        }   
-
-                        return new ChannelWriteTask((SocketChannel) socketChannel, peer);
-                    }
-
-                    if (nextSelectionKey.isAcceptable()) {
-                        clearInterestOps(nextSelectionKey, SelectionKey.OP_ACCEPT);
-                      
-
-                        // Need to pass in a reference to the network type
-                        return new ChannelAcceptTask((ServerSocketChannel) socketChannel, Peer.NETWORKDATA);
-                    }
-                } catch (CancelledKeyException e) {
-                    /*
-                     * Sometimes nextSelectionKey is cancelled / becomes invalid between the isValid() test at line 586
-                     * and later calls to isReadable() / isWritable() / isAcceptable() which themselves call isValid()!
-                     * Those isXXXable() calls could throw CancelledKeyException, so we catch it here and return null.
-                     */
-                    return null;
                 }
             }
+            for (Peer peer : readPeersThisRound) {
+                ExecuteProduceConsume.Task task;
+                while ((task = peer.getMessageTask(Peer.NETWORKDATA)) != null) {
+                    final ExecuteProduceConsume.Task t = task;
+                    try {
+                        networkDataWorkerPool.execute(() -> {
+                            try {
+                                t.perform();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            } catch (Exception e) {
+                                LOGGER.warn("NetworkData worker task threw: {}", e.getMessage(), e);
+                            }
+                        });
+                    } catch (java.util.concurrent.RejectedExecutionException e) {
+                        // Worker pool is full or shutting down - log and continue
+                        // Message will be lost but system remains stable
+                        LOGGER.warn("[{}] NetworkData worker pool rejected message task (pool full or shutting down)", 
+                                peer.getPeerConnectionId());
+                        break; // Stop draining this peer's queue
+                    }
+                }
+            }
+        }
+        LOGGER.debug("NetworkData I/O loop exiting");
+    }
 
+    private void runSchedulerLoop() {
+        while (!isShuttingDown && !Thread.currentThread().isInterrupted()) {
+            try {
+                Long now = NTP.getTime();
+                ExecuteProduceConsume.Task task = maybeProduceConnectPeerTask(now);
+                if (task != null) {
+                    final ExecuteProduceConsume.Task t = task;
+                    try {
+                        networkDataWorkerPool.execute(() -> {
+                            try {
+                                t.perform();
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            } catch (Exception e) {
+                                LOGGER.warn("NetworkData scheduler task threw: {}", e.getMessage(), e);
+                            }
+                        });
+                    } catch (java.util.concurrent.RejectedExecutionException e) {
+                        // Worker pool is full or shutting down - skip this task
+                        LOGGER.debug("NetworkData worker pool rejected scheduler task (pool full or shutting down)");
+                    }
+                } else {
+                    Thread.sleep(10);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        LOGGER.debug("NetworkData scheduler loop exiting");
+    }
+
+    private ExecuteProduceConsume.Task maybeProduceConnectPeerTask(Long now) throws InterruptedException {
+        if (now == null || now < nextConnectTaskTimestamp.get()) {
             return null;
         }
+        if (getImmutableOutboundHandshakedPeers().size() >= minOutboundPeers) {
+            return null;
+        }
+        boolean hasNoPeers = getImmutableHandshakedPeers().isEmpty();
+        if (hasNoPeers && lastPeerWasFromBackoff) {
+            nextConnectTaskTimestamp.set(now + ISOLATION_RETRY_INTERVAL);
+        } else {
+            nextConnectTaskTimestamp.set(now + 3000L);
+        }
+        Peer targetPeer = getConnectablePeer(now);
+        if (targetPeer == null) {
+            return null;
+        }
+        targetPeer.setPeerType(Peer.NETWORKDATA);
+        return new PeerConnectTask(targetPeer);
     }
 
     /**
@@ -1565,17 +1527,26 @@ public class NetworkData {
         SelectionKey selectionKey = socketChannel.keyFor(channelSelector);
 
         if (selectionKey == null) {
-            try {
-                selectionKey = socketChannel.register(this.channelSelector, interestOps);
-            } catch (ClosedChannelException e) {
-                // Channel already closed so ignore
-                LOGGER.trace("Failed to set interest ops on channel {} - channel already closed", socketChannel);
-                return;
-            } catch (Exception e) {
-                LOGGER.trace("Failed to register channel {} for interest ops {}: {}", socketChannel, interestOps, e.getMessage());
-                return;
+            // Must synchronize on selector when registering to avoid race with select()
+            synchronized (channelSelector) {
+                // Re-check after acquiring lock (channel might have been registered by another thread)
+                selectionKey = socketChannel.keyFor(channelSelector);
+                if (selectionKey == null) {
+                    try {
+                        selectionKey = socketChannel.register(this.channelSelector, interestOps);
+                        // Wake selector to process the new registration immediately
+                        channelSelector.wakeup();
+                    } catch (ClosedChannelException e) {
+                        // Channel already closed so ignore
+                        LOGGER.trace("Failed to set interest ops on channel {} - channel already closed", socketChannel);
+                        return;
+                    } catch (Exception e) {
+                        LOGGER.trace("Failed to register channel {} for interest ops {}: {}", socketChannel, interestOps, e.getMessage());
+                        return;
+                    }
+                    // Fall-through to allow logging
+                }
             }
-            // Fall-through to allow logging
         }
 
         try {
@@ -2516,13 +2487,36 @@ public class NetworkData {
             Thread.currentThread().interrupt();
         }
 
-        // Stop processing threads
+        if (this.ioThread != null && this.ioThread.isAlive()) {
+            this.ioThread.interrupt();
+            try {
+                this.ioThread.join(5000);
+                if (this.ioThread.isAlive())
+                    LOGGER.warn("NetworkData I/O thread did not terminate in time");
+            } catch (InterruptedException e) {
+                LOGGER.warn("Interrupted while waiting for NetworkData I/O thread");
+            }
+        }
+        if (this.schedulerThread != null && this.schedulerThread.isAlive()) {
+            this.schedulerThread.interrupt();
+            try {
+                this.schedulerThread.join(2000);
+                if (this.schedulerThread.isAlive())
+                    LOGGER.warn("NetworkData scheduler thread did not terminate in time");
+            } catch (InterruptedException e) {
+                LOGGER.warn("Interrupted while waiting for NetworkData scheduler thread");
+            }
+        }
         try {
-            if (!this.networkDataEPC.shutdown(5000)) {
-                LOGGER.warn("Network threads failed to terminate");
+            this.networkDataWorkerPool.shutdown();
+            if (!this.networkDataWorkerPool.awaitTermination(5000, TimeUnit.MILLISECONDS)) {
+                this.networkDataWorkerPool.shutdownNow();
+                if (!this.networkDataWorkerPool.awaitTermination(2000, TimeUnit.MILLISECONDS))
+                    LOGGER.warn("NetworkData worker pool did not terminate");
             }
         } catch (InterruptedException e) {
-            LOGGER.warn("Interrupted while waiting for networking threads to terminate");
+            LOGGER.warn("Interrupted while waiting for NetworkData worker pool to terminate");
+            this.networkDataWorkerPool.shutdownNow();
         }
 
         try {  // DeMap QDN uPnP so other nodes can use it when we are done
@@ -2533,6 +2527,15 @@ public class NetworkData {
         // Close all peer connections
         for (Peer peer : this.getImmutableConnectedPeers()) {
             peer.shutdown();
+        }
+        // Release selector and pending-write set to avoid resource leaks
+        this.channelsPendingWrite.clear();
+        if (this.channelSelector != null && this.channelSelector.isOpen()) {
+            try {
+                this.channelSelector.close();
+            } catch (IOException e) {
+                LOGGER.debug("Error closing channel selector: {}", e.getMessage());
+            }
         }
     }
 }

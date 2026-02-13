@@ -371,8 +371,8 @@ public class ArbitraryResource {
 	@GET
 	@Path("/resource/request/peers/{service}/{name}")
 	@Operation(
-			summary = "Get peer count for an active file request (default resource)",
-			description = "Returns the number of peers available for downloading chunks for the specified resource. Returns empty result if no active request is found.",
+			summary = "Get peer information for an active file request (default resource)",
+			description = "Returns detailed information about peers available for downloading chunks for the specified resource (default/latest). Each peer includes how many chunks they have available. Returns empty result if no active request is found.",
 			responses = {
 					@ApiResponse(
 							content = @Content(
@@ -393,7 +393,7 @@ public class ArbitraryResource {
 	@Path("/resource/request/peers/{service}/{name}/{identifier}")
 	@Operation(
 			summary = "Get peer information for an active file request",
-			description = "Returns detailed information about peers available for downloading chunks for the specified resource. Returns empty result if no active request is found.",
+			description = "Returns detailed information about peers available for downloading chunks for the specified resource. Each peer includes how many chunks they have available. Returns empty result if no active request is found.",
 			responses = {
 					@ApiResponse(
 							content = @Content(
@@ -454,7 +454,7 @@ public class ArbitraryResource {
 					}
 				}
 				
-				peerInfoList.add(new PeerInfo(id, speed, isDirect));
+				peerInfoList.add(new PeerInfo(id, speed, isDirect, entry.getValue().chunksAvailable));
 			}
 			
 			// Sort by speed (HIGH first, then LOW, then IDLE) then by id for consistent ordering

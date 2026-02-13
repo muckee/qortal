@@ -847,7 +847,7 @@ public class ArbitraryDataFileListManager {
 
                 // If we've seen this request recently, then ignore
                 if (arbitraryDataFileListRequests.putIfAbsent(message.getId(), newEntry) != null) {
-                    LOGGER.info("Ignoring hash list request from peer {} for signature {}", peer, signature58);
+                    LOGGER.trace("Ignoring hash list request from peer {} for signature {}", peer, signature58);
                     continue;
                 }
 
@@ -856,9 +856,9 @@ public class ArbitraryDataFileListManager {
                 String requestingPeer = getArbitraryDataFileListMessage.getRequestingPeer();
 
                 if (requestingPeer != null) {
-                    LOGGER.info("Received a request to provide a list request with {} hashes from peer {} (requesting peer {}) for signature {} messageId {}", hashCount, peer, requestingPeer, signature58, message.getId());
+                    LOGGER.trace("Received a request to provide a list request with {} hashes from peer {} (requesting peer {}) for signature {} messageId {}", hashCount, peer, requestingPeer, signature58, message.getId());
                 } else {
-                    LOGGER.info("Requesting Peer is null");
+                    LOGGER.trace("Requesting Peer is null");
                 }
 
                 signatureBySignature58.put(signature58, signature);
@@ -1013,7 +1013,7 @@ public class ArbitraryDataFileListManager {
 
                 // We should only respond if we have at least one hash
                 String requestingPeer = requestingPeerBySignature58.get(signature58);
-                LOGGER.info("Preparing our response to GetArbitraryDataFileList, {}", signature58);
+                LOGGER.trace("Preparing our response to GetArbitraryDataFileList, {}", signature58);
                 if (!hashes.isEmpty()) {
 
                     // Firstly we should keep track of the requesting peer, to allow for potential direct connections later
@@ -1055,7 +1055,7 @@ public class ArbitraryDataFileListManager {
                         
                         if (hasCompleteKnowledge) {
                             // Nothing left to do, so return to prevent any unnecessary forwarding from occurring
-                            LOGGER.info("No need for any forwarding because file list request is fully served with complete knowledge");
+                            LOGGER.trace("No need for any forwarding because file list request is fully served with complete knowledge");
                             continue;
                         }
                         LOGGER.trace("Have some chunks but may have incomplete knowledge - will still forward request");
