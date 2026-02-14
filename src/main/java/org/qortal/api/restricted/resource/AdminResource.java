@@ -44,16 +44,23 @@ import org.qortal.data.system.SystemInfo;
 import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 import org.qortal.utils.SslUtils;
+import org.bouncycastle.util.io.pem.PemObject;
+import org.bouncycastle.util.io.pem.PemWriter;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -72,7 +79,8 @@ public class AdminResource {
 	@Context
 	HttpServletRequest request;
 
-	private static final String CA_CERT_PATH = "ca.crt";
+	/** Alias of the server key entry in the SSL keystore (must match SslUtils). */
+	private static final String SSL_KEYSTORE_ALIAS = "server";
 
 	@POST
 	@Path("/http/createca")
@@ -111,9 +119,36 @@ public class AdminResource {
 			}
 	)
 	public String getCA() {
+		String keystorePathname = Settings.getInstance().getSslKeystorePathname();
+		String keystorePassword = Settings.getInstance().getSslKeystorePassword();
+		if (keystorePathname == null || keystorePassword == null) {
+			return "CA certificate not found.";
+		}
+		java.nio.file.Path keystorePath = Paths.get(keystorePathname);
+		if (!Files.isReadable(keystorePath)) {
+			return "CA certificate not found.";
+		}
 		try {
-			return new String(Files.readAllBytes(Paths.get(CA_CERT_PATH)));
-		} catch (IOException e) {
+			KeyStore keyStore = KeyStore.getInstance("PKCS12", "BC");
+			try (FileInputStream fis = new FileInputStream(keystorePath.toFile())) {
+				keyStore.load(fis, keystorePassword.toCharArray());
+			}
+			if (!keyStore.containsAlias(SSL_KEYSTORE_ALIAS)) {
+				return "CA certificate not found.";
+			}
+			Certificate[] chain = keyStore.getCertificateChain(SSL_KEYSTORE_ALIAS);
+			if (chain == null || chain.length < 2) {
+				return "CA certificate not found.";
+			}
+			// Root CA is the last certificate in the chain (same order as TLS server sends).
+			X509Certificate caCert = (X509Certificate) chain[chain.length - 1];
+			StringWriter sw = new StringWriter();
+			try (PemWriter pw = new PemWriter(sw)) {
+				pw.writeObject(new PemObject("CERTIFICATE", caCert.getEncoded()));
+			}
+			return sw.toString();
+		} catch (Exception e) {
+			LOGGER.debug("Could not read CA from keystore: {}", e.getMessage());
 			return "CA certificate not found.";
 		}
 	}
