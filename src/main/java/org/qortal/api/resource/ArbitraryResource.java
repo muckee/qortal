@@ -692,6 +692,7 @@ public class ArbitraryResource {
 				arbitraryResourceData.name = transactionData.getName();
 				arbitraryResourceData.service = transactionData.getService();
 				arbitraryResourceData.identifier = transactionData.getIdentifier();
+				arbitraryResourceData.latestSignature = transactionData.getSignature();
 				if (!resources.contains(arbitraryResourceData)) {
 					resources.add(arbitraryResourceData);
 				}
