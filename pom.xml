@@ -32,8 +32,7 @@
 		<javax.servlet-api.version>4.0.1</javax.servlet-api.version>
 		<jaxb-runtime.version>2.3.9</jaxb-runtime.version>
 		<jersey.version>2.47</jersey.version>
-		<jetty.version>9.4.56.v20240826</jetty.version>
-		<!-- <jetty.version>9.4.57.v20241219</jetty.version> v5.2.0 Coming Soon -->
+		<jetty.version>10.0.26</jetty.version> <!-- Next logical jump -->
 		<json-simple.version>1.1.1</json-simple.version>
 		<json.version>20240303</json.version>
 		<jsoup.version>1.18.1</jsoup.version>
@@ -711,7 +710,7 @@
 		<!-- Websocket support -->
 		<dependency>
 			<groupId>org.eclipse.jetty.websocket</groupId>
-			<artifactId>javax-websocket-server-impl</artifactId>
+			<artifactId>websocket-jetty-server</artifactId>
 			<version>${jetty.version}</version>
 		</dependency>
 		<!-- Jersey -->

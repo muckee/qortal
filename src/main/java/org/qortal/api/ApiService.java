@@ -16,6 +16,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.servlets.CrossOriginFilter;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.servlet.ServletContainer;
 import org.qortal.api.resource.AnnotationPostProcessor;
@@ -225,6 +226,7 @@ public class ApiService {
 				rewriteHandler.addRule(new RedirectPatternRule("/api-documentation", "/api-documentation/")); // redirect to add trailing slash if missing
 			}
 
+			JettyWebSocketServletContainerInitializer.configure(context, null);
 			context.addServlet(AdminStatusWebSocket.class, "/websockets/admin/status");
 			context.addServlet(BlocksWebSocket.class, "/websockets/blocks");
 			context.addServlet(DataMonitorSocket.class, "/websockets/datamonitor");
