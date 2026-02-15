@@ -4,6 +4,8 @@ import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -19,7 +21,10 @@ import java.security.*;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.net.InetAddress;
 import java.util.Date;
+import java.util.ArrayList;
+import java.util.List;
 
 public class SslUtils {
 
@@ -74,23 +79,54 @@ public class SslUtils {
         KeyPair serverKeyPair = kpGen.generateKeyPair();
 
         // Create server certificate
-        X500Name subject = new X500Name("CN=localhost");
+        X500Name subject = new X500Name("CN=qortal-server"); // Standardize the CN
         BigInteger serial = BigInteger.valueOf(System.currentTimeMillis());
         Date notBefore = new Date();
         Date notAfter = new Date(System.currentTimeMillis() + (365 * 24 * 60 * 60 * 1000));
 
-        JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(new X500Name("CN=qortal.org"), serial, notBefore, notAfter, subject, serverKeyPair.getPublic());
+        JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
+                new X500Name("CN=qortal.org"),
+                serial,
+                notBefore,
+                notAfter,
+                subject,
+                serverKeyPair.getPublic());
+
         certBuilder.addExtension(Extension.basicConstraints, false, new BasicConstraints(false));
         certBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
 
+        // --- START SAN EXTENSION ADDITION ---
+        List<GeneralName> altNames = new ArrayList<>();
+
+        // DNS Entries
+        altNames.add(new GeneralName(GeneralName.dNSName, "localhost"));
+
+        InetAddress localHost = InetAddress.getLocalHost();
+        String hostName = localHost.getHostName(); // Shortname
+        String canonicalHostName = localHost.getCanonicalHostName(); // FQDN
+
+        altNames.add(new GeneralName(GeneralName.dNSName, hostName));
+        if (!canonicalHostName.equalsIgnoreCase(hostName)) {
+            altNames.add(new GeneralName(GeneralName.dNSName, canonicalHostName));
+        }
+
+        // IP Entries
+        altNames.add(new GeneralName(GeneralName.iPAddress, "127.0.0.1"));
+        altNames.add(new GeneralName(GeneralName.iPAddress, localHost.getHostAddress()));
+
+        GeneralNames subjectAltNames = new GeneralNames(altNames.toArray(new GeneralName[0]));
+        certBuilder.addExtension(Extension.subjectAlternativeName, false, subjectAltNames);
+        // --- END SAN EXTENSION ADDITION ---
+
         JcaContentSignerBuilder signerBuilder = new JcaContentSignerBuilder("SHA256WithRSAEncryption").setProvider("BC");
-        X509Certificate cert = new JcaX509CertificateConverter().setProvider("BC").getCertificate(certBuilder.build(signerBuilder.build(caKeyPair.getPrivate())));
+        X509Certificate cert = new JcaX509CertificateConverter()
+                .setProvider("BC")
+                .getCertificate(certBuilder.build(signerBuilder.build(caKeyPair.getPrivate())));
 
         // Save server certificate and key
         saveCert(cert, SERVER_CERT_PATH);
         saveKey(serverKeyPair.getPrivate(), SERVER_KEY_PATH);
     }
-
     private static void saveCert(X509Certificate cert, String path) throws Exception {
         StringWriter sw = new StringWriter();
         try (PemWriter pw = new PemWriter(sw)) {
