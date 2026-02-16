@@ -3,18 +3,14 @@ package org.qortal.repository.hsqldb;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.qortal.controller.Controller;
-import org.qortal.controller.arbitrary.ArbitraryTransactionDataHashWrapper;
 import org.qortal.controller.tradebot.BitcoinACCTv1TradeBot;
 import org.qortal.gui.SplashFrame;
 
 import java.sql.Connection;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 public class HSQLDBDatabaseUpdates {
@@ -62,7 +58,7 @@ public class HSQLDBDatabaseUpdates {
 	 * @return database version, or 0 if no schema yet
 	 * @throws SQLException
 	 */
-	private static int fetchDatabaseVersion(Connection connection) throws SQLException {
+	public static int fetchDatabaseVersion(Connection connection) throws SQLException {
 		try (Statement stmt = connection.createStatement()) {
 			if (stmt.execute("SELECT version FROM DatabaseInfo"))
 				try (ResultSet resultSet = stmt.getResultSet()) {
@@ -1066,58 +1062,10 @@ public class HSQLDBDatabaseUpdates {
 				case 51:
 
 					LOGGER.info("Adding signatures to arbitrary resources cache table - this can take a while...");
-					stmt.execute("ALTER TABLE ArbitraryResourcesCache ADD latestSignature Signature");
-
-					ResultSet resultSet = stmt.executeQuery(
-						"SELECT signature, service, name, identifier " +
-								"FROM Transactions t " +
-								"JOIN ArbitraryTransactions a ON t.signature = a.signature " +
-								"WHERE name IS NOT NULL AND a.update_method = 0 " +
-								"ORDER BY created_when DESC "
-					);
-
-					Map<ArbitraryTransactionDataHashWrapper, byte[]> signatureByData = new HashMap<>();
-
-					while( resultSet.next()) {
-
-						signatureByData.putIfAbsent(
-							new ArbitraryTransactionDataHashWrapper(
-									resultSet.getInt(2),
-									resultSet.getString(3),
-									resultSet.getString(4)
-							),
-							resultSet.getBytes(1) );
-					}
-
-					LOGGER.info("Updating {} arbitrary resources with latest signatures", signatureByData.size());
-
-					String updateSql = "UPDATE ArbitraryResourcesCache SET latestSignature = ? WHERE name = ? AND service = ? AND identifier = ?";
-					PreparedStatement preparedStatement = connection.prepareStatement(updateSql);
-
-					boolean autoCommit = connection.getAutoCommit();
-					connection.setAutoCommit(false);
-
-					for (Map.Entry<ArbitraryTransactionDataHashWrapper, byte[]> entry : signatureByData.entrySet()) {
-						preparedStatement.setBytes(1, entry.getValue());
-
-						ArbitraryTransactionDataHashWrapper wrapper = entry.getKey();
-						preparedStatement.setString(2, wrapper.getName());
-						preparedStatement.setInt(3, entry.getKey().getService());
-
-						String identifier = entry.getKey().getIdentifier();
-						preparedStatement.setString(4, identifier != null ? identifier : "default");
-
-						preparedStatement.addBatch();
-					}
-
-					preparedStatement.executeBatch();
-
-					LOGGER.info("Updated arbitrary resources with latest signatures");
-
-					connection.commit();
-					connection.setAutoCommit(autoCommit);
-
-					LOGGER.info("arbitrary resources data latest signatures committed");
+					stmt.execute("ALTER TABLE ArbitraryResourcesCache ADD latest_signature Signature");
+					stmt.execute("ALTER TABLE ArbitraryResourcesCache ADD lower_case_name RegisteredName");
+					stmt.execute("CREATE INDEX ArbitraryResourcesServiceLowerNameIdIndex ON ArbitraryResourcesCache (service, lower_case_name, identifier)");
+					stmt.execute("ALTER TABLE DatabaseInfo ADD latest_signature_populated TINYINT NOT NULL DEFAULT 0");
 
 					break;
 
