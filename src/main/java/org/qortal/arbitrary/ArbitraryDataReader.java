@@ -202,7 +202,7 @@ public class ArbitraryDataReader {
                 // Wait for it to complete (up to 60 seconds)
                 int maxWaitMs = 60000;
                 int waitedMs = 0;
-                int sleepMs = 100;
+                int sleepMs = 200;
                 
                 while (waitedMs < maxWaitMs) {
                     try {
