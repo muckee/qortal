@@ -20,6 +20,7 @@ import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.utils.Base58;
+import org.qortal.utils.DaemonThreadFactory;
 import org.qortal.utils.ExecuteProduceConsume;
 import org.qortal.utils.ExecuteProduceConsume.StatsSnapshot;
 import org.qortal.utils.NTP;
@@ -213,6 +214,10 @@ public class NetworkData {
             new NamedThreadFactory("ChunkProcessor", Thread.NORM_PRIORITY),
             new ThreadPoolExecutor.CallerRunsPolicy() // back-pressure: if queue full, caller processes
     );
+
+     /** Dedicated pool for QDN force-connect so processFileHashes doesn't block on TCP connect. Shut down in shutdown(). */
+    private static final ExecutorService forceConnectExecutor = Executors.newCachedThreadPool(
+        new DaemonThreadFactory("QDN-force-connect", Thread.NORM_PRIORITY));
     
     private Selector channelSelector;
     private ServerSocketChannel serverChannel;
@@ -1449,6 +1454,20 @@ public class NetworkData {
         return true;
     }
 
+      /**
+     * Submit forceConnectPeer to a dedicated executor so the caller doesn't block on TCP connect.
+     * Use this from processFileHashes so the first loop stays fast when there are many direct-not-connected responses.
+     */
+      public void forceConnectPeerAsync(Peer newPeer) {
+        forceConnectExecutor.submit(() -> {
+            try {
+                forceConnectPeer(newPeer);
+            } catch (Exception e) {
+                LOGGER.debug("Force connect failed for peer {}: {}", newPeer, e.getMessage());
+            }
+        });
+    }
+
     public Peer getPeerFromChannel(SocketChannel socketChannel) {
         for (Peer peer : this.getImmutableConnectedPeers()) {
             if (peer.getSocketChannel() == socketChannel) {
@@ -2484,6 +2503,18 @@ public class NetworkData {
         } catch (InterruptedException e) {
             LOGGER.warn("Interrupted while waiting for chunk processor pool to terminate");
             chunkProcessorPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        LOGGER.info("Shutting down QDN force-connect executor...");
+        forceConnectExecutor.shutdown();
+        try {
+            if (!forceConnectExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("Force-connect executor did not terminate in time, forcing shutdown");
+                forceConnectExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOGGER.warn("Interrupted while waiting for force-connect executor to terminate");
+            forceConnectExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
 
