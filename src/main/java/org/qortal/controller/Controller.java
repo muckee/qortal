@@ -444,6 +444,10 @@ public class Controller extends Thread {
 				ArbitraryDataCacheManager.getInstance().buildArbitraryResourcesCache(repository, false);
 			}
 
+			try(final Repository repository = RepositoryManager.getRepository()) {
+				ArbitraryDataCacheManager.populateLatestSignaturesIfNecessary(repository.getConnection());
+			}
+
 			if( Settings.getInstance().isDbCacheEnabled() ) {
 				LOGGER.info("Starting Db Cache...");
 				HSQLDBDataCacheManager hsqldbDataCacheManager = new HSQLDBDataCacheManager();

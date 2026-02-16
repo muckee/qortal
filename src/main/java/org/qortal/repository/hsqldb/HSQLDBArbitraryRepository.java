@@ -614,7 +614,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		}
 
 		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when, " +
-				"title, description, category, tag1, tag2, tag3, tag4, tag5, latestSignature " +
+				"title, description, category, tag1, tag2, tag3, tag4, tag5, latest_signature " +
 				"FROM ArbitraryResourcesCache " +
 				"LEFT JOIN ArbitraryMetadataCache USING (service, name, identifier) " +
 				"WHERE ArbitraryResourcesCache.service = ? AND ArbitraryResourcesCache.name = ?");
@@ -627,7 +627,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 			bindParams.add(identifier);
 		}
 		else {
-			sql.append(" AND identifier IS NULL");
+			sql.append(" AND (identifier IS NULL OR identifier = 'default')");
 		}
 
 		try (ResultSet resultSet = this.repository.checkedExecute(sql.toString(), bindParams.toArray())) {
@@ -702,12 +702,12 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 			return null;
 		}
 
-		sql.append("SELECT latestSignature " +
+		sql.append("SELECT latest_signature " +
 				"FROM ArbitraryResourcesCache " +
-				"WHERE lower(name) = ? AND service = ? " +
+				"WHERE lower_case_name = ? AND service = ? " +
 				"AND identifier = ?");
 
-		bindParams.add(name);
+		bindParams.add(name.toLowerCase());
 		bindParams.add(service.value);
 		bindParams.add(identifier != null ? identifier : "default");
 
@@ -728,7 +728,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		List<Object> bindParams = new ArrayList<>();
 
 		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when, " +
-				"title, description, category, tag1, tag2, tag3, tag4, tag5,latestSignature " +
+				"title, description, category, tag1, tag2, tag3, tag4, tag5,latest_signature " +
 				"FROM ArbitraryResourcesCache " +
 				"LEFT JOIN ArbitraryMetadataCache USING (service, name, identifier) " +
 				"WHERE name IS NOT NULL ORDER BY created_when");
@@ -816,7 +816,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		List<Object> bindParams = new ArrayList<>();
 
 		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when, " +
-				"title, description, category, tag1, tag2, tag3, tag4, tag5, latestSignature " +
+				"title, description, category, tag1, tag2, tag3, tag4, tag5, latest_signature " +
 				"FROM ArbitraryResourcesCache " +
 				"LEFT JOIN ArbitraryMetadataCache USING (service, name, identifier) " +
 				"WHERE name IS NOT NULL");
@@ -1015,7 +1015,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		List<Object> bindParams = new ArrayList<>();
 
 		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when, " +
-				"title, description, category, tag1, tag2, tag3, tag4, tag5, latestSignature " +
+				"title, description, category, tag1, tag2, tag3, tag4, tag5, latest_signature " +
 				"FROM ArbitraryResourcesCache");
 
 		// Default to "latest" mode
@@ -1280,7 +1280,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		StringBuilder sql = new StringBuilder(512);
 		List<Object> bindParams = new ArrayList<>();
 
-		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when, latestSignature ");
+		sql.append("SELECT name, service, identifier, size, status, created_when, updated_when, latest_signature ");
 		sql.append("FROM ArbitraryResourcesCache ");
 		sql.append("WHERE name IS NOT NULL");
 
@@ -1400,7 +1400,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 		saveHelper.bind("service", arbitraryResourceData.service.value).bind("name", arbitraryResourceData.name)
 				.bind("identifier", arbitraryResourceData.identifier).bind("size", arbitraryResourceData.size)
 				.bind("created_when", arbitraryResourceData.created).bind("updated_when", arbitraryResourceData.updated)
-				.bind( "latestSignature", arbitraryResourceData.latestSignature);
+				.bind( "latest_signature", arbitraryResourceData.latestSignature);
 
 		try {
 			saveHelper.execute(this.repository);
