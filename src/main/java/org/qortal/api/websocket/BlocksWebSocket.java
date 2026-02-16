@@ -1,9 +1,9 @@
 package org.qortal.api.websocket;
 
 import org.eclipse.jetty.websocket.api.Session;
-import org.eclipse.jetty.websocket.api.WebSocketException;
+import org.eclipse.jetty.websocket.api.WriteCallback;
 import org.eclipse.jetty.websocket.api.annotations.*;
-import org.eclipse.jetty.websocket.servlet.WebSocketServletFactory;
+import org.eclipse.jetty.websocket.server.JettyWebSocketServletFactory;
 import org.qortal.api.ApiError;
 import org.qortal.controller.Controller;
 import org.qortal.data.block.BlockData;
@@ -24,9 +24,13 @@ import java.util.List;
 @SuppressWarnings("serial")
 public class BlocksWebSocket extends ApiWebSocket implements Listener {
 
+	/**
+	 * Jetty 10 implementation of configure.
+	 */
 	@Override
-	public void configure(WebSocketServletFactory factory) {
-		factory.register(BlocksWebSocket.class);
+	protected void configure(JettyWebSocketServletFactory factory) {
+		// Map the current instance to the upgrade request path
+		factory.addMapping("/", (req, res) -> this);
 
 		EventBus.INSTANCE.addListener(this);
 	}
@@ -57,7 +61,13 @@ public class BlocksWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketError
 	public void onWebSocketError(Session session, Throwable throwable) {
-		/* We ignore errors for now, but method here to silence log spam */
+		/* We ignore errors to silence log spam */
+	}
+
+	@Override
+	public void destroy() {
+		EventBus.INSTANCE.removeListener(this);
+		super.destroy();
 	}
 
 	@OnWebSocketMessage
@@ -128,10 +138,13 @@ public class BlocksWebSocket extends ApiWebSocket implements Listener {
 		try {
 			marshall(stringWriter, blockSummary);
 
-			session.getRemote().sendStringByFuture(stringWriter.toString());
-		} catch (IOException | WebSocketException e) {
-			// No output this time
+			// In Jetty 10, sendStringByFuture is replaced by sendString with a Callback.
+			if (session.isOpen()) {
+				session.getRemote().sendString(stringWriter.toString(), WriteCallback.NOOP);
+			}
+		} catch (IOException e) {
+			// No output this time. Specific catch for WebSocketException is no longer 
+			// required here as transport errors are handled by IO or Callbacks.
 		}
 	}
-
 }

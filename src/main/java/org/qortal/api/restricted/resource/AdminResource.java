@@ -32,28 +32,35 @@ import org.qortal.controller.Synchronizer.SynchronizationResult;
 import org.qortal.controller.repository.BlockArchiveRebuilder;
 import org.qortal.data.account.MintingAccountData;
 import org.qortal.data.account.RewardShareData;
-import org.qortal.data.system.DbConnectionInfo;
 import org.qortal.network.Network;
 import org.qortal.network.Peer;
 import org.qortal.network.PeerAddress;
-import org.qortal.repository.ReindexManager;
 import org.qortal.repository.DataException;
+import org.qortal.repository.ReindexManager;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.data.system.SystemInfo;
 import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
+import org.qortal.utils.SslUtils;
+import org.bouncycastle.util.io.pem.PemObject;
+import org.bouncycastle.util.io.pem.PemWriter;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -71,6 +78,80 @@ public class AdminResource {
 
 	@Context
 	HttpServletRequest request;
+
+	/** Alias of the server key entry in the SSL keystore (must match SslUtils). */
+	private static final String SSL_KEYSTORE_ALIAS = "server";
+
+	@POST
+	@Path("/http/createca")
+	@Operation(
+			summary = "Create a new local root CA",
+			description = "Generates and saves a new root CA certificate and key.",
+			responses = {
+					@ApiResponse(
+							description = "CA created successfully",
+							content = @Content(mediaType = MediaType.TEXT_PLAIN, schema = @Schema(type = "string"))
+					)
+			}
+	)
+	@ApiErrors({ApiError.INVALID_DATA, ApiError.REPOSITORY_ISSUE})
+	@SecurityRequirement(name = "apiKey")
+	public String createCA() {
+		Security.checkApiCallAllowed(request);
+		try {
+			SslUtils.generateSsl();
+			return "CA and server certificate created successfully";
+		} catch (Exception e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA, e);
+		}
+	}
+
+	@GET
+	@Path("/http/getca")
+	@Operation(
+			summary = "Get the local root CA certificate",
+			description = "Returns the root CA certificate in PEM format.",
+			responses = {
+					@ApiResponse(
+							description = "The root CA certificate",
+							content = @Content(mediaType = MediaType.TEXT_PLAIN, schema = @Schema(type = "string"))
+					)
+			}
+	)
+	public String getCA() {
+		String keystorePathname = Settings.getInstance().getSslKeystorePathname();
+		String keystorePassword = Settings.getInstance().getSslKeystorePassword();
+		if (keystorePathname == null || keystorePassword == null) {
+			return "CA certificate not found.";
+		}
+		java.nio.file.Path keystorePath = Paths.get(keystorePathname);
+		if (!Files.isReadable(keystorePath)) {
+			return "CA certificate not found.";
+		}
+		try {
+			KeyStore keyStore = KeyStore.getInstance("PKCS12", "BC");
+			try (FileInputStream fis = new FileInputStream(keystorePath.toFile())) {
+				keyStore.load(fis, keystorePassword.toCharArray());
+			}
+			if (!keyStore.containsAlias(SSL_KEYSTORE_ALIAS)) {
+				return "CA certificate not found.";
+			}
+			Certificate[] chain = keyStore.getCertificateChain(SSL_KEYSTORE_ALIAS);
+			if (chain == null || chain.length < 2) {
+				return "CA certificate not found.";
+			}
+			// Root CA is the last certificate in the chain (same order as TLS server sends).
+			X509Certificate caCert = (X509Certificate) chain[chain.length - 1];
+			StringWriter sw = new StringWriter();
+			try (PemWriter pw = new PemWriter(sw)) {
+				pw.writeObject(new PemObject("CERTIFICATE", caCert.getEncoded()));
+			}
+			return sw.toString();
+		} catch (Exception e) {
+			LOGGER.debug("Could not read CA from keystore: {}", e.getMessage());
+			return "CA certificate not found.";
+		}
+	}
 
 	@GET
 	@Path("/unused")
