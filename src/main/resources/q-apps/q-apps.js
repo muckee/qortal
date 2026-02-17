@@ -123,7 +123,7 @@ const REQUEST_CACHE_TTL = 5000; // 5 seconds
 const pendingMessageChannels = new Map();
 
 // Request queue to limit concurrent requests
-const MAX_CONCURRENT_REQUESTS = 10;
+const MAX_CONCURRENT_REQUESTS = 30;
 let activeRequestCount = 0;
 const requestQueue = [];
 
