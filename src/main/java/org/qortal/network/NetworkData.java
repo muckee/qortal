@@ -1035,8 +1035,16 @@ public class NetworkData {
                     // ATOMIC: Lock to prevent disconnect during repair (double-check pattern)
                     synchronized (this.peerListsLock) {
                         // Recheck after acquiring lock - peer might have been removed
-                        boolean stillInConnected = this.connectedPeers.stream().anyMatch(p -> p == peer);
-                        boolean stillNotInHandshaked = !this.handshakedPeers.stream().anyMatch(p -> p == peer);
+                        // ATOMIC: Hold list locks during iteration to prevent ConcurrentModificationException
+                        boolean stillInConnected;
+                        synchronized (this.connectedPeers) {
+                            stillInConnected = this.connectedPeers.stream().anyMatch(p -> p == peer);
+                        }
+                        
+                        boolean stillNotInHandshaked;
+                        synchronized (this.handshakedPeers) {
+                            stillNotInHandshaked = !this.handshakedPeers.stream().anyMatch(p -> p == peer);
+                        }
                         
                         if (stillInConnected && stillNotInHandshaked) {
                             // Normal case: handshake completed but peer missing from handshakedPeers
@@ -1076,8 +1084,16 @@ public class NetworkData {
                 // ATOMIC: Lock to prevent disconnect during repair (double-check pattern)
                 synchronized (this.peerListsLock) {
                     // Recheck after acquiring lock - peer might have been removed
-                    boolean stillInHandshaked = this.handshakedPeers.stream().anyMatch(p -> p == peer);
-                    boolean stillNotInConnected = !this.connectedPeers.stream().anyMatch(p -> p == peer);
+                    // ATOMIC: Hold list locks during iteration to prevent ConcurrentModificationException
+                    boolean stillInHandshaked;
+                    synchronized (this.handshakedPeers) {
+                        stillInHandshaked = this.handshakedPeers.stream().anyMatch(p -> p == peer);
+                    }
+                    
+                    boolean stillNotInConnected;
+                    synchronized (this.connectedPeers) {
+                        stillNotInConnected = !this.connectedPeers.stream().anyMatch(p -> p == peer);
+                    }
                     
                     if (stillInHandshaked && stillNotInConnected) {
                         // Peer is orphaned - in handshakedPeers but not in connectedPeers
@@ -1942,10 +1958,13 @@ public class NetworkData {
             // This can happen if the PoW thread completes handshake but the peer wasn't properly
             // added to connectedPeers during connection establishment
             // Use object identity (==), not equals() which compares by address
-            if (!this.connectedPeers.stream().anyMatch(p -> p == peer)) {
-                LOGGER.warn("[NetworkData: {}] Peer {} not in connectedPeers during handshake completion - adding now",
-                        peer.getPeerConnectionId(), peer);
-                this.addConnectedPeer(peer);
+            // ATOMIC: Hold connectedPeers lock during iteration to prevent ConcurrentModificationException
+            synchronized (this.connectedPeers) {
+                if (!this.connectedPeers.stream().anyMatch(p -> p == peer)) {
+                    LOGGER.warn("[NetworkData: {}] Peer {} not in connectedPeers during handshake completion - adding now",
+                            peer.getPeerConnectionId(), peer);
+                    this.addConnectedPeer(peer);  // Safe: addConnectedPeer is reentrant
+                }
             }
 
             // Synchronize duplicate check and add operation to prevent race condition
