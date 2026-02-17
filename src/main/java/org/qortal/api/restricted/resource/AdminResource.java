@@ -228,16 +228,26 @@ public class AdminResource {
 					if (pair.size() < 2) continue;
 					Integer type = (Integer) pair.get(0);
 					Object value = pair.get(1);
-					if (type == null || value == null) continue;
-					if (type == 2) {
-						dns.add(value.toString());
-					} else if (type == 7 && value instanceof byte[]) {
-						try {
+				if (type == null || value == null) continue;
+				if (type == 2) {
+					dns.add(value.toString());
+				} else if (type == 7) {
+					// Handle both byte[] (standard ASN.1 OCTET STRING) and String formats
+					try {
+						if (value instanceof byte[]) {
+							// Standard format: byte array representation of IP address
 							ip.add(InetAddress.getByAddress((byte[]) value).getHostAddress());
-						} catch (Exception e) {
-							LOGGER.trace("Could not parse SAN IP: {}", e.getMessage());
+						} else if (value instanceof String) {
+							// Alternative format: IP address already as string
+							String ipStr = (String) value;
+							if (!ipStr.isEmpty()) {
+								ip.add(ipStr);
+							}
 						}
+					} catch (Exception e) {
+						LOGGER.trace("Could not parse SAN IP: {}", e.getMessage());
 					}
+				}
 				}
 			}
 			return new CertificateSanInfo(dns, ip);
