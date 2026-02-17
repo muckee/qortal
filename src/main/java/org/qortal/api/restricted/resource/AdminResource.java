@@ -21,6 +21,7 @@ import org.qortal.account.Account;
 import org.qortal.account.PrivateKeyAccount;
 import org.qortal.api.*;
 import org.qortal.api.model.ActivitySummary;
+import org.qortal.api.model.CertificateSanInfo;
 import org.qortal.api.model.NodeInfo;
 import org.qortal.api.model.NodeStatus;
 import org.qortal.block.BlockChain;
@@ -54,6 +55,7 @@ import javax.ws.rs.core.MediaType;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.StringWriter;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
@@ -62,6 +64,7 @@ import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -86,7 +89,7 @@ public class AdminResource {
 	@Path("/http/createca")
 	@Operation(
 			summary = "Create a new local root CA",
-			description = "Generates and saves a new root CA certificate and key.",
+			description = "Generates and saves a new root CA certificate and key, then restarts the API service to apply the new certificate.",
 			responses = {
 					@ApiResponse(
 							description = "CA created successfully",
@@ -96,11 +99,34 @@ public class AdminResource {
 	)
 	@ApiErrors({ApiError.INVALID_DATA, ApiError.REPOSITORY_ISSUE})
 	@SecurityRequirement(name = "apiKey")
-	public String createCA() {
+	public String createCA(@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
 		Security.checkApiCallAllowed(request);
 		try {
+			// Generate new SSL certificate
 			SslUtils.generateSsl();
-			return "CA and server certificate created successfully";
+			
+			// Restart API service in a background thread to apply the new certificate
+			// This allows the current request to complete before the restart happens
+			new Thread(() -> {
+				try {
+					// Give the response time to be sent back to the client
+					Thread.sleep(500);
+					LOGGER.info("Restarting API service to apply new SSL certificate...");
+					ApiService apiService = ApiService.getInstance();
+					try {
+						apiService.restart();
+					} catch (Exception e) {
+						LOGGER.warn("First restart attempt failed ({}), retrying after 2s: {}", e.getMessage(), e);
+						Thread.sleep(2000);
+						apiService.start();
+					}
+					LOGGER.info("API service restarted successfully with new SSL certificate");
+				} catch (Exception e) {
+					LOGGER.error("Failed to restart API service after certificate generation. API may be down. Restart the node to recover: {}", e.getMessage(), e);
+				}
+			}, "SSL-Cert-Restart").start();
+			
+			return "CA and server certificate created successfully. API service will restart in a moment to apply the new certificate.";
 		} catch (Exception e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_DATA, e);
 		}
@@ -118,7 +144,9 @@ public class AdminResource {
 					)
 			}
 	)
-	public String getCA() {
+	@SecurityRequirement(name = "apiKey")
+	public String getCA(@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
+		Security.checkApiCallAllowed(request);
 		String keystorePathname = Settings.getInstance().getSslKeystorePathname();
 		String keystorePassword = Settings.getInstance().getSslKeystorePassword();
 		if (keystorePathname == null || keystorePassword == null) {
@@ -150,6 +178,72 @@ public class AdminResource {
 		} catch (Exception e) {
 			LOGGER.debug("Could not read CA from keystore: {}", e.getMessage());
 			return "CA certificate not found.";
+		}
+	}
+
+	@GET
+	@Path("/http/san")
+	@Operation(
+			summary = "Get SSL certificate Subject Alternative Names",
+			description = "Returns the DNS names and IP addresses the current server certificate is valid for (SAN list).",
+			responses = {
+					@ApiResponse(
+							description = "SAN list (dns and ip arrays)",
+							content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = CertificateSanInfo.class))
+					)
+			}
+	)
+	@SecurityRequirement(name = "apiKey")
+	public CertificateSanInfo getCertificateSan(@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
+		Security.checkApiCallAllowed(request);
+		List<String> dns = new ArrayList<>();
+		List<String> ip = new ArrayList<>();
+		String keystorePathname = Settings.getInstance().getSslKeystorePathname();
+		String keystorePassword = Settings.getInstance().getSslKeystorePassword();
+		if (keystorePathname == null || keystorePassword == null) {
+			return new CertificateSanInfo(dns, ip);
+		}
+		java.nio.file.Path keystorePath = Paths.get(keystorePathname);
+		if (!Files.isReadable(keystorePath)) {
+			return new CertificateSanInfo(dns, ip);
+		}
+		try {
+			KeyStore keyStore = KeyStore.getInstance("PKCS12", "BC");
+			try (FileInputStream fis = new FileInputStream(keystorePath.toFile())) {
+				keyStore.load(fis, keystorePassword.toCharArray());
+			}
+			if (!keyStore.containsAlias(SSL_KEYSTORE_ALIAS)) {
+				return new CertificateSanInfo(dns, ip);
+			}
+			Certificate[] chain = keyStore.getCertificateChain(SSL_KEYSTORE_ALIAS);
+			if (chain == null || chain.length < 1) {
+				return new CertificateSanInfo(dns, ip);
+			}
+			X509Certificate serverCert = (X509Certificate) chain[0];
+			Collection<?> sanCollection = serverCert.getSubjectAlternativeNames();
+			if (sanCollection != null) {
+				for (Object item : sanCollection) {
+					if (!(item instanceof List)) continue;
+					List<?> pair = (List<?>) item;
+					if (pair.size() < 2) continue;
+					Integer type = (Integer) pair.get(0);
+					Object value = pair.get(1);
+					if (type == null || value == null) continue;
+					if (type == 2) {
+						dns.add(value.toString());
+					} else if (type == 7 && value instanceof byte[]) {
+						try {
+							ip.add(InetAddress.getByAddress((byte[]) value).getHostAddress());
+						} catch (Exception e) {
+							LOGGER.trace("Could not parse SAN IP: {}", e.getMessage());
+						}
+					}
+				}
+			}
+			return new CertificateSanInfo(dns, ip);
+		} catch (Exception e) {
+			LOGGER.debug("Could not read SAN from keystore: {}", e.getMessage());
+			return new CertificateSanInfo(dns, ip);
 		}
 	}
 

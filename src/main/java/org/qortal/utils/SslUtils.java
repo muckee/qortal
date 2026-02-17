@@ -1,5 +1,7 @@
 package org.qortal.utils;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
@@ -22,11 +24,18 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.util.Date;
 import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class SslUtils {
+
+    private static final Logger LOGGER = LogManager.getLogger(SslUtils.class);
 
     private static final String CA_CERT_PATH = "ca.crt";
     private static final String CA_KEY_PATH = "ca.key";
@@ -111,8 +120,70 @@ public class SslUtils {
         }
 
         // IP Entries
+        // Always add loopback explicitly
         altNames.add(new GeneralName(GeneralName.iPAddress, "127.0.0.1"));
-        altNames.add(new GeneralName(GeneralName.iPAddress, localHost.getHostAddress()));
+        
+        // Discover and add all local network interface IPs
+        Set<String> addedIps = new HashSet<>();
+        addedIps.add("127.0.0.1"); // Track loopback to avoid duplicates
+        
+        try {
+            Enumeration<NetworkInterface> networkInterfaces = NetworkInterface.getNetworkInterfaces();
+            while (networkInterfaces.hasMoreElements()) {
+                NetworkInterface networkInterface = networkInterfaces.nextElement();
+                
+                // Skip interfaces that are down or loopback (we already added 127.0.0.1)
+                if (!networkInterface.isUp() || networkInterface.isLoopback()) {
+                    continue;
+                }
+                
+                Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress address = addresses.nextElement();
+                    
+                    // Skip loopback addresses (redundant check for safety)
+                    if (address.isLoopbackAddress()) {
+                        continue;
+                    }
+                    
+                    // Skip link-local addresses (169.254.x.x for IPv4, fe80:: for IPv6)
+                    if (address.isLinkLocalAddress()) {
+                        continue;
+                    }
+                    
+                    String ipAddress = address.getHostAddress();
+                    
+                    // For IPv6 addresses, strip zone identifier if present (e.g., %eth0)
+                    int percentIndex = ipAddress.indexOf('%');
+                    if (percentIndex > 0) {
+                        ipAddress = ipAddress.substring(0, percentIndex);
+                    }
+                    
+                    // Avoid duplicate IPs
+                    if (!addedIps.contains(ipAddress)) {
+                        altNames.add(new GeneralName(GeneralName.iPAddress, ipAddress));
+                        addedIps.add(ipAddress);
+                        LOGGER.info("Adding IP address to SSL certificate SAN: {}", ipAddress);
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            LOGGER.warn("Failed to enumerate network interfaces for SSL certificate: {}", e.getMessage());
+            // Fallback to old behavior if network enumeration fails
+            try {
+                String fallbackIp = localHost.getHostAddress();
+                if (!addedIps.contains(fallbackIp)) {
+                    altNames.add(new GeneralName(GeneralName.iPAddress, fallbackIp));
+                    addedIps.add(fallbackIp);
+                    LOGGER.info("Added fallback IP address to SSL certificate SAN: {}", fallbackIp);
+                }
+            } catch (Exception ex) {
+                LOGGER.warn("Failed to get fallback IP address: {}", ex.getMessage());
+            }
+        }
+        
+        LOGGER.info("SSL certificate will be valid for {} IP address(es) and {} DNS name(s)", 
+                addedIps.size(), altNames.size() - addedIps.size());
 
         GeneralNames subjectAltNames = new GeneralNames(altNames.toArray(new GeneralName[0]));
         certBuilder.addExtension(Extension.subjectAlternativeName, false, subjectAltNames);
