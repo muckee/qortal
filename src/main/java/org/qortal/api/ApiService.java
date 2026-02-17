@@ -1,6 +1,8 @@
 package org.qortal.api;
 
 import io.swagger.v3.jaxrs2.integration.resources.OpenApiResource;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.http2.HTTP2Cipher;
@@ -9,6 +11,7 @@ import org.eclipse.jetty.rewrite.handler.RedirectPatternRule;
 import org.eclipse.jetty.rewrite.handler.RewriteHandler;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.server.handler.ErrorHandler;
+import org.eclipse.jetty.util.component.LifeCycle;
 import org.eclipse.jetty.server.handler.InetAccessHandler;
 import org.eclipse.jetty.servlet.DefaultServlet;
 import org.eclipse.jetty.servlet.FilterHolder;
@@ -36,27 +39,52 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.Security;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.security.KeyStore;
 import java.security.SecureRandom;
 
 public class ApiService {
 
+	private static final Logger LOGGER = LogManager.getLogger(ApiService.class);
 	private static ApiService instance;
 
-	private final ResourceConfig config;
+	/** Ensures stop/start/restart are atomic and no concurrent lifecycle changes. */
+	private final Object lifecycleLock = new Object();
+
 	private Server server;
 	private ApiKey apiKey;
+
+	/**
+	 * Creates a fresh ResourceConfig for each server lifecycle or inspection.
+	 * Jersey locks (immutabilizes) a ResourceConfig when used by a ServletContainer,
+	 * so we must not reuse the same instance across restarts.
+	 */
+	private static ResourceConfig createResourceConfig() {
+		ResourceConfig config = new ResourceConfig();
+		config.packages("org.qortal.api.resource", "org.qortal.api.restricted.resource");
+		config.register(org.glassfish.jersey.media.multipart.MultiPartFeature.class);
+		config.register(org.qortal.api.model.ConnectedPeerJacksonWriter.class, 10000);
+		config.register(OpenApiResource.class);
+		config.register(ApiDefinition.class);
+		config.register(AnnotationPostProcessor.class);
+		return config;
+	}
+
+	/** Add BouncyCastle providers once per JVM; repeated adds would clutter the provider list. */
+	private static void ensureProvidersAdded() {
+		if (Security.getProvider("BC") == null) {
+			Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
+		}
+		if (Security.getProvider("BCJSSE") == null) {
+			Security.addProvider(new org.bouncycastle.jsse.provider.BouncyCastleJsseProvider());
+		}
+	}
 
 	public static final String API_VERSION_HEADER = "X-API-VERSION";
 
 	private ApiService() {
-		this.config = new ResourceConfig();
-		this.config.packages("org.qortal.api.resource", "org.qortal.api.restricted.resource");
-		this.config.register(org.glassfish.jersey.media.multipart.MultiPartFeature.class);
-		this.config.register(org.qortal.api.model.ConnectedPeerJacksonWriter.class, 10000);  // High priority for ConnectedPeer endpoints
-		this.config.register(OpenApiResource.class);
-		this.config.register(ApiDefinition.class);
-		this.config.register(AnnotationPostProcessor.class);
 	}
 
 	public static ApiService getInstance() {
@@ -66,8 +94,9 @@ public class ApiService {
 		return instance;
 	}
 
+	/** Returns resource classes; uses a fresh config so no long-lived reference to a locked config is retained. */
 	public Iterable<Class<?>> getResources() {
-		return this.config.getClasses();
+		return List.copyOf(createResourceConfig().getClasses());
 	}
 
 	public void setApiKey(ApiKey apiKey) {
@@ -80,11 +109,15 @@ public class ApiService {
 
 
 	public void start() {
+		synchronized (lifecycleLock) {
+			startInternal();
+		}
+	}
+
+	private void startInternal() {
 		//System.setProperty("javax.net.debug", "ssl,handshake");
 		try {
-			// 1. Setup Providers
-			Security.addProvider(new org.bouncycastle.jce.provider.BouncyCastleProvider());
-			Security.addProvider(new org.bouncycastle.jsse.provider.BouncyCastleJsseProvider());
+			ensureProvidersAdded();
 
 			String keystorePathname = Settings.getInstance().getSslKeystorePathname();
 			String keystorePassword = Settings.getInstance().getSslKeystorePassword();
@@ -196,8 +229,8 @@ public class ApiService {
 			corsFilterHolder.setInitParameter(CrossOriginFilter.CHAIN_PREFLIGHT_PARAM, "false");
 			context.addFilter(corsFilterHolder, "/*", null);
 
-			// API servlet
-			ServletContainer container = new ServletContainer(this.config);
+			// API servlet - fresh config per server lifecycle (Jersey locks config on use)
+			ServletContainer container = new ServletContainer(createResourceConfig());
 			ServletHolder apiServlet = new ServletHolder(container);
 			apiServlet.setInitOrder(1);
 			context.addServlet(apiServlet, "/*");
@@ -252,14 +285,64 @@ public class ApiService {
 	}
 
 	public void stop() {
-		try {
-			// Stop server
-			this.server.stop();
-		} catch (Exception e) {
-			// Failed to stop
+		synchronized (lifecycleLock) {
+			stopInternal();
 		}
+	}
 
+	/**
+	 * Stop the server and wait for it to fully release the port using Jetty's lifecycle listener.
+	 * Must be called with lifecycleLock held.
+	 */
+	private void stopInternal() {
+		if (this.server == null) {
+			return;
+		}
+		Server s = this.server;
 		this.server = null;
+		try {
+			CountDownLatch latch = new CountDownLatch(1);
+			s.addEventListener(new LifeCycle.Listener() {
+				@Override
+				public void lifeCycleStopped(LifeCycle event) {
+					latch.countDown();
+				}
+			});
+			s.stop();
+			if (!latch.await(15, TimeUnit.SECONDS)) {
+				LOGGER.warn("API server did not stop within 15 seconds");
+			}
+		} catch (Exception e) {
+			LOGGER.error("Failed to stop API server: {}", e.getMessage(), e);
+		}
+	}
+
+	/**
+	 * Restart the API service to reload SSL certificates or other configuration.
+	 * If the new server fails to start, attempts to bring the old server back up so the API is not permanently down.
+	 */
+	public void restart() throws Exception {
+		synchronized (lifecycleLock) {
+			Server oldServer = this.server;
+			try {
+				stopInternal();
+				startInternal();
+			} catch (Exception e) {
+				LOGGER.error("Restart failed, attempting recovery", e);
+				if (oldServer != null && oldServer.isStopped()) {
+					try {
+						oldServer.start();
+						this.server = oldServer;
+						LOGGER.info("Recovery successful: previous API server restored");
+					} catch (Exception ex) {
+						LOGGER.error("Recovery failed", ex);
+						throw new RuntimeException("Restart and recovery failed", e);
+					}
+				} else {
+					throw new RuntimeException("Restart failed", e);
+				}
+			}
+		}
 	}
 
 	public static int getApiVersion(HttpServletRequest request) {
