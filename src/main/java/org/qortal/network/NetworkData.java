@@ -20,6 +20,7 @@ import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
 import org.qortal.utils.Base58;
+import org.qortal.utils.DaemonThreadFactory;
 import org.qortal.utils.ExecuteProduceConsume;
 import org.qortal.utils.ExecuteProduceConsume.StatsSnapshot;
 import org.qortal.utils.NTP;
@@ -213,6 +214,10 @@ public class NetworkData {
             new NamedThreadFactory("ChunkProcessor", Thread.NORM_PRIORITY),
             new ThreadPoolExecutor.CallerRunsPolicy() // back-pressure: if queue full, caller processes
     );
+
+     /** Dedicated pool for QDN force-connect so processFileHashes doesn't block on TCP connect. Shut down in shutdown(). */
+    private static final ExecutorService forceConnectExecutor = Executors.newCachedThreadPool(
+        new DaemonThreadFactory("QDN-force-connect", Thread.NORM_PRIORITY));
     
     private Selector channelSelector;
     private ServerSocketChannel serverChannel;
@@ -1030,8 +1035,16 @@ public class NetworkData {
                     // ATOMIC: Lock to prevent disconnect during repair (double-check pattern)
                     synchronized (this.peerListsLock) {
                         // Recheck after acquiring lock - peer might have been removed
-                        boolean stillInConnected = this.connectedPeers.stream().anyMatch(p -> p == peer);
-                        boolean stillNotInHandshaked = !this.handshakedPeers.stream().anyMatch(p -> p == peer);
+                        // ATOMIC: Hold list locks during iteration to prevent ConcurrentModificationException
+                        boolean stillInConnected;
+                        synchronized (this.connectedPeers) {
+                            stillInConnected = this.connectedPeers.stream().anyMatch(p -> p == peer);
+                        }
+                        
+                        boolean stillNotInHandshaked;
+                        synchronized (this.handshakedPeers) {
+                            stillNotInHandshaked = !this.handshakedPeers.stream().anyMatch(p -> p == peer);
+                        }
                         
                         if (stillInConnected && stillNotInHandshaked) {
                             // Normal case: handshake completed but peer missing from handshakedPeers
@@ -1071,8 +1084,16 @@ public class NetworkData {
                 // ATOMIC: Lock to prevent disconnect during repair (double-check pattern)
                 synchronized (this.peerListsLock) {
                     // Recheck after acquiring lock - peer might have been removed
-                    boolean stillInHandshaked = this.handshakedPeers.stream().anyMatch(p -> p == peer);
-                    boolean stillNotInConnected = !this.connectedPeers.stream().anyMatch(p -> p == peer);
+                    // ATOMIC: Hold list locks during iteration to prevent ConcurrentModificationException
+                    boolean stillInHandshaked;
+                    synchronized (this.handshakedPeers) {
+                        stillInHandshaked = this.handshakedPeers.stream().anyMatch(p -> p == peer);
+                    }
+                    
+                    boolean stillNotInConnected;
+                    synchronized (this.connectedPeers) {
+                        stillNotInConnected = !this.connectedPeers.stream().anyMatch(p -> p == peer);
+                    }
                     
                     if (stillInHandshaked && stillNotInConnected) {
                         // Peer is orphaned - in handshakedPeers but not in connectedPeers
@@ -1447,6 +1468,20 @@ public class NetworkData {
         this.onPeerReady(newPeer);
 
         return true;
+    }
+
+      /**
+     * Submit forceConnectPeer to a dedicated executor so the caller doesn't block on TCP connect.
+     * Use this from processFileHashes so the first loop stays fast when there are many direct-not-connected responses.
+     */
+      public void forceConnectPeerAsync(Peer newPeer) {
+        forceConnectExecutor.submit(() -> {
+            try {
+                forceConnectPeer(newPeer);
+            } catch (Exception e) {
+                LOGGER.debug("Force connect failed for peer {}: {}", newPeer, e.getMessage());
+            }
+        });
     }
 
     public Peer getPeerFromChannel(SocketChannel socketChannel) {
@@ -1923,10 +1958,13 @@ public class NetworkData {
             // This can happen if the PoW thread completes handshake but the peer wasn't properly
             // added to connectedPeers during connection establishment
             // Use object identity (==), not equals() which compares by address
-            if (!this.connectedPeers.stream().anyMatch(p -> p == peer)) {
-                LOGGER.warn("[NetworkData: {}] Peer {} not in connectedPeers during handshake completion - adding now",
-                        peer.getPeerConnectionId(), peer);
-                this.addConnectedPeer(peer);
+            // ATOMIC: Hold connectedPeers lock during iteration to prevent ConcurrentModificationException
+            synchronized (this.connectedPeers) {
+                if (!this.connectedPeers.stream().anyMatch(p -> p == peer)) {
+                    LOGGER.warn("[NetworkData: {}] Peer {} not in connectedPeers during handshake completion - adding now",
+                            peer.getPeerConnectionId(), peer);
+                    this.addConnectedPeer(peer);  // Safe: addConnectedPeer is reentrant
+                }
             }
 
             // Synchronize duplicate check and add operation to prevent race condition
@@ -2484,6 +2522,18 @@ public class NetworkData {
         } catch (InterruptedException e) {
             LOGGER.warn("Interrupted while waiting for chunk processor pool to terminate");
             chunkProcessorPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        LOGGER.info("Shutting down QDN force-connect executor...");
+        forceConnectExecutor.shutdown();
+        try {
+            if (!forceConnectExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("Force-connect executor did not terminate in time, forcing shutdown");
+                forceConnectExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOGGER.warn("Interrupted while waiting for force-connect executor to terminate");
+            forceConnectExecutor.shutdownNow();
             Thread.currentThread().interrupt();
         }
 

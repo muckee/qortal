@@ -106,6 +106,10 @@ public class ArbitraryDataFileManager extends Thread {
     private final Map<String, Long> invalidHashCooldowns = new ConcurrentHashMap<>();
     private static final long INVALID_HASH_COOLDOWN_MS = 10 * 60 * 1000L; // 10 minutes
 
+    /** Signatures we recently finished fetching (all chunks done). Used to skip late file_list responses. TTL 2 mins; cleaned on read and at shutdown. */
+    private final Map<String, Long> completedSignaturesWithTime = new ConcurrentHashMap<>();
+    private static final long COMPLETED_SIGNATURE_TTL_MS = 12 * 1000L; // 12 seconds
+
     /** In-flight request: hash58 -> (signature58, peerAddress). Cleared on receive or when cleanup expires the request. */
     private final Map<String, InFlightRequestInfo> inFlightRequestsByHash = new ConcurrentHashMap<>();
     /** Peers we already tried for this chunk (timed out or in flight). Key: signature58 + "|" + hash58. Used to retry from another peer. */
@@ -563,7 +567,7 @@ public class ArbitraryDataFileManager extends Thread {
         initializeRelayCache();
         
         this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::processResponses, 60, 1, TimeUnit.SECONDS);
-        this.arbitraryDataFileHashResponseScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60, 1, TimeUnit.SECONDS);
+        this.handleFileListRequestsScheduler.scheduleAtFixedRate(this::handleFileListRequestProcess, 60_000, 250, TimeUnit.MILLISECONDS);
 
         // Clean up stale pending relay forwards and disconnected peers
         cleaner.scheduleAtFixedRate(() -> {
@@ -684,12 +688,17 @@ public class ArbitraryDataFileManager extends Thread {
         LOGGER.info("Shutting down ArbitraryDataFileManager schedulers...");
         
         arbitraryDataFileHashResponseScheduler.shutdown();
+        handleFileListRequestsScheduler.shutdown();
         cleaner.shutdown();
         
         try {
             if (!arbitraryDataFileHashResponseScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
                 LOGGER.warn("arbitraryDataFileHashResponseScheduler did not terminate in time, forcing shutdown");
                 arbitraryDataFileHashResponseScheduler.shutdownNow();
+            }
+            if (!handleFileListRequestsScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                LOGGER.warn("handleFileListRequestsScheduler did not terminate in time, forcing shutdown");
+                handleFileListRequestsScheduler.shutdownNow();
             }
             if (!cleaner.awaitTermination(5, TimeUnit.SECONDS)) {
                 LOGGER.warn("cleaner scheduler did not terminate in time, forcing shutdown");
@@ -698,10 +707,11 @@ public class ArbitraryDataFileManager extends Thread {
         } catch (InterruptedException e) {
             LOGGER.warn("Interrupted while shutting down schedulers, forcing shutdown");
             arbitraryDataFileHashResponseScheduler.shutdownNow();
+            handleFileListRequestsScheduler.shutdownNow();
             cleaner.shutdownNow();
             Thread.currentThread().interrupt();
         }
-        
+        completedSignaturesWithTime.clear();
         LOGGER.info("ArbitraryDataFileManager schedulers shut down successfully");
         
         // Interrupt the main thread
@@ -787,6 +797,25 @@ public class ArbitraryDataFileManager extends Thread {
     public void clearTriedPeersForSignature(String signature58) {
         String prefix = signature58 + "|";
         triedPeersByChunk.keySet().removeIf(k -> k != null && k.startsWith(prefix));
+    }
+
+
+    /** Mark a signature as recently completed (all chunks done). Entries expire after 12 seconds and are removed on read or at shutdown. */
+    public void markSignatureCompleted(String signature58) {
+        completedSignaturesWithTime.put(signature58, System.currentTimeMillis());
+    }
+
+    /** True if this signature was recently completed (within TTL). Removes expired entry if found. */
+    public boolean isSignatureRecentlyCompleted(String signature58) {
+        Long completedAt = completedSignaturesWithTime.get(signature58);
+        if (completedAt == null) {
+            return false;
+        }
+        if (System.currentTimeMillis() - completedAt > COMPLETED_SIGNATURE_TTL_MS) {
+            completedSignaturesWithTime.remove(signature58);
+            return false;
+        }
+        return true;
     }
 
     public void cleanupRequestCache(Long now) {
@@ -1160,6 +1189,19 @@ public class ArbitraryDataFileManager extends Thread {
                     metadataHashBySignature58.remove(Base58.encode(signature));
                 }
             }
+             // Immediate check: if we have all chunks/complete file, clear file list request so poll can exit (no extra DB connection)
+             if (arbitraryTransactionData != null) {
+                try {
+                    if (ArbitraryTransactionUtils.completeFileExists(arbitraryTransactionData)) {
+                        String signature58 = Base58.encode(signature);
+                        ArbitraryDataFileListManager.getInstance().deleteFileListRequestsForSignature(signature58);
+                        markSignatureCompleted(signature58);
+                        
+                    }
+                } catch (DataException e) {
+                    LOGGER.warn("Unable to check complete file for file list request cleanup: {}", e.getMessage());
+                }
+            }
         }
 
         // We may need to remove the file list request, if we have all the files for this transaction
@@ -1207,6 +1249,7 @@ public class ArbitraryDataFileManager extends Thread {
                     LOGGER.debug("All chunks or complete file exist for transaction {}", signature58);
 
                     ArbitraryDataFileListManager.getInstance().deleteFileListRequestsForSignature(signature58);
+                    markSignatureCompleted(signature58);
                 }
             }
 

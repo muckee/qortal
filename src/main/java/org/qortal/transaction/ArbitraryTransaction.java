@@ -402,6 +402,7 @@ public class ArbitraryTransaction extends Transaction {
 		arbitraryResourceData.service = service;
 		arbitraryResourceData.name = name;
 		arbitraryResourceData.identifier = identifier;
+		arbitraryResourceData.latestSignature = arbitraryTransactionData.getSignature();
 
 		final ArbitraryTransactionDataHashWrapper wrapper = new ArbitraryTransactionDataHashWrapper(arbitraryTransactionData);
 
@@ -510,6 +511,7 @@ public class ArbitraryTransaction extends Transaction {
 		arbitraryResourceData.service = service;
 		arbitraryResourceData.name = name;
 		arbitraryResourceData.identifier = identifier;
+		arbitraryResourceData.latestSignature = arbitraryTransactionData.getSignature();
 
 		// Update status
 		ArbitraryDataResource resource = new ArbitraryDataResource(name, ArbitraryDataFile.ResourceIdType.NAME, service, identifier);
