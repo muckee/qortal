@@ -31,3 +31,4 @@
 /data*
 /src/test/resources/arbitrary/*/.qortal/cache
 apikey.txt
+/.env

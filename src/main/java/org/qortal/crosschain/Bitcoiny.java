@@ -8,6 +8,7 @@ import org.bitcoinj.crypto.ChildNumber;
 import org.bitcoinj.crypto.DeterministicHierarchy;
 import org.bitcoinj.crypto.DeterministicKey;
 import org.bitcoinj.params.AbstractBitcoinNetParams;
+import org.bitcoinj.script.Script;
 import org.bitcoinj.script.Script.ScriptType;
 import org.bitcoinj.script.ScriptBuilder;
 import org.bitcoinj.wallet.DeterministicKeyChain;
@@ -294,13 +295,11 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 	 */
 	private Optional<UTXO> buildUTXO(boolean coinbase, UnspentOutput unspentOutput)  {
 		try {
-			List<TransactionOutput> transactionOutputs = getOutputs(unspentOutput.hash);
-
-			TransactionOutput transactionOutput = transactionOutputs.get(unspentOutput.index);
+			Script scriptPubKey = this.getScriptPubKey(unspentOutput);
 
 			UTXO utxo = new UTXO(Sha256Hash.wrap(unspentOutput.hash), unspentOutput.index,
 					Coin.valueOf(unspentOutput.value), unspentOutput.height, coinbase,
-					transactionOutput.getScriptPubKey());
+					scriptPubKey);
 
 			return Optional.of(utxo);
 		} catch (Exception e) {
@@ -320,13 +319,56 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 	 */
 	private Optional<TransactionOutput> getTransactionOutput(UnspentOutput unspentOutput)  {
 		try {
-			List<TransactionOutput> transactionOutputs = this.getOutputs(unspentOutput.hash);
-
-			TransactionOutput transactionOutput = transactionOutputs.get(unspentOutput.index);
+			Script scriptPubKey = this.getScriptPubKey(unspentOutput);
+			TransactionOutput transactionOutput = new TransactionOutput(this.params, null,
+					Coin.valueOf(unspentOutput.value), scriptPubKey.getProgram());
 			return Optional.of(transactionOutput);
 		} catch (Exception e) {
 			LOGGER.error(e.getMessage(), e);
 			return Optional.empty();
+		}
+	}
+
+	/**
+	 * Returns scriptPubKey for an unspent output.
+	 * <p>
+	 * Uses script data directly if available. Otherwise tries raw tx deserialization, and if that fails,
+	 * falls back to provider transaction metadata (e.g. Electrum verbose transaction output script).
+	 */
+	private Script getScriptPubKey(UnspentOutput unspentOutput) throws ForeignBlockchainException {
+		if (unspentOutput.script != null)
+			return new Script(unspentOutput.script);
+
+		try {
+			List<TransactionOutput> transactionOutputs = this.getOutputs(unspentOutput.hash);
+			if (unspentOutput.index < 0 || unspentOutput.index >= transactionOutputs.size()) {
+				throw new ForeignBlockchainException(String.format("Output index %d out of range for transaction %s",
+						unspentOutput.index, HashCode.fromBytes(unspentOutput.hash)));
+			}
+
+			return transactionOutputs.get(unspentOutput.index).getScriptPubKey();
+		} catch (ForeignBlockchainException | RuntimeException e) {
+			String txHash = HashCode.fromBytes(unspentOutput.hash).toString();
+			LOGGER.debug("Raw transaction decode failed for {}. Falling back to provider metadata: {}", txHash, e.getMessage());
+
+			BitcoinyTransaction transaction = this.blockchainProvider.getTransaction(txHash);
+			if (transaction.outputs == null || unspentOutput.index < 0 || unspentOutput.index >= transaction.outputs.size()) {
+				throw new ForeignBlockchainException(String.format("Output index %d out of range for transaction %s",
+						unspentOutput.index, txHash));
+			}
+
+			String scriptPubKeyHex = transaction.outputs.get(unspentOutput.index).scriptPubKey;
+			if (scriptPubKeyHex == null || scriptPubKeyHex.isEmpty()) {
+				throw new ForeignBlockchainException(String.format("Missing scriptPubKey for output %d of transaction %s",
+						unspentOutput.index, txHash));
+			}
+
+			try {
+				return new Script(HashCode.fromString(scriptPubKeyHex).asBytes());
+			} catch (IllegalArgumentException e2) {
+				throw new ForeignBlockchainException(String.format("Invalid scriptPubKey for output %d of transaction %s: %s",
+						unspentOutput.index, txHash, e2.getMessage()));
+			}
 		}
 	}
 
