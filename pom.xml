@@ -39,6 +39,7 @@
 		<junit-jupiter-engine.version>5.11.0-M2</junit-jupiter-engine.version>
 		<log4j.version>2.23.1</log4j.version>
 		<mail.version>1.5.0-b01</mail.version>
+		<lifecycle-mapping.version>1.0.0</lifecycle-mapping.version>
 		<maven-build-helper-plugin.version>3.6.0</maven-build-helper-plugin.version>
 		<maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
 		<maven-dependency-plugin.version>3.6.1</maven-dependency-plugin.version>
@@ -548,6 +549,8 @@
 				<exclusion>
 					<groupId>com.google.protobuf</groupId>
 					<artifactId>protobuf-javalite</artifactId>
+				</exclusion>
+				<exclusion>
 					<groupId>org.bouncycastle</groupId>
 					<artifactId>*</artifactId>
 				</exclusion>
