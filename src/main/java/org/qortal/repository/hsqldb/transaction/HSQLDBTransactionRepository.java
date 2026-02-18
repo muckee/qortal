@@ -199,7 +199,9 @@ public class HSQLDBTransactionRepository implements TransactionRepository {
 
 				BaseTransactionData baseTransactionData = new BaseTransactionData(timestamp, txGroupId, reference, creatorPublicKey, fee, approvalStatus, blockHeight, approvalHeight, signature);
 
-				list.add( fromBase(type, baseTransactionData) );
+				TransactionData data = fromBase(type, baseTransactionData);
+				if (data != null)
+					list.add(data);
 			} while( resultSet.next());
 
 			return list;
