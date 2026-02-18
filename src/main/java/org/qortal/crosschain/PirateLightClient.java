@@ -31,6 +31,8 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 
 	private static final int RESPONSE_TIME_READINGS = 5;
 	private static final long MAX_AVG_RESPONSE_TIME = 500L; // ms
+	private static final int MAX_INBOUND_MESSAGE_BYTES = 16 * 1024 * 1024;
+	private static final int MAX_INBOUND_METADATA_BYTES = 8 * 1024;
 
 	public static class Server implements ChainableServer{
 		String hostname;
@@ -652,6 +654,8 @@ public class PirateLightClient extends BitcoinyBlockchainProvider {
 		ManagedChannel tempChannel = null;
 		try {
 			ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(server.getHostName(), server.getPort());
+			channelBuilder.maxInboundMessageSize(MAX_INBOUND_MESSAGE_BYTES);
+			channelBuilder.maxInboundMetadataSize(MAX_INBOUND_METADATA_BYTES);
 			if (server.getConnectionType() == ChainableServer.ConnectionType.SSL) {
 				channelBuilder.useTransportSecurity();
 			} else {
