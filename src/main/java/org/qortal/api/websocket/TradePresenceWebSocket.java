@@ -103,7 +103,9 @@ public class TradePresenceWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
-		/* ignored */
+		if (Objects.equals(message, "ping") && session.isOpen()) {
+			session.getRemote().sendString("pong", WriteCallback.NOOP);
+		}
 	}
 
 	private boolean sendTradePresences(Session session, List<TradePresenceData> tradePresences) {

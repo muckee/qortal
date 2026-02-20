@@ -68,6 +68,9 @@ public class UnsignedFeesSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
+		if (java.util.Objects.equals(message, "ping") && session.isOpen()) {
+			session.getRemote().sendString("pong", WriteCallback.NOOP);
+		}
 	}
 
 	private void sendUnsignedFeeEvent(Session session, UnsignedFeeEvent unsignedFeeEvent) {

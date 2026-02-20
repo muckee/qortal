@@ -19,6 +19,7 @@ import org.qortal.utils.Base58;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.util.List;
+import java.util.Objects;
 
 @WebSocket
 @SuppressWarnings("serial")
@@ -72,6 +73,12 @@ public class BlocksWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
+		if (Objects.equals(message, "ping")) {
+			if (session.isOpen()) {
+				session.getRemote().sendString("pong", WriteCallback.NOOP);
+			}
+			return;
+		}
 		// We're expecting either a base58 block signature or an integer block height
 		if (message.length() > 128) {
 			// Try base58 block signature

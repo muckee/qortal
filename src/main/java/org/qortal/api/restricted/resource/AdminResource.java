@@ -144,9 +144,7 @@ public class AdminResource {
 					)
 			}
 	)
-	@SecurityRequirement(name = "apiKey")
-	public String getCA(@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
-		Security.checkApiCallAllowed(request);
+	public String getCA() {
 		String keystorePathname = Settings.getInstance().getSslKeystorePathname();
 		String keystorePassword = Settings.getInstance().getSslKeystorePassword();
 		if (keystorePathname == null || keystorePassword == null) {
@@ -193,9 +191,7 @@ public class AdminResource {
 					)
 			}
 	)
-	@SecurityRequirement(name = "apiKey")
-	public CertificateSanInfo getCertificateSan(@HeaderParam(Security.API_KEY_HEADER) String apiKey) {
-		Security.checkApiCallAllowed(request);
+	public CertificateSanInfo getCertificateSan() {
 		List<String> dns = new ArrayList<>();
 		List<String> ip = new ArrayList<>();
 		String keystorePathname = Settings.getInstance().getSslKeystorePathname();

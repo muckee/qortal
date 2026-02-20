@@ -132,7 +132,9 @@ public class TradeBotWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
-		/* ignored */
+		if (Objects.equals(message, "ping") && session.isOpen()) {
+			session.getRemote().sendString("pong", WriteCallback.NOOP);
+		}
 	}
 
     private boolean sendEntries(Session session, List<TradeBotData> tradeBotEntries) {

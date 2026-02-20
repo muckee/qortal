@@ -81,7 +81,9 @@ public class AdminStatusWebSocket extends ApiWebSocket implements Listener {
 
 	@OnWebSocketMessage
 	public void onWebSocketMessage(Session session, String message) {
-		/* ignored */
+		if (java.util.Objects.equals(message, "ping") && session.isOpen()) {
+			session.getRemote().sendString("pong", WriteCallback.NOOP);
+		}
 	}
 
 	private static String buildStatusString() throws IOException {
