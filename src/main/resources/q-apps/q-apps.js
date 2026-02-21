@@ -853,17 +853,20 @@ function processRequestQueue() {
 
 /**
  * Execute a request immediately (bypasses queue)
+ * @param {object} request - The request payload
+ * @param {number} [effectiveTimeoutMs] - Timeout used for this request (for cleanup); if omitted, cleanup uses getDefaultTimeout(request.action)
  */
-function executeQortalRequestImmediate(request) {
+function executeQortalRequestImmediate(request, effectiveTimeoutMs) {
   return new Promise((res, rej) => {
     const channel = new MessageChannel();
     const requestId = Math.random().toString(36).substring(2, 15) + Date.now();
 
-    // Track this channel for cleanup
+    // Track this channel for cleanup (effectiveTimeoutMs used so cleanup respects qortalRequest / qortalRequestWithTimeout timeouts)
     pendingMessageChannels.set(requestId, {
       channel: channel,
       request: request,
       timestamp: Date.now(),
+      effectiveTimeoutMs: effectiveTimeoutMs,
     });
 
     channel.port1.onmessage = ({ data }) => {
@@ -894,12 +897,14 @@ function executeQortalRequestImmediate(request) {
 
 /**
  * Make a Qortal (Q-Apps) request with no timeout
+ * @param {object} request - The request payload
+ * @param {number} [effectiveTimeoutMs] - Timeout used for this request (for orphan cleanup only); if omitted, cleanup uses getDefaultTimeout(request.action)
  */
-const qortalRequestWithNoTimeout = (request) => {
+const qortalRequestWithNoTimeout = (request, effectiveTimeoutMs) => {
   return new Promise((res, rej) => {
     const executeRequest = () => {
       activeRequestCount++;
-      executeQortalRequestImmediate(request).then(res).catch(rej);
+      executeQortalRequestImmediate(request, effectiveTimeoutMs).then(res).catch(rej);
     };
 
     // If under concurrent limit, execute immediately
@@ -959,9 +964,10 @@ const qortalRequest = (request) => {
   );
 
   // Create new request promise
+  const defaultTimeout = getDefaultTimeout(request.action);
   const requestPromise = Promise.race([
-    qortalRequestWithNoTimeout(request),
-    awaitTimeout(getDefaultTimeout(request.action), "The request timed out"),
+    qortalRequestWithNoTimeout(request, defaultTimeout),
+    awaitTimeout(defaultTimeout, "The request timed out"),
   ])
     .then((result) => {
       debugLog("Request completed:", request.action);
@@ -996,7 +1002,7 @@ const qortalRequestWithTimeout = (request, timeout) => {
 
   // Create new request promise
   const requestPromise = Promise.race([
-    qortalRequestWithNoTimeout(request),
+    qortalRequestWithNoTimeout(request, timeout),
     awaitTimeout(timeout, "The request timed out"),
   ]).finally(() => {
     // Remove from pending cache when done (success or failure)
@@ -1009,16 +1015,20 @@ const qortalRequestWithTimeout = (request, timeout) => {
   return requestPromise;
 };
 
+// Clean up channels this long after the request's timeout would have fired
+const CLEANUP_BUFFER_MS = 5000;
+
 /**
- * Cleanup orphaned MessageChannels that have been waiting too long
+ * Cleanup orphaned MessageChannels that have been waiting too long.
+ * Uses each request's effective timeout (from qortalRequest or qortalRequestWithTimeout) so long-running requests are not closed early.
  */
 function cleanupOrphanedChannels() {
   const now = Date.now();
-  const MAX_CHANNEL_AGE = 5 * 60 * 1000; // 5 minutes
   let cleanedCount = 0;
 
   for (const [requestId, data] of pendingMessageChannels.entries()) {
-    if (now - data.timestamp > MAX_CHANNEL_AGE) {
+    const maxAge = (data.effectiveTimeoutMs != null ? data.effectiveTimeoutMs : getDefaultTimeout(data.request.action)) + CLEANUP_BUFFER_MS;
+    if (now - data.timestamp > maxAge) {
       console.warn(
         "Cleaning up orphaned MessageChannel for request:",
         data.request.action,
