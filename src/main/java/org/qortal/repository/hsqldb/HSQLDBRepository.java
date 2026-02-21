@@ -453,7 +453,7 @@ public class HSQLDBRepository implements Repository {
 					if (transactionCount > 0) {
 						// We can't safely perform CHECKPOINT due to ongoing SQL transactions
 						// Log this so we know why checkpoint was skipped (helps debugging)
-						LOGGER.debug("Skipping requested checkpoint - {} active transaction(s) found", transactionCount);
+						LOGGER.trace("Skipping requested checkpoint - {} active transaction(s) found", transactionCount);
 						// Keep the checkpoint request so it can be tried again later
 						return;
 					}
