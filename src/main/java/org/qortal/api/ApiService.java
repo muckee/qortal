@@ -220,6 +220,8 @@ public class ApiService {
 			// Context
 			ServletContextHandler context = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
 			context.setContextPath("/");
+			// Allow multipart/form-data up to 10 MB (e.g. /chunk uploads); Jetty 10 default is 200 KB
+			context.setMaxFormContentSize(10 * 1024 * 1024);
 			rewriteHandler.setHandler(context);
 
 			// Cross-origin resource sharing
