@@ -223,6 +223,8 @@ public class NetworkData {
     private ServerSocketChannel serverChannel;
     private SelectionKey serverSelectionKey;
     private final Set<SelectableChannel> channelsPendingWrite = ConcurrentHashMap.newKeySet();
+    /** Coalesces OP_WRITE wakeups: only the first caller per select-cycle actually wakes the selector. */
+    private final java.util.concurrent.atomic.AtomicBoolean selectorWakeupPending = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     /**
      * Lock for atomic peer list operations to prevent race conditions.
@@ -866,6 +868,9 @@ public class NetworkData {
                     LOGGER.warn("Channel selection threw IOException: {}", e.getMessage());
                     continue;
                 }
+                // Reset coalescing flag now that select() has returned, so the next queued write
+                // will trigger a fresh wakeup on the following iteration.
+                selectorWakeupPending.set(false);
                 if (Thread.currentThread().isInterrupted())
                     break;
                 Set<SelectionKey> selected = channelSelector.selectedKeys();
@@ -878,13 +883,19 @@ public class NetworkData {
                     SelectableChannel socketChannel = key.channel();
                     try {
                         if (key.isReadable()) {
-                            clearInterestOps(key, SelectionKey.OP_READ);
-                            Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
+                            // Do NOT clear/re-arm OP_READ here. readChannel() drains all available socket
+                            // data in its internal loop (exits when bytesRead == 0). After draining, the OS
+                            // socket buffer is empty so epoll will not re-fire OP_READ until new data arrives.
+                            // Clearing and re-arming OP_READ every cycle would add 2 epoll_ctl() system calls
+                            // per readable peer per iteration (processed in processUpdateQueue), which is the
+                            // dominant source of NetworkData-IO CPU cost with many active peers. On error or
+                            // EOF, disconnect() closes the channel, cancelling the key automatically.
+                            // key.attachment() is O(1): the Peer was stored at registration time via registerPeerChannel().
+                            Peer peer = (Peer) key.attachment();
                             if (peer != null) {
                                 try {
                                     peer.readChannel();
                                     readPeersThisRound.add(peer);
-                                    setInterestOps(socketChannel, SelectionKey.OP_READ);
                                 } catch (IOException e) {
                                     if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
                                         peer.disconnect("Connection reset");
@@ -895,13 +906,18 @@ public class NetworkData {
                                 }
                             }
                         } else if (key.isWritable()) {
-                            clearInterestOps(key, SelectionKey.OP_WRITE);
-                            Peer peer = getPeerFromChannel((SocketChannel) socketChannel);
+                            // Do NOT clear OP_WRITE upfront. Only clear it when writeChannel()
+                            // confirms the send queue is fully drained (needsMoreWriting == false).
+                            // While data remains, OP_WRITE stays armed and the selector re-fires it
+                            // next cycle — no epoll_ctl calls needed. The old pattern (always clear
+                            // upfront + conditionally re-arm) issued 1–2 epoll_ctl calls per writable
+                            // event and was the dominant cost in processUpdateQueue during bulk transfers.
+                            Peer peer = (Peer) key.attachment();
                             if (peer != null && channelsPendingWrite.add(socketChannel)) {
                                 try {
                                     boolean needsMoreWriting = peer.writeChannel();
-                                    if (needsMoreWriting)
-                                        setInterestOps(socketChannel, SelectionKey.OP_WRITE);
+                                    if (!needsMoreWriting)
+                                        clearInterestOps(key, SelectionKey.OP_WRITE);
                                 } catch (IOException e) {
                                     if (e.getMessage() != null && e.getMessage().toLowerCase().contains("connection reset")) {
                                         peer.disconnect("Connection reset");
@@ -948,6 +964,22 @@ public class NetworkData {
                                 peer.getPeerConnectionId());
                         break; // Stop draining this peer's queue
                     }
+                }
+            }
+            // Sleep unconditionally at the end of every cycle to cap the loop at ~1000
+            // iterations/sec. Without this, OP_WRITE staying armed (level-triggered EPOLLOUT)
+            // causes select() to return immediately on every iteration even during heavy sync
+            // when reads are also present — yielding hundreds of thousands of iterations/sec
+            // and near-100% CPU on this thread. 1 ms is well within the responsiveness budget
+            // of a blockchain node (the original select(50L) idle timeout was 50× longer).
+            // The selector lock is already released here, so a wakeup() queued by another
+            // thread is not blocked — it will be consumed on the very next select() call.
+            if (!isShuttingDown && !Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(1);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
             }
         }
@@ -1548,6 +1580,11 @@ public class NetworkData {
         if (!selectionKey.channel().isOpen())
             return;
 
+        // If none of the bits to clear are currently set, interestOpsAnd() would queue a
+        // no-op epoll_ctl into processUpdateQueue. Skip it to avoid unnecessary syscall overhead.
+        if ((selectionKey.interestOps() & interestOps) == 0)
+            return;
+
         LOGGER.trace("Thread {} clearing {} interest-ops on channel: {}",
                 Thread.currentThread().getId(),
                 OP_NAMES[interestOps],
@@ -1557,8 +1594,6 @@ public class NetworkData {
     }
 
     public void setInterestOps(SelectableChannel socketChannel, int interestOps) {
-        
-        
         SelectionKey selectionKey = socketChannel.keyFor(channelSelector);
 
         if (selectionKey == null) {
@@ -1591,10 +1626,40 @@ public class NetworkData {
         }
     }
 
-    private void setInterestOps(SelectionKey selectionKey, int interestOps) {
-        if (!selectionKey.isValid() || !selectionKey.channel().isOpen()) { // Added isValid()
-            return;
+    /**
+     * Register a peer's SocketChannel with the selector for OP_READ, attaching the Peer
+     * object to the SelectionKey so the IO loop can resolve peer → O(1) via key.attachment()
+     * instead of an O(n) linear scan through connectedPeers. Must be called exactly once per
+     * peer, from Peer.sharedSetup().
+     */
+    public void registerPeerChannel(SocketChannel channel, Peer peer) {
+        synchronized (channelSelector) {
+            SelectionKey key = channel.keyFor(channelSelector);
+            if (key == null) {
+                try {
+                    channel.register(channelSelector, SelectionKey.OP_READ, peer);
+                    channelSelector.wakeup();
+                } catch (ClosedChannelException e) {
+                    // Channel closed before we could register — nothing to do
+                } catch (Exception e) {
+                    LOGGER.trace("Failed to register peer channel {}: {}", channel, e.getMessage());
+                }
+            } else {
+                // Already registered (shouldn't happen in normal flow) — just attach the peer
+                key.attach(peer);
+            }
         }
+    }
+
+    private void setInterestOps(SelectionKey selectionKey, int interestOps) {
+        if (!selectionKey.isValid() || !selectionKey.channel().isOpen())
+            return;
+
+        // If all requested bits are already set, interestOpsOr() would queue a no-op epoll_ctl
+        // into processUpdateQueue. Skip both the syscall and the wakeup — the selector already
+        // knows this channel is armed and will fire on it when it's ready.
+        if ((selectionKey.interestOps() & interestOps) == interestOps)
+            return;
 
         LOGGER.trace("Thread {} setting {} interest-ops on channel: {}",
                 Thread.currentThread().getId(),
@@ -1602,14 +1667,16 @@ public class NetworkData {
                 selectionKey.channel());
 
         selectionKey.interestOpsOr(interestOps);
-        
-        // Wake selector immediately for write operations to avoid 50ms timeout delays that cascade
-        // across multiple queued messages. Without this, 80+ chunks would wait 50ms each = 4+ seconds.
-        // Real-world measurements showed 57-second delays for bulk chunk transfers.
-        // Read operations can tolerate the natural selector wake cycle without performance impact.
+
+        // Wake selector immediately for write operations so the first queued message is sent without
+        // waiting for the 50ms select() timeout. Subsequent callers in the same select-cycle are
+        // coalesced: compareAndSet(false→true) ensures only one actual wakeup() call per cycle,
+        // eliminating redundant wakeups when multiple peers enqueue messages simultaneously.
         if (interestOps == SelectionKey.OP_WRITE) {
-            channelSelector.wakeup();
-            LOGGER.trace("Selector woken for OP_WRITE on channel {}", selectionKey.channel());
+            if (selectorWakeupPending.compareAndSet(false, true)) {
+                channelSelector.wakeup();
+                LOGGER.trace("Selector woken for OP_WRITE on channel {}", selectionKey.channel());
+            }
         }
     }
 

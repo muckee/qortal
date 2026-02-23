@@ -714,9 +714,9 @@ public class Peer {
 
         this.socketChannel.configureBlocking(false);
         if (network == Peer.NETWORK)
-            Network.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
+            Network.getInstance().registerPeerChannel(this.socketChannel, this);
         else
-            NetworkData.getInstance().setInterestOps(this.socketChannel, SelectionKey.OP_READ);
+            NetworkData.getInstance().registerPeerChannel(this.socketChannel, this);
         this.byteBuffer = null; // Defer allocation to when we need it, to save memory. Sorry GC!
 
         Random random = new SecureRandom();
@@ -899,16 +899,11 @@ public class Peer {
                             this.peerConnectionId, message.getType().name(), this, 
                             this.handshakeStatus, this.handshakeMessagePending);
 
-                    // Prematurely end any blocking channel select so that new messages can be processed.
-                    // This might cause this.socketChannel.read() above to return zero into bytesRead.
-                    switch (this.peerType) {
-                        case Peer.NETWORK:
-                            Network.getInstance().wakeupChannelSelector();
-                            break;
-                        case Peer.NETWORKDATA:
-                            NetworkData.getInstance().wakeupChannelSelector();
-                            break;
-                    }
+                    // No wakeup needed here: readChannel() is always called from the IO thread itself,
+                    // which is not in select() at this point. The queued message will be drained to the
+                    // worker pool later in the same runIOLoop() iteration (the readPeersThisRound drain),
+                    // so calling wakeup() would only cause the next select() to return immediately as a
+                    // no-op, wasting a loop iteration.
                 }
             }
         }

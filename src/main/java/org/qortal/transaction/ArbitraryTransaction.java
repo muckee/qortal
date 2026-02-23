@@ -402,7 +402,6 @@ public class ArbitraryTransaction extends Transaction {
 		arbitraryResourceData.service = service;
 		arbitraryResourceData.name = name;
 		arbitraryResourceData.identifier = identifier;
-		arbitraryResourceData.latestSignature = arbitraryTransactionData.getSignature();
 
 		final ArbitraryTransactionDataHashWrapper wrapper = new ArbitraryTransactionDataHashWrapper(arbitraryTransactionData);
 
@@ -424,6 +423,7 @@ public class ArbitraryTransaction extends Transaction {
 				return;
 			}
 		}
+		arbitraryResourceData.latestSignature = latestTransactionData.getSignature();
 		ArbitraryResourceData existingArbitraryResourceData = resourceByWrapper.get(wrapper);
 
 		if( existingArbitraryResourceData == null ) {
