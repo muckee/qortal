@@ -1,6 +1,7 @@
 package org.qortal.api;
 
 import io.swagger.v3.jaxrs2.integration.resources.OpenApiResource;
+import io.swagger.v3.oas.integration.SwaggerConfiguration;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.eclipse.jetty.alpn.server.ALPNServerConnectionFactory;
@@ -39,16 +40,24 @@ import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.Security;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.util.stream.Collectors;
 
 public class ApiService {
 
 	private static final Logger LOGGER = LogManager.getLogger(ApiService.class);
 	private static ApiService instance;
+	private static final Set<String> API_RESOURCE_PACKAGES = Set.of(
+			"org.qortal.api.resource",
+			"org.qortal.api.restricted.resource"
+	);
+	private static final Set<String> OPENAPI_RESOURCE_CLASS_NAMES = discoverOpenApiResourceClassNames();
 
 	/** Ensures stop/start/restart are atomic and no concurrent lifecycle changes. */
 	private final Object lifecycleLock = new Object();
@@ -63,13 +72,36 @@ public class ApiService {
 	 */
 	private static ResourceConfig createResourceConfig() {
 		ResourceConfig config = new ResourceConfig();
-		config.packages("org.qortal.api.resource", "org.qortal.api.restricted.resource");
+		config.packages(API_RESOURCE_PACKAGES.toArray(String[]::new));
 		config.register(org.glassfish.jersey.media.multipart.MultiPartFeature.class);
 		config.register(org.qortal.api.model.ConnectedPeerJacksonWriter.class, 10000);
-		config.register(OpenApiResource.class);
+		config.register(createOpenApiResource());
 		config.register(ApiDefinition.class);
 		config.register(AnnotationPostProcessor.class);
 		return config;
+	}
+
+	/**
+	 * Configure Swagger to scan only known JAX-RS resource classes from this application.
+	 * Without this, swagger-jaxrs2 2.2.x falls back to a broad ClassGraph scan on every
+	 * /openapi.json request, which can spawn huge numbers of threads under concurrent refreshes.
+	 */
+	private static OpenApiResource createOpenApiResource() {
+		SwaggerConfiguration swaggerConfig = new SwaggerConfiguration()
+				.resourcePackages(new LinkedHashSet<>(API_RESOURCE_PACKAGES))
+				.resourceClasses(new LinkedHashSet<>(OPENAPI_RESOURCE_CLASS_NAMES));
+
+		return (OpenApiResource) new OpenApiResource().openApiConfiguration(swaggerConfig);
+	}
+
+	private static Set<String> discoverOpenApiResourceClassNames() {
+		ResourceConfig discoveryConfig = new ResourceConfig();
+		discoveryConfig.packages(API_RESOURCE_PACKAGES.toArray(String[]::new));
+
+		return discoveryConfig.getClasses().stream()
+				.filter(clazz -> clazz.isAnnotationPresent(javax.ws.rs.Path.class))
+				.map(Class::getName)
+				.collect(Collectors.toCollection(LinkedHashSet::new));
 	}
 
 	/** Add BouncyCastle providers once per JVM; repeated adds would clutter the provider list. */
