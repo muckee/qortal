@@ -320,7 +320,7 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 	private Optional<TransactionOutput> getTransactionOutput(UnspentOutput unspentOutput)  {
 		try {
 			Script scriptPubKey = this.getScriptPubKey(unspentOutput);
-			TransactionOutput transactionOutput = new TransactionOutput(this.params, null,
+			TransactionOutput transactionOutput = new TransactionOutput(this.params, getTransaction(unspentOutput.hash),
 					Coin.valueOf(unspentOutput.value), scriptPubKey.getProgram());
 			return Optional.of(transactionOutput);
 		} catch (Exception e) {
@@ -389,6 +389,36 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 				Context.propagate(bitcoinjContext);
 				Transaction transaction = new Transaction(this.params, rawTransactionBytes);
 				return transaction.getOutputs();
+			} catch (ForeignBlockchainException | RuntimeException e) {
+				lastException = e;
+			}
+		}
+
+		String message = String.format("Unable to deserialize raw transaction %s: %s",
+				HashCode.fromBytes(txHash),
+				lastException == null ? "unknown error" : lastException.getMessage());
+		throw new ForeignBlockchainException(message);
+	}
+
+	/**
+	 * Get Transaction
+	 *
+	 * @param txHash the hash for the transaction
+	 *
+	 * @return the transaction
+	 *
+	 * @throws ForeignBlockchainException if there was an error
+	 */
+	private Transaction getTransaction(byte[] txHash) throws ForeignBlockchainException {
+		Exception lastException = null;
+
+		for (int retry = 0; retry <= RETRIES; retry++) {
+			try {
+				byte[] rawTransactionBytes = this.blockchainProvider.getRawTransaction(txHash);
+
+				Context.propagate(bitcoinjContext);
+				Transaction transaction = new Transaction(this.params, rawTransactionBytes);
+				return transaction;
 			} catch (ForeignBlockchainException | RuntimeException e) {
 				lastException = e;
 			}
