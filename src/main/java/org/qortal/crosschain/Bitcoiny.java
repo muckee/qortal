@@ -252,6 +252,13 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 			unspentTransactionOutputs.add( getTransactionOutput(unspentOutput));
 		}
 
+		long missingCount = unspentTransactionOutputs.stream().filter(Optional::isEmpty).count();
+		if (missingCount > 0) {
+			throw new ForeignBlockchainException(String.format(
+					"Failed to resolve %d/%d unspent outputs for %s",
+					missingCount, unspentOutputs.size(), base58Address));
+		}
+
 		return unspentTransactionOutputs.stream().filter(Optional::isPresent)
 				.map(Optional::get)
 				.collect(Collectors.toList());
@@ -319,9 +326,32 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 	 */
 	private Optional<TransactionOutput> getTransactionOutput(UnspentOutput unspentOutput)  {
 		try {
-			Script scriptPubKey = this.getScriptPubKey(unspentOutput);
-			TransactionOutput transactionOutput = new TransactionOutput(this.params, getTransaction(unspentOutput.hash),
-					Coin.valueOf(unspentOutput.value), scriptPubKey.getProgram());
+			List<TransactionOutput> outputs = this.getOutputs(unspentOutput.hash);
+			if (unspentOutput.index < 0 || unspentOutput.index >= outputs.size()) {
+				LOGGER.error("Output index {} out of range for transaction {} ({} outputs)",
+						unspentOutput.index, HashCode.fromBytes(unspentOutput.hash), outputs.size());
+				return Optional.empty();
+			}
+
+			TransactionOutput transactionOutput = outputs.get(unspentOutput.index);
+
+			// Sanity-check provider UTXO metadata against raw tx decode so we fail early on inconsistencies.
+			if (transactionOutput.getValue().value != unspentOutput.value) {
+				LOGGER.error("UTXO value mismatch for {}:{} (provider={}, rawTx={})",
+						HashCode.fromBytes(unspentOutput.hash), unspentOutput.index,
+						unspentOutput.value, transactionOutput.getValue().value);
+				return Optional.empty();
+			}
+
+			if (unspentOutput.script != null) {
+				byte[] outputScript = transactionOutput.getScriptPubKey().getProgram();
+				if (!Arrays.equals(unspentOutput.script, outputScript)) {
+					LOGGER.error("UTXO script mismatch for {}:{}",
+							HashCode.fromBytes(unspentOutput.hash), unspentOutput.index);
+					return Optional.empty();
+				}
+			}
+
 			return Optional.of(transactionOutput);
 		} catch (Exception e) {
 			LOGGER.error(e.getMessage(), e);
@@ -389,36 +419,6 @@ public abstract class Bitcoiny extends AbstractBitcoinNetParams implements Forei
 				Context.propagate(bitcoinjContext);
 				Transaction transaction = new Transaction(this.params, rawTransactionBytes);
 				return transaction.getOutputs();
-			} catch (ForeignBlockchainException | RuntimeException e) {
-				lastException = e;
-			}
-		}
-
-		String message = String.format("Unable to deserialize raw transaction %s: %s",
-				HashCode.fromBytes(txHash),
-				lastException == null ? "unknown error" : lastException.getMessage());
-		throw new ForeignBlockchainException(message);
-	}
-
-	/**
-	 * Get Transaction
-	 *
-	 * @param txHash the hash for the transaction
-	 *
-	 * @return the transaction
-	 *
-	 * @throws ForeignBlockchainException if there was an error
-	 */
-	private Transaction getTransaction(byte[] txHash) throws ForeignBlockchainException {
-		Exception lastException = null;
-
-		for (int retry = 0; retry <= RETRIES; retry++) {
-			try {
-				byte[] rawTransactionBytes = this.blockchainProvider.getRawTransaction(txHash);
-
-				Context.propagate(bitcoinjContext);
-				Transaction transaction = new Transaction(this.params, rawTransactionBytes);
-				return transaction;
 			} catch (ForeignBlockchainException | RuntimeException e) {
 				lastException = e;
 			}
