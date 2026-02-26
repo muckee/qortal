@@ -13,6 +13,7 @@ import org.qortal.api.ApiErrors;
 import org.qortal.api.ApiExceptionFactory;
 import org.qortal.api.model.GroupMembers;
 import org.qortal.api.model.GroupMembers.MemberInfo;
+import org.qortal.api.model.GroupWithJoinRequests;
 import org.qortal.crypto.Crypto;
 import org.qortal.data.group.*;
 import org.qortal.data.transaction.*;
@@ -30,7 +31,9 @@ import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -107,6 +110,7 @@ public class GroupsResource {
 	@Path("/member/{address}")
 	@Operation(
 		summary = "List all groups where address is a member",
+		description = "By default returns groups where the address is a member. Use adminOnly=true to return only groups where the address is an admin. Use ownerOnly=true to return only groups where the address is the owner.",
 		responses = {
 			@ApiResponse(
 				description = "group info",
@@ -118,12 +122,22 @@ public class GroupsResource {
 		}
 	)
 	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.REPOSITORY_ISSUE})
-	public List<GroupData> getGroupsWithMember(@PathParam("address") String member) {
+	public List<GroupData> getGroupsWithMember(
+			@PathParam("address") String member,
+			@Parameter(description = "If true, return only groups where the address is an admin") @QueryParam("adminOnly") Boolean adminOnly,
+			@Parameter(description = "If true, return only groups where the address is the owner") @QueryParam("ownerOnly") Boolean ownerOnly) {
 		if (!Crypto.isValidAddress(member))
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			List<GroupData> allGroupData = repository.getGroupRepository().getGroupsWithMember(member);
+			List<GroupData> allGroupData;
+			if (Boolean.TRUE.equals(ownerOnly)) {
+				allGroupData = repository.getGroupRepository().getGroupsByOwner(member);
+			} else if (Boolean.TRUE.equals(adminOnly)) {
+				allGroupData = repository.getGroupRepository().getGroupsByAdmin(member);
+			} else {
+				allGroupData = repository.getGroupRepository().getGroupsWithMember(member);
+			}
 			allGroupData.forEach(groupData -> {
 				try {
 					groupData.memberCount = repository.getGroupRepository().countGroupMembers(groupData.getGroupId());
@@ -810,6 +824,47 @@ public class GroupsResource {
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			return repository.getGroupRepository().getJoinRequestsByJoiner(address);
+		} catch (DataException e) {
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
+		}
+	}
+
+	@GET
+	@Path("/joinrequests/admin/{address}")
+	@Operation(
+		summary = "Groups where address is admin, with pending join requests for each",
+		description = "Returns all groups where the given address is an admin, and the pending join requests for each group.",
+		responses = {
+			@ApiResponse(
+				description = "list of group with its join requests",
+				content = @Content(
+					mediaType = MediaType.APPLICATION_JSON,
+					array = @ArraySchema(schema = @Schema(implementation = GroupWithJoinRequests.class))
+				)
+			)
+		}
+	)
+	@ApiErrors({ApiError.INVALID_ADDRESS, ApiError.REPOSITORY_ISSUE})
+	public List<GroupWithJoinRequests> getAdminGroupsWithJoinRequests(@PathParam("address") String address) {
+		if (!Crypto.isValidAddress(address))
+			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
+
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			List<GroupData> groups = repository.getGroupRepository().getGroupsByAdmin(address);
+			if (groups.isEmpty())
+				return new ArrayList<>();
+
+			List<Integer> groupIds = groups.stream().map(GroupData::getGroupId).collect(Collectors.toList());
+			List<GroupJoinRequestData> allJoinRequests = repository.getGroupRepository().getJoinRequestsByGroupIds(groupIds);
+			Map<Integer, List<GroupJoinRequestData>> joinRequestsByGroupId = allJoinRequests.stream()
+					.collect(Collectors.groupingBy(GroupJoinRequestData::getGroupId));
+
+			List<GroupWithJoinRequests> result = new ArrayList<>(groups.size());
+			for (GroupData group : groups) {
+				List<GroupJoinRequestData> joinRequests = joinRequestsByGroupId.getOrDefault(group.getGroupId(), new ArrayList<>());
+				result.add(new GroupWithJoinRequests(group, joinRequests));
+			}
+			return result;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
