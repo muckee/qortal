@@ -242,6 +242,14 @@ public class GroupsResource {
 				// Convert form
 				List<MemberInfo> membersInfo = admins.stream().map(admin -> new MemberInfo(admin.getAdmin(), null, true)).collect(Collectors.toList());
 
+				try {
+					List<String> addresses = membersInfo.stream().map(m -> m.member).collect(Collectors.toList());
+					Map<String, String> primaryNames = repository.getNameRepository().getPrimaryNamesByOwners(addresses);
+					membersInfo.forEach(m -> m.setPrimaryName(primaryNames.get(m.member)));
+				} catch (DataException e) {
+					// Leave primaryName null
+				}
+
 				return new GroupMembers(membersInfo, memberCount, adminCount);
 			}
 
@@ -252,6 +260,14 @@ public class GroupsResource {
 			// Convert form
 			Predicate<GroupMemberData> memberIsAdmin = member -> admins.stream().anyMatch(admin -> admin.getAdmin().equals(member.getMember()));
 			List<MemberInfo> membersInfo = members.stream().map(member -> new MemberInfo(member.getMember(), member.getJoined(), memberIsAdmin.test(member))).collect(Collectors.toList());
+
+			try {
+				List<String> addresses = membersInfo.stream().map(m -> m.member).collect(Collectors.toList());
+				Map<String, String> primaryNames = repository.getNameRepository().getPrimaryNamesByOwners(addresses);
+				membersInfo.forEach(m -> m.setPrimaryName(primaryNames.get(m.member)));
+			} catch (DataException e) {
+				// Leave primaryName null
+			}
 
 			return new GroupMembers(membersInfo, memberCount, adminCount);
 		} catch (DataException e) {
