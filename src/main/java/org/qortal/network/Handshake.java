@@ -708,14 +708,22 @@ public enum Handshake {
 			return null;
 		}
 
-	int peerType = helloMessage.getPeerType();
-	if (peerType != Peer.NETWORK && peerType != Peer.NETWORKDATA) {
-			LOGGER.debug("Peer {} sent invalid peerType {} in HELLO_V2", peer, peerType);
+		int remotePeerType = helloMessage.getPeerType();
+		if (remotePeerType != Peer.NETWORK && remotePeerType != Peer.NETWORKDATA) {
+			LOGGER.debug("Peer {} sent invalid peerType {} in HELLO_V2", peer, remotePeerType);
 			return null;
 		}
-		peer.setPeerType(peerType);
 
-		switch (peerType) {
+		// The peer's type is authoritatively determined at connection time by whichever
+		// network server owns the connection. Reject if the remote claims a different type —
+		// this catches P2P connections accidentally made to QDN ports (and vice versa).
+		if (remotePeerType != peer.getPeerType()) {
+			LOGGER.debug("Rejecting HELLO_V2 from {} - remote claimed peerType {} but connection belongs to peerType {}",
+					peer, remotePeerType, peer.getPeerType());
+			return null;
+		}
+
+		switch (peer.getPeerType()) {
 			case Peer.NETWORK:
 				Network.getInstance().ourPeerAddressUpdated(helloMessage.getSenderPeerAddress());
 				break;
