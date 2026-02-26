@@ -32,8 +32,10 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -74,6 +76,13 @@ public class GroupsResource {
 					// Exclude memberCount for this group
 				}
 			});
+			try {
+				List<String> owners = allGroupData.stream().map(GroupData::getOwner).distinct().collect(Collectors.toList());
+				Map<String, String> primaryNamesByOwner = repository.getNameRepository().getPrimaryNamesByOwners(owners);
+				allGroupData.forEach(g -> g.setOwnerPrimaryName(primaryNamesByOwner.get(g.getOwner())));
+			} catch (DataException e) {
+				// Leave ownerPrimaryName null
+			}
 			return allGroupData;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
@@ -100,7 +109,14 @@ public class GroupsResource {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.INVALID_ADDRESS);
 
 		try (final Repository repository = RepositoryManager.getRepository()) {
-			return repository.getGroupRepository().getGroupsByOwner(owner);
+			List<GroupData> groups = repository.getGroupRepository().getGroupsByOwner(owner);
+			try {
+				Map<String, String> primaryNamesByOwner = repository.getNameRepository().getPrimaryNamesByOwners(Collections.singletonList(owner));
+				groups.forEach(g -> g.setOwnerPrimaryName(primaryNamesByOwner.get(g.getOwner())));
+			} catch (DataException e) {
+				// Leave ownerPrimaryName null
+			}
+			return groups;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
 		}
@@ -145,6 +161,15 @@ public class GroupsResource {
 					// Exclude memberCount for this group
 				}
 			});
+
+			try {
+				List<String> owners = allGroupData.stream().map(GroupData::getOwner).distinct().collect(Collectors.toList());
+				Map<String, String> primaryNamesByOwner = repository.getNameRepository().getPrimaryNamesByOwners(owners);
+				allGroupData.forEach(groupData -> groupData.setOwnerPrimaryName(primaryNamesByOwner.get(groupData.getOwner())));
+			} catch (DataException e) {
+				// Leave ownerPrimaryName null
+			}
+
 			return allGroupData;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
@@ -173,6 +198,12 @@ public class GroupsResource {
 				throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.GROUP_UNKNOWN);
 
 			groupData.memberCount = repository.getGroupRepository().countGroupMembers(groupId);
+			try {
+				Optional<String> primaryName = repository.getNameRepository().getPrimaryName(groupData.getOwner());
+				groupData.setOwnerPrimaryName(primaryName.orElse(null));
+			} catch (DataException e) {
+				// Leave ownerPrimaryName null
+			}
 			return groupData;
 		} catch (DataException e) {
 			throw ApiExceptionFactory.INSTANCE.createException(request, ApiError.REPOSITORY_ISSUE, e);
@@ -853,6 +884,14 @@ public class GroupsResource {
 			List<GroupData> groups = repository.getGroupRepository().getGroupsByAdmin(address);
 			if (groups.isEmpty())
 				return new ArrayList<>();
+
+			try {
+				List<String> owners = groups.stream().map(GroupData::getOwner).distinct().collect(Collectors.toList());
+				Map<String, String> primaryNamesByOwner = repository.getNameRepository().getPrimaryNamesByOwners(owners);
+				groups.forEach(g -> g.setOwnerPrimaryName(primaryNamesByOwner.get(g.getOwner())));
+			} catch (DataException e) {
+				// Leave ownerPrimaryName null
+			}
 
 			List<Integer> groupIds = groups.stream().map(GroupData::getGroupId).collect(Collectors.toList());
 			List<GroupJoinRequestData> allJoinRequests = repository.getGroupRepository().getJoinRequestsByGroupIds(groupIds);
