@@ -291,7 +291,7 @@ public class PeersResource {
 			final LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
 			final Configuration config = ctx.getConfiguration();
 
-			String epcClassName = "org.qortal.network.Network.NetworkProcessor";
+			String epcClassName = "org.qortal.network.Network";
 			LoggerConfig loggerConfig = config.getLoggerConfig(epcClassName);
 			LoggerConfig specificConfig = loggerConfig;
 

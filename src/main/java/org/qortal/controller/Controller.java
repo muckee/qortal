@@ -439,6 +439,7 @@ public class Controller extends Thread {
 				ArbitraryDataCacheManager.getInstance().buildArbitraryResourcesCache(repository, false);
 			}
 
+
 			if( Settings.getInstance().isDbCacheEnabled() ) {
 				LOGGER.info("Starting Db Cache...");
 				HSQLDBDataCacheManager hsqldbDataCacheManager = new HSQLDBDataCacheManager();
@@ -508,7 +509,12 @@ public class Controller extends Thread {
 			}
 		}
 
+	
+
 		try (Repository repository = RepositoryManager.getRepository()) {
+
+			ArbitraryDataCacheManager.populateLatestSignaturesIfNecessary(repository.getConnection());
+		
 			if (RepositoryManager.needsTransactionSequenceRebuild(repository)) {
 				// Don't allow the node to start if transaction sequences haven't been built yet
 				// This is needed to handle a case when bootstrapping
@@ -888,20 +894,24 @@ public class Controller extends Thread {
 						LOGGER.warn(String.format("Repository issue when trying to prune peers: %s", e.getMessage()));
 					}
 					
-					// Check EPC health to detect critical thread issues
+					// Check worker pool health to detect critical thread issues
+					// Note: After refactor to dedicated I/O threads, 0 active threads means "idle worker pool"
+					// not "dead system". The I/O threads run independently and always service sockets.
+					// Only warn if pool stats are unavailable (indicates shutdown or initialization issue).
 					try {
 						ExecuteProduceConsume.StatsSnapshot networkStats = Network.getInstance().getStatsSnapshot();
 						ExecuteProduceConsume.StatsSnapshot networkDataStats = NetworkData.getInstance().getStatsSnapshot();
 						
-						// CRITICAL: Warn if either EPC has no active threads
-						if (networkStats.activeThreadCount == 0) {
-							LOGGER.error("CRITICAL: Network EPC has 0 active threads! Network processing has stopped!");
+						// Log high activity for monitoring, but 0 active threads is now normal when idle
+						if (networkStats.activeThreadCount > 50) {
+							LOGGER.trace("Network worker pool has high activity: {} active threads", networkStats.activeThreadCount);
 						}
-						if (networkDataStats.activeThreadCount == 0) {
-							LOGGER.error("CRITICAL: NetworkData EPC has 0 active threads! Data network processing has stopped!");
+						if (networkDataStats.activeThreadCount > 15) {
+							LOGGER.trace("NetworkData worker pool has high activity: {} active threads", networkDataStats.activeThreadCount);
 						}
 					} catch (Exception e) {
-						LOGGER.warn("Failed to get EPC stats: {}", e.getMessage());
+						// This would indicate a more serious problem (e.g., Network not initialized)
+						LOGGER.error("CRITICAL: Failed to get worker pool stats (system may not be initialized): {}", e.getMessage());
 					}
 				}
 
