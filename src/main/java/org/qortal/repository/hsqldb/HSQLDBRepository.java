@@ -34,11 +34,11 @@ public class HSQLDBRepository implements Repository {
 	/** Read/write gate: normal queries take read lock; checkpoint/backup takes write lock. Fair to avoid starvation. */
 	public static final ReentrantReadWriteLock CHECKPOINT_GATE = new ReentrantReadWriteLock(true);
 	/** Start allowing forceful checkpoint lock attempts after this many non-forceful attempts. */
-	private static final int CHECKPOINT_FORCEFUL_AFTER_ATTEMPTS = 32;
+	private static final int CHECKPOINT_FORCEFUL_AFTER_ATTEMPTS = 131072;
 	/** After threshold, do one forceful attempt every N attempts. */
-	private static final int CHECKPOINT_FORCEFUL_INTERVAL_ATTEMPTS = 16;
+	private static final int CHECKPOINT_FORCEFUL_INTERVAL_ATTEMPTS = 65536;
 	/** Minimum delay between INFO-level pending-checkpoint summaries. */
-	private static final long CHECKPOINT_PENDING_SUMMARY_INTERVAL_MS = 30_000L;
+	private static final long CHECKPOINT_PENDING_SUMMARY_INTERVAL_MS = 180_000L;
 	private static final AtomicInteger CHECKPOINT_ATTEMPTS_SINCE_REQUEST = new AtomicInteger();
 	private static final AtomicLong CHECKPOINT_LAST_PENDING_SUMMARY_MS = new AtomicLong(0L);
 
@@ -450,20 +450,17 @@ public class HSQLDBRepository implements Repository {
 			attemptsBeforeForceful = modulo == 0 ? 0 : CHECKPOINT_FORCEFUL_INTERVAL_ATTEMPTS - modulo;
 		}
 
+		long now = System.currentTimeMillis();
 		boolean forcefulAttempt = attemptNumber >= CHECKPOINT_FORCEFUL_AFTER_ATTEMPTS && attemptsBeforeForceful == 0;
-		LOGGER.debug("Checkpoint attempt {} (beforeForceful={}, forcefulThreshold={}, forcefulInterval={})",
-				attemptNumber, attemptsBeforeForceful, CHECKPOINT_FORCEFUL_AFTER_ATTEMPTS, CHECKPOINT_FORCEFUL_INTERVAL_ATTEMPTS);
 
 		if (forcefulAttempt) {
-			LOGGER.debug("Checkpoint attempt {} is forceful - acquiring blocking checkpoint gate lock", attemptNumber);
 			CHECKPOINT_GATE.writeLock().lock();
 		} else {
 			// Use non-blocking tryLock for most attempts to avoid queuing a writer that blocks readers
 			// under fair lock ordering (which causes a "lock wave" of reader starvation).
 			if (!CHECKPOINT_GATE.writeLock().tryLock()) {
-				long now = System.currentTimeMillis();
 				if (shouldLogCheckpointPendingSummary(now)) {
-					LOGGER.info("Checkpoint pending summary: attemptsSinceRequest={}, beforeForceful={}, reason=checkpoint_gate_busy",
+					LOGGER.info("Checkpoint pending summary: attemptsSinceRequest={}, attemptsBeforeForceful={}, reason=checkpoint_gate_busy",
 							attemptNumber, attemptsBeforeForceful);
 				}
 				return;
@@ -501,9 +498,8 @@ public class HSQLDBRepository implements Repository {
 
 						if (transactionCount > 0) {
 							// We can't safely perform CHECKPOINT due to ongoing SQL transactions
-							long now = System.currentTimeMillis();
 							if (shouldLogCheckpointPendingSummary(now)) {
-								LOGGER.info("Checkpoint pending summary: attemptsSinceRequest={}, beforeForceful={}, reason=active_transactions, activeTransactions={}",
+								LOGGER.info("Checkpoint pending summary: attemptsSinceRequest={}, attemptsBeforeForceful={}, reason=active_transactions, activeTransactions={}",
 										attemptNumber, attemptsBeforeForceful, transactionCount);
 							}
 							// Keep the checkpoint request so it can be tried again later
