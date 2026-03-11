@@ -714,7 +714,7 @@ public class TransactionImporter extends Thread {
             }
 
             int remainingCandidates = signatureBySignature58.size();
-            LOGGER.info("Sig-import cycle: candidatesBeforeDb={}, existingInDb={}, remainingCandidates={}", candidatesBeforeDb, existingInDb, remainingCandidates);
+            LOGGER.debug("Sig-import cycle: candidatesBeforeDb={}, existingInDb={}, remainingCandidates={}", candidatesBeforeDb, existingInDb, remainingCandidates);
 
             // Check isInterrupted() here and exit fast
             if (Thread.currentThread().isInterrupted())
