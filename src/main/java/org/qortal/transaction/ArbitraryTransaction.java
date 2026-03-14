@@ -20,6 +20,8 @@ import org.qortal.data.arbitrary.ArbitraryResourceStatus;
 import org.qortal.data.naming.NameData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.notification.NotificationManager;
+import org.qortal.notification.ResourcePublishedEvent;
 import org.qortal.payment.Payment;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -29,6 +31,7 @@ import org.qortal.transform.Transformer;
 import org.qortal.transform.transaction.ArbitraryTransactionTransformer;
 import org.qortal.transform.transaction.TransactionTransformer;
 import org.qortal.utils.ArbitraryTransactionUtils;
+import org.qortal.utils.Base58;
 import org.qortal.utils.NTP;
 
 import java.io.IOException;
@@ -322,6 +325,38 @@ public class ArbitraryTransaction extends Transaction {
 			);
 
 			repository.saveChanges();
+
+		// Fire RESOURCE_PUBLISHED notification immediately after the cache row is committed.
+		// Only fire for confirmed transactions (autoInvalidate=false); skip unconfirmed mempool
+		// arrivals to avoid duplicate notifications when the tx is later confirmed into a block.
+		// Only dispatched to subscriptions that don't require metadata fields — those are
+		// handled later by ArbitraryDataCacheManager once metadata arrives.
+		if (!autoInvalidate && arbitraryTransactionData.getService() != null && arbitraryTransactionData.getName() != null) {
+				LOGGER.info("NOTIFY_DEBUG arbitrary tx: service={} name={} identifier={}",
+					arbitraryTransactionData.getService().name(),
+					arbitraryTransactionData.getName(),
+					arbitraryTransactionData.getIdentifier());
+				try {
+					String serviceName = arbitraryTransactionData.getService().name();
+					String identifier  = arbitraryTransactionData.getIdentifier() != null
+							? arbitraryTransactionData.getIdentifier() : "";
+					String sig = arbitraryTransactionData.getSignature() != null
+							? Base58.encode(arbitraryTransactionData.getSignature()) : null;
+					NotificationManager.getInstance().processResourcePublishedEarly(
+						new ResourcePublishedEvent(
+							serviceName,
+							arbitraryTransactionData.getName(),
+							identifier,
+							sig,
+							null, null, null, null,
+							arbitraryTransactionData.getTimestamp(),
+							null, null
+						)
+					);
+				} catch (Exception notifEx) {
+					LOGGER.debug("Error firing early RESOURCE_PUBLISHED notification: {}", notifEx.getMessage());
+				}
+			}
 
 		} catch (Exception e) {
 			// Log and ignore all exceptions. The cache is updated from other places too, and can be rebuilt if needed.

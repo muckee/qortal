@@ -26,9 +26,13 @@ import org.qortal.data.naming.NameData;
 import org.qortal.data.network.PeerData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.data.transaction.ChatTransactionData;
+import org.qortal.data.transaction.PaymentTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.crypto.Crypto;
 import org.qortal.event.Event;
 import org.qortal.event.EventBus;
+import org.qortal.notification.NotificationEvent;
+import org.qortal.notification.NotificationManager;
 import org.qortal.globalization.Translator;
 import org.qortal.gui.Gui;
 import org.qortal.gui.SysTray;
@@ -1495,6 +1499,33 @@ public class Controller extends Thread {
 			if (transactionData.getType() == TransactionType.CHAT)
 				ChatNotifier.getInstance().onNewChatTransaction((ChatTransactionData) transactionData);
 		});
+	}
+
+	/**
+	 * Converts a transaction into a {@link NotificationEvent} and dispatches it
+	 * through the {@link NotificationManager} to any subscribed WebSocket clients.
+	 * <p>
+	 * Covered events:
+	 * <ul>
+	 *   <li>{@code PAYMENT_RECEIVED} – PAYMENT transactions</li>
+	 * </ul>
+	 */
+	private void dispatchTransactionNotification(TransactionData transactionData) {
+		if (transactionData == null) {
+			return;
+		}
+
+		try {
+			if (transactionData.getType() == TransactionType.PAYMENT) {
+				PaymentTransactionData tx = (PaymentTransactionData) transactionData;
+				String sender = Crypto.toAddress(tx.getCreatorPublicKey());
+				String amount = String.valueOf(tx.getAmount());
+				NotificationManager.getInstance().processEvent(new NotificationEvent("PAYMENT_RECEIVED",
+					Map.of("sender", sender, "recipient", tx.getRecipient(), "amount", amount)));
+			}
+		} catch (Exception e) {
+			LOGGER.debug("Error dispatching transaction notification: {}", e.getMessage());
+		}
 	}
 
 	/**

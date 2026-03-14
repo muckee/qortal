@@ -7,6 +7,8 @@ import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.transaction.ArbitraryTransactionData;
 import org.qortal.event.DataMonitorEvent;
 import org.qortal.event.EventBus;
+import org.qortal.notification.NotificationManager;
+import org.qortal.notification.ResourcePublishedEvent;
 import org.qortal.gui.SplashFrame;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
@@ -271,6 +273,13 @@ public class ArbitraryDataCacheManager extends Thread {
                         )
                     );
 
+                    // Fire RESOURCE_PUBLISHED notification to any subscribed WebSocket clients.
+                    try {
+                        fireResourcePublishedNotification(transactionData);
+                    } catch (Exception notifEx) {
+                        LOGGER.debug("Error firing RESOURCE_PUBLISHED notification: {}", notifEx.getMessage());
+                    }
+
                     LOGGER.debug(() -> String.format("Finished processing transaction %.8s in arbitrary resource queue...", Base58.encode(transactionData.getSignature())));
 
                 } catch (DataException e) {
@@ -289,6 +298,43 @@ public class ArbitraryDataCacheManager extends Thread {
     public void addToUpdateQueue(ArbitraryTransactionData transactionData) {
         this.updateQueue.add(transactionData);
         LOGGER.debug(() -> String.format("Transaction %.8s added to queue", Base58.encode(transactionData.getSignature())));
+    }
+
+    /**
+     * Builds a {@link ResourcePublishedEvent} purely from {@code transactionData}
+     * — no database reads — and dispatches it to the {@link NotificationManager}.
+     * <p>
+     * Metadata fields (title, description, tags, category, level) are not available
+     * at this point without a DB round-trip, so they are omitted. Filters that rely
+     * on those fields will simply not match, which is acceptable since MAIL_PRIVATE
+     * and similar services are typically filtered by service + query (identifier).
+     */
+    private void fireResourcePublishedNotification(ArbitraryTransactionData transactionData) {
+        if (transactionData.getService() == null || transactionData.getName() == null) {
+            return;
+        }
+
+        String serviceName = transactionData.getService().name();
+        String name        = transactionData.getName();
+        String identifier  = transactionData.getIdentifier() != null ? transactionData.getIdentifier() : "";
+        String sig         = transactionData.getSignature() != null
+                ? Base58.encode(transactionData.getSignature()) : null;
+
+        ResourcePublishedEvent ev = new ResourcePublishedEvent(
+            serviceName,
+            name,
+            identifier,
+            sig,
+            null,   // title  — not available without DB read
+            null,   // description
+            null,   // tags
+            null,   // category
+            transactionData.getTimestamp(),
+            null,   // updated
+            null    // creatorLevel
+        );
+
+        NotificationManager.getInstance().processResourcePublished(ev);
     }
 
     public boolean needsArbitraryResourcesCacheRebuild(Repository repository) throws DataException {

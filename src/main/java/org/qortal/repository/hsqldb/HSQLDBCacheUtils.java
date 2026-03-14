@@ -365,6 +365,160 @@ public class HSQLDBCacheUtils {
     }
 
     /**
+     * Notification-history–specific path: sort once by created desc, then one pass with early exit.
+     * Avoids full filter-then-sort of the entire service list so history stays fast for large caches.
+     * Supports the same metadata filters as filterList (query, title, description, keywords).
+     *
+     * @param candidates   list for a single service (from cache)
+     * @param levelByName level-by-name map (for minLevel)
+     * @param after       only items with created &gt; after
+     * @param limit       stop after this many results
+     * @param identifier  optional prefix/contains filter on identifier
+     * @param prefixOnly  true for prefix match, false for contains
+     * @param blockedNames names to exclude (e.g. from ListUtils.blockedNames()); null = no exclusion
+     * @param names       optional: retain if name matches any term (prefix/contains per prefixOnly); null/empty = pass
+     * @param exactMatchNames optional: retain only if name (lowercase) in this set; null/empty = pass
+     * @param minLevel    optional minimum account level; null = no filter
+     * @param query       optional: match name, identifier, title or description (or name only if defaultResource); null = pass
+     * @param defaultResource when true with query, only default identifier and query on name
+     * @param title       optional: prefix/contains on metadata title; null/empty = pass
+     * @param description optional: prefix/contains on metadata description; null/empty = pass
+     * @param keywords    optional: at least one keyword in metadata description; null/empty = pass
+     * @return at most {@code limit} items, newest first (no metadata/status stripping)
+     */
+    public static List<ArbitraryResourceData> getRecentForNotificationHistory(
+            List<ArbitraryResourceData> candidates,
+            Map<String, Integer> levelByName,
+            long after,
+            int limit,
+            String identifier,
+            boolean prefixOnly,
+            List<String> blockedNames,
+            List<String> names,
+            List<String> exactMatchNames,
+            Integer minLevel,
+            String query,
+            boolean defaultResource,
+            String title,
+            String description,
+            List<String> keywords) {
+
+        if (candidates == null || candidates.isEmpty() || limit <= 0) {
+            return new ArrayList<>();
+        }
+
+        long t0 = System.currentTimeMillis();
+        List<ArbitraryResourceData> sorted = new ArrayList<>(candidates);
+        sorted.sort(CREATED_WHEN_COMPARATOR.reversed());
+        long t1 = System.currentTimeMillis();
+        LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory copy+sort ms={} candidates={}", t1 - t0, candidates.size());
+
+        List<String> exactLower = null;
+        if (exactMatchNames != null && !exactMatchNames.isEmpty()) {
+            exactLower = exactMatchNames.stream().map(String::toLowerCase).collect(Collectors.toList());
+        }
+
+        List<String> keywordsLower = null;
+        if (keywords != null && !keywords.isEmpty()) {
+            keywordsLower = keywords.stream().map(String::toLowerCase).collect(Collectors.toList());
+        }
+
+        List<ArbitraryResourceData> result = new ArrayList<>(Math.min(limit, sorted.size()));
+        for (ArbitraryResourceData r : sorted) {
+            if (result.size() >= limit) break;
+
+            Long created = r.created;
+            if (created == null || created <= after) continue;
+            if (blockedNames != null && blockedNames.contains(r.name)) continue;
+
+            if (identifier != null && !identifier.isEmpty()) {
+                String id = r.identifier;
+                if (id == null) continue;
+                String idLower = id.toLowerCase();
+                String identLower = identifier.toLowerCase();
+                if (prefixOnly ? !idLower.startsWith(identLower) : !idLower.contains(identLower)) continue;
+            }
+
+            if (query != null && !query.isEmpty()) {
+                String q = query.toLowerCase();
+                boolean queryMatch;
+                if (defaultResource) {
+                    queryMatch = DEFAULT_IDENTIFIER.equals(r.identifier) && r.name != null
+                            && (prefixOnly ? r.name.toLowerCase().startsWith(q) : r.name.toLowerCase().contains(q));
+                } else {
+                    queryMatch = (r.name != null && (prefixOnly ? r.name.toLowerCase().startsWith(q) : r.name.toLowerCase().contains(q)))
+                            || (r.identifier != null && (prefixOnly ? r.identifier.toLowerCase().startsWith(q) : r.identifier.toLowerCase().contains(q)));
+                    if (!queryMatch && r.metadata != null) {
+                        String t = r.metadata.getTitle();
+                        String d = r.metadata.getDescription();
+                        queryMatch = (t != null && (prefixOnly ? t.toLowerCase().startsWith(q) : t.toLowerCase().contains(q)))
+                                || (d != null && (prefixOnly ? d.toLowerCase().startsWith(q) : d.toLowerCase().contains(q)));
+                    }
+                }
+                if (!queryMatch) continue;
+            }
+
+            if (title != null && !title.isEmpty()) {
+                if (r.metadata == null) continue;
+                String t = r.metadata.getTitle();
+                if (t == null) continue;
+                String tLower = t.toLowerCase();
+                String titleLower = title.toLowerCase();
+                if (prefixOnly ? !tLower.startsWith(titleLower) : !tLower.contains(titleLower)) continue;
+            }
+
+            if (description != null && !description.isEmpty()) {
+                if (r.metadata == null) continue;
+                String d = r.metadata.getDescription();
+                if (d == null) continue;
+                String dLower = d.toLowerCase();
+                String descLower = description.toLowerCase();
+                if (prefixOnly ? !dLower.startsWith(descLower) : !dLower.contains(descLower)) continue;
+            }
+
+            if (keywordsLower != null) {
+                if (r.metadata == null || r.metadata.getDescription() == null) continue;
+                String dLower = r.metadata.getDescription().toLowerCase();
+                boolean anyMatch = false;
+                for (String k : keywordsLower) {
+                    if (dLower.contains(k)) {
+                        anyMatch = true;
+                        break;
+                    }
+                }
+                if (!anyMatch) continue;
+            }
+
+            if (names != null && !names.isEmpty()) {
+                String name = r.name;
+                if (name == null) continue;
+                String nameLower = name.toLowerCase();
+                boolean match = false;
+                for (String term : names) {
+                    String termLower = term.toLowerCase();
+                    if (prefixOnly ? nameLower.startsWith(termLower) : nameLower.contains(termLower)) {
+                        match = true;
+                        break;
+                    }
+                }
+                if (!match) continue;
+            }
+
+            if (exactLower != null) {
+                if (r.name == null || !exactLower.contains(r.name.toLowerCase())) continue;
+            }
+
+            if (minLevel != null && levelByName.getOrDefault(r.name, 0) < minLevel) continue;
+
+            result.add(r);
+        }
+        long t2 = System.currentTimeMillis();
+        LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory filter loop ms={} resultSize={} total ms={}",
+                t2 - t1, result.size(), t2 - t0);
+        return result;
+    }
+
+    /**
      * Filter Terms
      *
      * @param term the term to filter
