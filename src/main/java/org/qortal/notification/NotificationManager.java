@@ -44,7 +44,7 @@ public class NotificationManager {
     static final String WILDCARD = "*";
 
     /** Notifications for the same resource within this window are deduplicated per session. */
-    private static final long DEDUP_WINDOW_MS = 10_000L;
+    private static final long DEDUP_WINDOW_MS = 5 * 60 * 1000L; // 5 minutes
 
     private static NotificationManager instance;
 
@@ -512,7 +512,7 @@ public class NotificationManager {
                 sb.append("]");
             }
             if (ev.created != null) {
-                sb.append(",\"timestamp\":").append(ev.created);
+                sb.append(",\"created\":").append(ev.created);
             }
             if (ev.updated != null) {
                 sb.append(",\"updated\":").append(ev.updated);
@@ -523,6 +523,7 @@ public class NotificationManager {
             if (ev.creatorLevel != null) {
                 sb.append(",\"creatorLevel\":").append(ev.creatorLevel);
             }
+            sb.append(",\"timestamp\":").append(System.currentTimeMillis());
             sb.append("}");
 
             // Echo back the subscription's display hints if present (with {name}/{identifier} substitution)
@@ -584,6 +585,7 @@ public class NotificationManager {
                 sb.append("\"").append(jsonEscape(entry.getValue())).append("\"");
                 first = false;
             }
+            sb.append(",\"timestamp\":").append(System.currentTimeMillis());
 
             sb.append("}");
 
@@ -805,9 +807,10 @@ public class NotificationManager {
         sb.append("\"service\":\"").append(jsonEscape(r.service != null ? r.service.name() : "")).append("\"");
         sb.append(",\"name\":\"").append(jsonEscape(r.name != null ? r.name : "")).append("\"");
         sb.append(",\"identifier\":\"").append(jsonEscape(r.identifier != null ? r.identifier : "")).append("\"");
-        if (r.created != null) sb.append(",\"timestamp\":").append(r.created);
+        if (r.created != null) sb.append(",\"created\":").append(r.created);
         if (r.updated != null) sb.append(",\"updated\":").append(r.updated);
         if (r.latestSignature != null) sb.append(",\"signature\":\"").append(jsonEscape(Base58.encode(r.latestSignature))).append("\"");
+        sb.append(",\"timestamp\":").append(System.currentTimeMillis());
         sb.append("}");
         appendSubDisplayHints(sb, sub, r.name, r.identifier);
         sb.append("}");
@@ -823,8 +826,9 @@ public class NotificationManager {
         sb.append("\"sender\":\"").append(jsonEscape(sender)).append("\"");
         sb.append(",\"recipient\":\"").append(jsonEscape(recipient)).append("\"");
         sb.append(",\"amount\":\"").append(jsonEscape(amount)).append("\"");
-        sb.append(",\"timestamp\":").append(timestamp);
+        sb.append(",\"created\":").append(timestamp);
         if (signature != null) sb.append(",\"signature\":\"").append(jsonEscape(signature)).append("\"");
+        sb.append(",\"timestamp\":").append(System.currentTimeMillis());
         sb.append("}");
         appendSubDisplayHints(sb, sub, null, null);
         sb.append("}");

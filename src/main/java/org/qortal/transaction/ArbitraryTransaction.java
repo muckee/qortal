@@ -326,38 +326,6 @@ public class ArbitraryTransaction extends Transaction {
 
 			repository.saveChanges();
 
-		// Fire RESOURCE_PUBLISHED notification immediately after the cache row is committed.
-		// Only fire for confirmed transactions (autoInvalidate=false); skip unconfirmed mempool
-		// arrivals to avoid duplicate notifications when the tx is later confirmed into a block.
-		// Only dispatched to subscriptions that don't require metadata fields — those are
-		// handled later by ArbitraryDataCacheManager once metadata arrives.
-		if (!autoInvalidate && arbitraryTransactionData.getService() != null && arbitraryTransactionData.getName() != null) {
-				LOGGER.info("NOTIFY_DEBUG arbitrary tx: service={} name={} identifier={}",
-					arbitraryTransactionData.getService().name(),
-					arbitraryTransactionData.getName(),
-					arbitraryTransactionData.getIdentifier());
-				try {
-					String serviceName = arbitraryTransactionData.getService().name();
-					String identifier  = arbitraryTransactionData.getIdentifier() != null
-							? arbitraryTransactionData.getIdentifier() : "";
-					String sig = arbitraryTransactionData.getSignature() != null
-							? Base58.encode(arbitraryTransactionData.getSignature()) : null;
-					NotificationManager.getInstance().processResourcePublishedEarly(
-						new ResourcePublishedEvent(
-							serviceName,
-							arbitraryTransactionData.getName(),
-							identifier,
-							sig,
-							null, null, null, null,
-							arbitraryTransactionData.getTimestamp(),
-							null, null
-						)
-					);
-				} catch (Exception notifEx) {
-					LOGGER.debug("Error firing early RESOURCE_PUBLISHED notification: {}", notifEx.getMessage());
-				}
-			}
-
 		} catch (Exception e) {
 			// Log and ignore all exceptions. The cache is updated from other places too, and can be rebuilt if needed.
 			LOGGER.info("Unable to update arbitrary caches", e);
@@ -468,6 +436,7 @@ public class ArbitraryTransaction extends Transaction {
 		}
 
 		// Check for existing cached data
+		final boolean isNewResource = (existingArbitraryResourceData == null);
 		if (existingArbitraryResourceData == null) {
 			// Nothing exists yet, so set creation date from the current transaction (it will be reduced later if needed)
 			arbitraryResourceData.created = arbitraryTransactionData.getTimestamp();
@@ -493,6 +462,7 @@ public class ArbitraryTransaction extends Transaction {
 		// Save
 		repository.getArbitraryRepository().save(arbitraryResourceData);
 
+		ResourcePublishedEvent metadataFirstTimeEvent = null;
 		// Update metadata for latest transaction if it is local
 		if (latestTransactionData.getMetadataHash() != null) {
 			ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(latestTransactionData.getMetadataHash(), latestTransactionData.getSignature());
@@ -508,7 +478,27 @@ public class ArbitraryTransaction extends Transaction {
 					metadata.setCategory(transactionMetadata.getCategory());
 					metadata.setTags(transactionMetadata.getTags());
 					repository.getArbitraryRepository().save(metadata);
+					LOGGER.info("METADATA_FETCH: updateArbitraryResourceCacheIncludingMetadata saved metadata to cache name={} service={} identifier={}",
+							name, service != null ? service.name() : null, identifier);
 
+					// First time we have metadata for this resource? Fire notification with metadata populated.
+					boolean hadNoMetadata = existingArbitraryResourceData == null
+							|| existingArbitraryResourceData.metadata == null
+							|| !existingArbitraryResourceData.metadata.hasMetadata();
+					if (hadNoMetadata && service != null && name != null) {
+						String serviceName = service.name();
+						String ident = arbitraryTransactionData.getIdentifier() != null ? arbitraryTransactionData.getIdentifier() : "";
+						String sig = arbitraryTransactionData.getSignature() != null ? Base58.encode(arbitraryTransactionData.getSignature()) : null;
+						String title = transactionMetadata.getTitle();
+						String description = transactionMetadata.getDescription();
+						List<String> tags = transactionMetadata.getTags();
+						String categoryStr = transactionMetadata.getCategory() != null ? transactionMetadata.getCategory().toString() : null;
+						metadataFirstTimeEvent = new ResourcePublishedEvent(
+								serviceName, name, ident, sig,
+								title, description, tags, categoryStr,
+								arbitraryTransactionData.getTimestamp(),
+								null, null);
+					}
 				} catch (IOException e) {
 					// Ignore, as we can add it again later
 				}
@@ -518,6 +508,36 @@ public class ArbitraryTransaction extends Transaction {
 				ArbitraryResourceMetadata metadata = new ArbitraryResourceMetadata();
 				metadata.setArbitraryResourceData(arbitraryResourceData);
 				repository.getArbitraryRepository().delete(metadata);
+			}
+		}
+
+		// Fire RESOURCE_PUBLISHED notification for new resources.
+		if (isNewResource && service != null && name != null) {
+			try {
+				String serviceName = service.name();
+				String ident = arbitraryTransactionData.getIdentifier() != null ? arbitraryTransactionData.getIdentifier() : "";
+				String sig = arbitraryTransactionData.getSignature() != null ? Base58.encode(arbitraryTransactionData.getSignature()) : null;
+				ResourcePublishedEvent ev = new ResourcePublishedEvent(
+					serviceName,
+					name,
+					ident,
+					sig,
+					null, null, null, null,
+					arbitraryTransactionData.getTimestamp(),
+					null, null
+				);
+				NotificationManager.getInstance().processResourcePublishedEarly(ev);
+			} catch (Exception e) {
+				LOGGER.debug("Error firing RESOURCE_PUBLISHED notification: {}", e.getMessage());
+			}
+		}
+
+		// If we saved metadata for the first time, fire full notification (with metadata) so metadata-based filters match.
+		if (metadataFirstTimeEvent != null) {
+			try {
+				NotificationManager.getInstance().processResourcePublished(metadataFirstTimeEvent);
+			} catch (Exception e) {
+				LOGGER.debug("Error firing RESOURCE_PUBLISHED notification (metadata first time): {}", e.getMessage());
 			}
 		}
 	}

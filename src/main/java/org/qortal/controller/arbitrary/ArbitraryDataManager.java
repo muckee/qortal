@@ -53,6 +53,9 @@ public class ArbitraryDataManager extends Thread {
 	/** Request timeout when transferring arbitrary data */
 	public static final long ARBITRARY_REQUEST_TIMEOUT = 12 * 1000L; // ms
 
+	/** Request timeout when fetching metadata only (shorter than full data) */
+	public static final long METADATA_REQUEST_TIMEOUT = 7 * 1000L; // ms
+
 	/** Maximum time to hold information about an in-progress relay */
 	public static final long ARBITRARY_RELAY_TIMEOUT = 10 * 60 * 1000L; // 10 minutes (was 2 minutes)
 
@@ -67,6 +70,15 @@ public class ArbitraryDataManager extends Thread {
 
 	private long lastMetadataFetchTime = 0L;
 	private static long METADATA_FETCH_INTERVAL = 5 * 60 * 1000L;
+
+	/** Latest-100 metadata fetcher: start only 5 mins after startup, then work up to 90s, pause 30s, repeat */
+	private static final long LATEST_100_INITIAL_DELAY_MS = 5 * 60 * 1000L;
+	private static final long LATEST_100_WORK_MS = 90 * 1000L;
+	private static final long LATEST_100_PAUSE_MS = 90 * 1000L;
+	private static final int LATEST_100_LIMIT = 100;
+
+	private volatile Thread latestMetadataFetchThread;
+	private volatile boolean latestMetadataFetchThreadStarted = false;
 
 	private long lastDataFetchTime = 0L;
 	private static long DATA_FETCH_INTERVAL = 1 * 60 * 1000L;
@@ -114,6 +126,9 @@ public class ArbitraryDataManager extends Thread {
 		try {
 			// Wait for node to finish starting up and making connections
 			Thread.sleep(2 * 60 * 1000L);
+
+			// Start concurrent "latest 100" metadata fetcher (runs 5 min after startup, then 90s work / 30s pause)
+			startLatest100MetadataFetchThread();
 
 			while (!isStopping) {
 				Thread.sleep(2000);
@@ -186,6 +201,9 @@ public class ArbitraryDataManager extends Thread {
 
 	public void shutdown() {
 		isStopping = true;
+		if (latestMetadataFetchThread != null) {
+			latestMetadataFetchThread.interrupt();
+		}
 		this.interrupt();
 	}
 
@@ -448,6 +466,12 @@ public class ArbitraryDataManager extends Thread {
 				// fetch the metadata and notify the event bus again
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
 
+				LOGGER.info("METADATA_FETCH: fetchAllMetadata picked resource name={} service={} identifier={} signature={}",
+						arbitraryTransactionData != null ? arbitraryTransactionData.getName() : null,
+						arbitraryTransactionData != null && arbitraryTransactionData.getService() != null ? arbitraryTransactionData.getService().name() : null,
+						arbitraryTransactionData != null ? arbitraryTransactionData.getIdentifier() : null,
+						Base58.encode(signature));
+
 				// Ask our connected peers if they have metadata for this signature
 				fetchMetadata(arbitraryTransactionData);
 
@@ -472,6 +496,109 @@ public class ArbitraryDataManager extends Thread {
 				LOGGER.error(e.getMessage(), e);
 			}
 		}
+	}
+
+	/** Starts the concurrent "latest 100" metadata fetch thread once (5 min delay, then 90s work / 30s pause). */
+	private void startLatest100MetadataFetchThread() {
+		synchronized (this) {
+			if (latestMetadataFetchThreadStarted) {
+				return;
+			}
+			latestMetadataFetchThreadStarted = true;
+		}
+		latestMetadataFetchThread = new Thread(() -> {
+			Thread.currentThread().setName("Arbitrary Latest-100 Metadata");
+			Thread.currentThread().setPriority(NORM_PRIORITY);
+			LOGGER.info("Arbitrary Latest-100 Metadata thread started; waiting {}ms before first burst", LATEST_100_INITIAL_DELAY_MS);
+			try {
+				Thread.sleep(LATEST_100_INITIAL_DELAY_MS);
+				while (!isStopping) {
+					try {
+						fetchLatest100MetadataBurst();
+					} catch (Exception e) {
+						LOGGER.error("Error in latest-100 metadata burst", e);
+					}
+					Thread.sleep(LATEST_100_PAUSE_MS);
+				}
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+		});
+		latestMetadataFetchThread.start();
+	}
+
+	/**
+	 * Fetches metadata for as many recent transactions as possible within 90 seconds.
+	 * Builds the candidate list once per burst, then works through it sequentially.
+	 */
+	private void fetchLatest100MetadataBurst() throws InterruptedException {
+		if (!Settings.getInstance().isQdnEnabled()) {
+			return;
+		}
+		List<Peer> peers = NetworkData.getInstance().getImmutableHandshakedPeers().stream()
+				.collect(Collectors.toList());
+		peers.removeIf(Controller.hasMisbehaved);
+		if (peers.size() < Settings.getInstance().getMinBlockchainPeers()) {
+			return;
+		}
+
+		final long deadline = System.currentTimeMillis() + LATEST_100_WORK_MS;
+		ArbitraryDataStorageManager storageManager = ArbitraryDataStorageManager.getInstance();
+
+		// Build the candidate list once for this burst
+		List<ArbitraryTransactionData> candidates = new ArrayList<>();
+		try (final Repository repository = RepositoryManager.getRepository()) {
+			List<ArbitraryTransactionData> recent = repository.getArbitraryRepository().getLatestArbitraryTransactions(LATEST_100_LIMIT);
+			for (ArbitraryTransactionData txData : recent) {
+				if (isStopping) break;
+				try {
+					ArbitraryTransaction tx = new ArbitraryTransaction(repository, txData);
+					if (!storageManager.isBlocked(txData) && !hasLocalMetadata(tx)) {
+						candidates.add(txData);
+					}
+				} catch (Exception e) {
+					// skip this entry
+				}
+			}
+		} catch (Exception e) {
+			LOGGER.error("Repository issue building latest-100 metadata candidates", e);
+			return;
+		}
+
+		if (candidates.isEmpty()) {
+			LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst - no candidates needing metadata");
+			return;
+		}
+
+		LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst starting burst with {} candidates", candidates.size());
+
+		for (ArbitraryTransactionData txData : candidates) {
+			if (isStopping || System.currentTimeMillis() >= deadline) break;
+
+			LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst fetching name={} service={} identifier={} signature={}",
+					txData.getName(),
+					txData.getService() != null ? txData.getService().name() : null,
+					txData.getIdentifier(),
+					Base58.encode(txData.getSignature()));
+
+			fetchMetadata(txData);
+
+			if (txData.getService() != null) {
+				EventBus.INSTANCE.notify(
+						new DataMonitorEvent(
+								System.currentTimeMillis(),
+								txData.getIdentifier(),
+								txData.getName(),
+								txData.getService().name(),
+								"fetched metadata (latest-100)",
+								txData.getTimestamp(),
+								txData.getTimestamp()
+						)
+				);
+			}
+		}
+
+		LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst burst complete");
 	}
 
 	private static List<byte[]> processTransactionsForSignatures(

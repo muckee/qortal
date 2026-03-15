@@ -91,7 +91,7 @@ public class PaymentTransaction extends Transaction {
 		data.put("sender", sender);
 		data.put("recipient", recipient);
 		data.put("amount", amount);
-		data.put("timestamp", timestamp);
+		data.put("created", timestamp);
 		if (signature != null) data.put("signature", signature);
 		CompletableFuture.runAsync(() -> {
 			try {
