@@ -24,7 +24,7 @@ import java.util.Map;
  *   "resourceFilter": {
  *     "service": "MAIL_PRIVATE",
  *     "identifier": "qortal_qmail_alice_mail_",
- *     "prefixOnly": true,
+ *     "prefix": true,
  *     "excludeBlocked": true
  *   },
  *   "message": { "en": "New QMail", "fr": "Nouveau QMail" },

@@ -18,12 +18,11 @@ import java.util.List;
  *     "service": "BLOG",
  *     "query": "qortal",
  *     "names": ["alice", "bob"],
- *     "exactMatchNames": ["charlie"],
  *     "identifier": "post",
  *     "title": "hello",
  *     "description": "world",
  *     "keywords": ["news", "update"],
- *     "prefixOnly": false,
+ *     "prefix": false,
  *     "defaultResource": false,
  *     "minLevel": 3,
  *     "followedOnly": true,
@@ -50,11 +49,8 @@ public class ResourcePublishedFilter {
     /** Fuzzy/prefix match on the resource identifier. */
     public String identifier;
 
-    /** Fuzzy/prefix match — resource name must contain one of these strings. */
-    public List<String> names;
-
     /** Exact (case-insensitive) name match — resource name must be one of these. */
-    public List<String> exactMatchNames;
+    public List<String> names;
 
     /** Fuzzy/prefix match on metadata title. */
     public String title;
@@ -71,9 +67,9 @@ public class ResourcePublishedFilter {
     /**
      * When {@code true}, all string comparisons use prefix matching instead of
      * substring matching (i.e. value must <em>start</em> with the filter string).
-     * Defaults to {@code false}.
+     * When {@code false} or absent, substring (contains) matching is used.
      */
-    public boolean prefixOnly = false;
+    public Boolean prefix;
 
     /**
      * When {@code true}, only the default resource (identifier = "default") is
@@ -167,24 +163,12 @@ public class ResourcePublishedFilter {
             if (!stringMatches(ev.identifier, identifier.toLowerCase())) return false;
         }
 
-        // --- names (fuzzy/prefix, OR across list) ---
+        // --- names (exact, case-insensitive — resource name must be one of these) ---
         if (names != null && !names.isEmpty()) {
-            boolean anyMatch = false;
-            for (String n : names) {
-                if (stringMatches(ev.name, n.toLowerCase())) {
-                    anyMatch = true;
-                    break;
-                }
-            }
-            if (!anyMatch) return false;
-        }
-
-        // --- exactMatchNames (case-insensitive IN list) ---
-        if (exactMatchNames != null && !exactMatchNames.isEmpty()) {
-            boolean found = false;
             String lName = ev.name != null ? ev.name.toLowerCase() : "";
-            for (String n : exactMatchNames) {
-                if (n.toLowerCase().equals(lName)) {
+            boolean found = false;
+            for (String n : names) {
+                if (n != null && n.toLowerCase().equals(lName)) {
                     found = true;
                     break;
                 }
@@ -251,13 +235,13 @@ public class ResourcePublishedFilter {
     // -------------------------------------------------------------------------
 
     /**
-     * Tests whether {@code field} contains (or starts with, if {@code prefixOnly})
+     * Tests whether {@code field} contains (or starts with, if {@code prefix})
      * the lower-cased {@code pattern}.
      * Returns {@code false} if {@code field} is null.
      */
     private boolean stringMatches(String field, String pattern) {
         if (field == null) return false;
         String lField = field.toLowerCase();
-        return prefixOnly ? lField.startsWith(pattern) : lField.contains(pattern);
+        return Boolean.TRUE.equals(prefix) ? lField.startsWith(pattern) : lField.contains(pattern);
     }
 }

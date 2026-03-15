@@ -376,14 +376,15 @@ public class HSQLDBCacheUtils {
      * @param identifier  optional prefix/contains filter on identifier
      * @param prefixOnly  true for prefix match, false for contains
      * @param blockedNames names to exclude (e.g. from ListUtils.blockedNames()); null = no exclusion
-     * @param names       optional: retain if name matches any term (prefix/contains per prefixOnly); null/empty = pass
-     * @param exactMatchNames optional: retain only if name (lowercase) in this set; null/empty = pass
+     * @param names       optional: exact (case-insensitive) name match — resource name must be one of these; null/empty = pass
      * @param minLevel    optional minimum account level; null = no filter
      * @param query       optional: match name, identifier, title or description (or name only if defaultResource); null = pass
      * @param defaultResource when true with query, only default identifier and query on name
      * @param title       optional: prefix/contains on metadata title; null/empty = pass
      * @param description optional: prefix/contains on metadata description; null/empty = pass
      * @param keywords    optional: at least one keyword in metadata description; null/empty = pass
+     * @param before      optional: only items with created &lt; before; null = no filter
+     * @param followedNames optional: retain only if resource name (case-insensitive) is in this list; null/empty = pass
      * @return at most {@code limit} items, newest first (no metadata/status stripping)
      */
     public static List<ArbitraryResourceData> getRecentForNotificationHistory(
@@ -395,13 +396,14 @@ public class HSQLDBCacheUtils {
             boolean prefixOnly,
             List<String> blockedNames,
             List<String> names,
-            List<String> exactMatchNames,
             Integer minLevel,
             String query,
             boolean defaultResource,
             String title,
             String description,
-            List<String> keywords) {
+            List<String> keywords,
+            Long before,
+            List<String> followedNames) {
 
         if (candidates == null || candidates.isEmpty() || limit <= 0) {
             return new ArrayList<>();
@@ -413,14 +415,22 @@ public class HSQLDBCacheUtils {
         long t1 = System.currentTimeMillis();
         LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory copy+sort ms={} candidates={}", t1 - t0, candidates.size());
 
-        List<String> exactLower = null;
-        if (exactMatchNames != null && !exactMatchNames.isEmpty()) {
-            exactLower = exactMatchNames.stream().map(String::toLowerCase).collect(Collectors.toList());
+        List<String> namesLower = null;
+        if (names != null && !names.isEmpty()) {
+            namesLower = names.stream().map(String::toLowerCase).collect(Collectors.toList());
         }
 
         List<String> keywordsLower = null;
         if (keywords != null && !keywords.isEmpty()) {
             keywordsLower = keywords.stream().map(String::toLowerCase).collect(Collectors.toList());
+        }
+
+        List<String> followedLower = null;
+        if (followedNames != null && !followedNames.isEmpty()) {
+            followedLower = followedNames.stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(String::toLowerCase)
+                    .collect(Collectors.toList());
         }
 
         List<ArbitraryResourceData> result = new ArrayList<>(Math.min(limit, sorted.size()));
@@ -429,7 +439,11 @@ public class HSQLDBCacheUtils {
 
             Long created = r.created;
             if (created == null || created <= after) continue;
+            if (before != null && created != null && created >= before) continue;
             if (blockedNames != null && blockedNames.contains(r.name)) continue;
+            if (followedLower != null) {
+                if (r.name == null || !followedLower.contains(r.name.toLowerCase())) continue;
+            }
 
             if (identifier != null && !identifier.isEmpty()) {
                 String id = r.identifier;
@@ -489,23 +503,8 @@ public class HSQLDBCacheUtils {
                 if (!anyMatch) continue;
             }
 
-            if (names != null && !names.isEmpty()) {
-                String name = r.name;
-                if (name == null) continue;
-                String nameLower = name.toLowerCase();
-                boolean match = false;
-                for (String term : names) {
-                    String termLower = term.toLowerCase();
-                    if (prefixOnly ? nameLower.startsWith(termLower) : nameLower.contains(termLower)) {
-                        match = true;
-                        break;
-                    }
-                }
-                if (!match) continue;
-            }
-
-            if (exactLower != null) {
-                if (r.name == null || !exactLower.contains(r.name.toLowerCase())) continue;
+            if (namesLower != null) {
+                if (r.name == null || !namesLower.contains(r.name.toLowerCase())) continue;
             }
 
             if (minLevel != null && levelByName.getOrDefault(r.name, 0) < minLevel) continue;

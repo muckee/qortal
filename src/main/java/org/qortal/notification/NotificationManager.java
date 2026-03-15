@@ -219,8 +219,8 @@ public class NotificationManager {
             if ("RESOURCE_PUBLISHED".equals(event) && rule.getResourceFilter() != null) {
                 ResourcePublishedFilter f = rule.getResourceFilter();
                 serviceKey = (f.service != null && !f.service.isEmpty()) ? f.service : WILDCARD;
-                if (f.exactMatchNames != null && f.exactMatchNames.size() == 1) {
-                    nameKey = f.exactMatchNames.get(0).toLowerCase();
+                if (f.names != null && f.names.size() == 1) {
+                    nameKey = f.names.get(0).toLowerCase();
                 } else {
                     nameKey = WILDCARD;
                 }
@@ -604,6 +604,8 @@ public class NotificationManager {
     // -------------------------------------------------------------------------
 
     private static final int DEFAULT_HISTORY_LIMIT = 100;
+    private static final int DEFAULT_PAYMENT_RECEIVED_LIMIT = 20;
+    private static final int MAX_PAYMENT_RECEIVED_LIMIT = 100;
 
     /**
      * Handles the {@code notification-history} WebSocket action.
@@ -618,7 +620,7 @@ public class NotificationManager {
     private static final long HISTORY_DEFAULT_AFTER_MS = 7L  * 24 * 60 * 60 * 1000;  // 7 days
     private static final long HISTORY_MAX_LOOKBACK_MS  = 30L * 24 * 60 * 60 * 1000;  // 30 days
 
-    public void handleNotificationHistory(Session session, Integer limit, Long after) {
+    public void handleNotificationHistory(Session session, Integer limit, Long after, Integer paymentReceivedLimit) {
         if (!session.isOpen()) return;
 
         SessionSubscriptions subs = sessions.get(session);
@@ -628,6 +630,9 @@ public class NotificationManager {
         LOGGER.info("NOTIFY_HISTORY_TIMING: handleNotificationHistory start");
 
         int effectiveLimit = (limit != null && limit > 0) ? limit : DEFAULT_HISTORY_LIMIT;
+        int effectivePaymentLimit = (paymentReceivedLimit != null && paymentReceivedLimit > 0)
+                ? Math.min(paymentReceivedLimit, MAX_PAYMENT_RECEIVED_LIMIT)
+                : DEFAULT_PAYMENT_RECEIVED_LIMIT;
 
         long now = System.currentTimeMillis();
         long maxLookback = now - HISTORY_MAX_LOOKBACK_MS;
@@ -648,7 +653,7 @@ public class NotificationManager {
             if ("RESOURCE_PUBLISHED".equals(sub.getEvent())) {
                 collectResourceHistoryPaired(sub, effectiveAfter, effectiveLimit, timestamps, jsons);
             } else if ("PAYMENT_RECEIVED".equals(sub.getEvent())) {
-                collectPaymentHistoryPaired(sub, effectiveAfter, timestamps, jsons);
+                collectPaymentHistoryPaired(sub, effectiveAfter, effectivePaymentLimit, timestamps, jsons);
             }
         }
 
@@ -714,6 +719,9 @@ public class NotificationManager {
         List<String> blockedNames = (f.excludeBlocked != null && f.excludeBlocked)
                 ? org.qortal.utils.ListUtils.blockedNames()
                 : null;
+        List<String> followedNames = (f.followedOnly != null && f.followedOnly)
+                ? org.qortal.utils.ListUtils.followedNames()
+                : null;
 
         long t2 = System.currentTimeMillis();
         LOGGER.info("NOTIFY_HISTORY_TIMING: blockedNames ms={}", t2 - t1);
@@ -726,16 +734,17 @@ public class NotificationManager {
                         afterMs,
                         limit,
                         f.identifier,
-                        f.prefixOnly,
+                        Boolean.TRUE.equals(f.prefix),
                         blockedNames,
                         f.names,
-                        f.exactMatchNames,
                         f.minLevel,
                         f.query,
                         f.defaultResource,
                         f.title,
                         f.description,
-                        f.keywords);
+                        f.keywords,
+                        f.before,
+                        followedNames);
 
         long t3 = System.currentTimeMillis();
         LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory ms={} results={}", t3 - t2, results.size());
@@ -751,7 +760,7 @@ public class NotificationManager {
     }
 
     private void collectPaymentHistoryPaired(
-            NotificationSubscription sub, Long after,
+            NotificationSubscription sub, Long after, int paymentLimit,
             List<long[]> timestamps, List<String> jsons) {
 
         long t0 = System.currentTimeMillis();
@@ -766,10 +775,9 @@ public class NotificationManager {
             long t1 = System.currentTimeMillis();
             LOGGER.info("NOTIFY_HISTORY_TIMING: collectPaymentHistoryPaired getRepository ms={}", t1 - t0);
 
-            // Cap at 20 — lean single query, no per-row hydration
             List<String[]> payments =
                     repository.getTransactionRepository()
-                            .getReceivedPaymentsForNotifications(recipient, after, 20);
+                            .getReceivedPaymentsForNotifications(recipient, after, paymentLimit);
 
             long t2 = System.currentTimeMillis();
             LOGGER.info("NOTIFY_HISTORY_TIMING: getReceivedPaymentsForNotifications ms={} count={}", t2 - t1, payments.size());

@@ -142,7 +142,9 @@ public class NotificationsWebSocket extends ApiWebSocket {
                             ? ((Number) payload.get("limit")).intValue() : null;
                     Long after = payload.get("after") instanceof Number
                             ? ((Number) payload.get("after")).longValue() : null;
-                    NotificationManager.getInstance().handleNotificationHistory(session, limit, after);
+                    Integer paymentReceivedLimit = payload.get("paymentReceivedLimit") instanceof Number
+                            ? ((Number) payload.get("paymentReceivedLimit")).intValue() : null;
+                    NotificationManager.getInstance().handleNotificationHistory(session, limit, after, paymentReceivedLimit);
                     break;
                 }
 
