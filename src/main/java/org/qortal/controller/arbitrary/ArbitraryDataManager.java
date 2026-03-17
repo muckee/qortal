@@ -54,7 +54,7 @@ public class ArbitraryDataManager extends Thread {
 	public static final long ARBITRARY_REQUEST_TIMEOUT = 12 * 1000L; // ms
 
 	/** Request timeout when fetching metadata only (shorter than full data) */
-	public static final long METADATA_REQUEST_TIMEOUT = 7 * 1000L; // ms
+	public static final long METADATA_REQUEST_TIMEOUT = 12 * 1000L; // ms
 
 	/** Maximum time to hold information about an in-progress relay */
 	public static final long ARBITRARY_RELAY_TIMEOUT = 10 * 60 * 1000L; // 10 minutes (was 2 minutes)
@@ -509,7 +509,6 @@ public class ArbitraryDataManager extends Thread {
 		latestMetadataFetchThread = new Thread(() -> {
 			Thread.currentThread().setName("Arbitrary Latest-100 Metadata");
 			Thread.currentThread().setPriority(NORM_PRIORITY);
-			LOGGER.info("Arbitrary Latest-100 Metadata thread started; waiting {}ms before first burst", LATEST_100_INITIAL_DELAY_MS);
 			try {
 				Thread.sleep(LATEST_100_INITIAL_DELAY_MS);
 				while (!isStopping) {
@@ -581,7 +580,7 @@ public class ArbitraryDataManager extends Thread {
 					txData.getIdentifier(),
 					Base58.encode(txData.getSignature()));
 
-			fetchMetadata(txData);
+			fetchMetadataForBurst(txData);
 
 			if (txData.getService() != null) {
 				EventBus.INSTANCE.notify(
@@ -597,8 +596,6 @@ public class ArbitraryDataManager extends Thread {
 				);
 			}
 		}
-
-		LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst burst complete");
 	}
 
 	private static List<byte[]> processTransactionsForSignatures(
@@ -706,6 +703,22 @@ public class ArbitraryDataManager extends Thread {
 				arbitraryTransactionData.getIdentifier()
 		);
 		return ArbitraryMetadataManager.getInstance().fetchMetadata(resource, true);
+	}
+
+	// Entrypoint to request metadata using burst-specific rate limits (separate counter, less restrictive)
+	public ArbitraryDataTransactionMetadata fetchMetadataForBurst(ArbitraryTransactionData arbitraryTransactionData) {
+
+		if (arbitraryTransactionData.getService() == null) {
+			return null;
+		}
+
+		ArbitraryDataResource resource = new ArbitraryDataResource(
+				arbitraryTransactionData.getName(),
+				ArbitraryDataFile.ResourceIdType.NAME,
+				arbitraryTransactionData.getService(),
+				arbitraryTransactionData.getIdentifier()
+		);
+		return ArbitraryMetadataManager.getInstance().fetchMetadataForBurst(resource);
 	}
 
 

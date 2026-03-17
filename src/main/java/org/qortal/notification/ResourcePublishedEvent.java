@@ -29,9 +29,6 @@ public class ResourcePublishedEvent {
     public final Long created;
     public final Long updated;
 
-    // Creator's account level at the time the event fires (may be null if lookup failed)
-    public final Integer creatorLevel;
-
     public ResourcePublishedEvent(
             String service,
             String name,
@@ -42,8 +39,7 @@ public class ResourcePublishedEvent {
             List<String> tags,
             String category,
             Long created,
-            Long updated,
-            Integer creatorLevel) {
+            Long updated) {
         this.service      = service;
         this.name         = name;
         this.identifier   = identifier;
@@ -54,6 +50,5 @@ public class ResourcePublishedEvent {
         this.category     = category;
         this.created      = created;
         this.updated      = updated;
-        this.creatorLevel = creatorLevel;
     }
 }

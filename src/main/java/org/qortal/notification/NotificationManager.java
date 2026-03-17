@@ -520,9 +520,6 @@ public class NotificationManager {
             if (ev.signature != null) {
                 sb.append(",\"signature\":\"").append(jsonEscape(ev.signature)).append("\"");
             }
-            if (ev.creatorLevel != null) {
-                sb.append(",\"creatorLevel\":").append(ev.creatorLevel);
-            }
             sb.append(",\"timestamp\":").append(System.currentTimeMillis());
             sb.append("}");
 
@@ -732,14 +729,12 @@ public class NotificationManager {
         List<org.qortal.data.arbitrary.ArbitraryResourceData> results =
                 org.qortal.repository.hsqldb.HSQLDBCacheUtils.getRecentForNotificationHistory(
                         candidates,
-                        cache.getLevelByName(),
                         afterMs,
                         limit,
                         f.identifier,
                         Boolean.TRUE.equals(f.prefix),
                         blockedNames,
                         f.names,
-                        f.minLevel,
                         f.query,
                         f.defaultResource,
                         f.title,

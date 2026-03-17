@@ -497,7 +497,7 @@ public class ArbitraryTransaction extends Transaction {
 								serviceName, name, ident, sig,
 								title, description, tags, categoryStr,
 								arbitraryTransactionData.getTimestamp(),
-								null, null);
+								null);
 					}
 				} catch (IOException e) {
 					// Ignore, as we can add it again later
@@ -524,7 +524,7 @@ public class ArbitraryTransaction extends Transaction {
 					sig,
 					null, null, null, null,
 					arbitraryTransactionData.getTimestamp(),
-					null, null
+					null
 				);
 				NotificationManager.getInstance().processResourcePublishedEarly(ev);
 			} catch (Exception e) {

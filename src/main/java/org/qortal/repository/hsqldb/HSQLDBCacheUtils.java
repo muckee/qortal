@@ -370,14 +370,12 @@ public class HSQLDBCacheUtils {
      * Supports the same metadata filters as filterList (query, title, description, keywords).
      *
      * @param candidates   list for a single service (from cache)
-     * @param levelByName level-by-name map (for minLevel)
      * @param after       only items with created &gt; after
      * @param limit       stop after this many results
      * @param identifier  optional prefix/contains filter on identifier
      * @param prefixOnly  true for prefix match, false for contains
      * @param blockedNames names to exclude (e.g. from ListUtils.blockedNames()); null = no exclusion
      * @param names       optional: exact (case-insensitive) name match — resource name must be one of these; null/empty = pass
-     * @param minLevel    optional minimum account level; null = no filter
      * @param query       optional: match name, identifier, title or description (or name only if defaultResource); null = pass
      * @param defaultResource when true with query, only default identifier and query on name
      * @param title       optional: prefix/contains on metadata title; null/empty = pass
@@ -389,14 +387,12 @@ public class HSQLDBCacheUtils {
      */
     public static List<ArbitraryResourceData> getRecentForNotificationHistory(
             List<ArbitraryResourceData> candidates,
-            Map<String, Integer> levelByName,
             long after,
             int limit,
             String identifier,
             boolean prefixOnly,
             List<String> blockedNames,
             List<String> names,
-            Integer minLevel,
             String query,
             boolean defaultResource,
             String title,
@@ -506,8 +502,6 @@ public class HSQLDBCacheUtils {
             if (namesLower != null) {
                 if (r.name == null || !namesLower.contains(r.name.toLowerCase())) continue;
             }
-
-            if (minLevel != null && levelByName.getOrDefault(r.name, 0) < minLevel) continue;
 
             result.add(r);
         }

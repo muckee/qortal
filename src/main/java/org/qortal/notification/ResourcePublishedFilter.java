@@ -24,7 +24,6 @@ import java.util.List;
  *     "keywords": ["news", "update"],
  *     "prefix": false,
  *     "defaultResource": false,
- *     "minLevel": 3,
  *     "followedOnly": true,
  *     "excludeBlocked": true,
  *     "after": 1700000000000,
@@ -77,9 +76,6 @@ public class ResourcePublishedFilter {
      * Defaults to {@code false}.
      */
     public boolean defaultResource = false;
-
-    /** Creator account level must be >= this value. Null = no restriction. */
-    public Integer minLevel;
 
     /**
      * When {@code true}, only resources whose creator name is in the local
@@ -202,11 +198,6 @@ public class ResourcePublishedFilter {
         // --- timestamp range ---
         if (after != null && ev.created != null && ev.created <= after) return false;
         if (before != null && ev.created != null && ev.created >= before) return false;
-
-        // --- minLevel ---
-        if (minLevel != null) {
-            if (ev.creatorLevel == null || ev.creatorLevel < minLevel) return false;
-        }
 
         // --- followedOnly ---
         if (Boolean.TRUE.equals(followedOnly)) {
