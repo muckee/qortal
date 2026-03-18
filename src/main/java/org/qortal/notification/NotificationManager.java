@@ -705,9 +705,14 @@ public class NotificationManager {
         org.qortal.data.arbitrary.ArbitraryResourceCache cache =
                 org.qortal.data.arbitrary.ArbitraryResourceCache.getInstance();
 
-        List<org.qortal.data.arbitrary.ArbitraryResourceData> candidates =
-                new ArrayList<>(cache.getDataByService()
-                        .getOrDefault(serviceEnum.value, Collections.emptyList()));
+        List<org.qortal.data.arbitrary.ArbitraryResourceData> candidates = new ArrayList<>();
+        synchronized (cache.getDataByService()) {
+            java.util.Map<String, org.qortal.data.arbitrary.ArbitraryResourceData> serviceMap =
+                    cache.getDataByService().get(serviceEnum.value);
+            if (serviceMap != null) {
+                candidates.addAll(serviceMap.values());
+            }
+        }
 
         long t1 = System.currentTimeMillis();
         LOGGER.info("NOTIFY_HISTORY_TIMING: collectResourceHistoryPaired service={} getCandidates ms={} size={}",

@@ -14,6 +14,7 @@ import org.qortal.controller.repository.NamesDatabaseIntegrityCheck;
 import org.qortal.crypto.Crypto;
 import org.qortal.crypto.MemoryPoW;
 import org.qortal.data.PaymentData;
+import org.qortal.data.arbitrary.ArbitraryResourceCache;
 import org.qortal.data.arbitrary.ArbitraryResourceData;
 import org.qortal.data.arbitrary.ArbitraryResourceMetadata;
 import org.qortal.data.arbitrary.ArbitraryResourceStatus;
@@ -26,6 +27,7 @@ import org.qortal.payment.Payment;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
+import org.qortal.settings.Settings;
 import org.qortal.transform.TransformationException;
 import org.qortal.transform.Transformer;
 import org.qortal.transform.transaction.ArbitraryTransactionTransformer;
@@ -478,6 +480,8 @@ public class ArbitraryTransaction extends Transaction {
 					metadata.setCategory(transactionMetadata.getCategory());
 					metadata.setTags(transactionMetadata.getTags());
 					repository.getArbitraryRepository().save(metadata);
+					metadata.setArbitraryResourceData(null); // clear back-reference before placing in cache to avoid circular serialization
+					arbitraryResourceData.metadata = metadata;
 					LOGGER.info("METADATA_FETCH: updateArbitraryResourceCacheIncludingMetadata saved metadata to cache name={} service={} identifier={}",
 							name, service != null ? service.name() : null, identifier);
 
@@ -508,6 +512,17 @@ public class ArbitraryTransaction extends Transaction {
 				ArbitraryResourceMetadata metadata = new ArbitraryResourceMetadata();
 				metadata.setArbitraryResourceData(arbitraryResourceData);
 				repository.getArbitraryRepository().delete(metadata);
+			}
+		}
+
+		// Update in-memory search cache so new/updated resources are visible immediately
+		// without waiting for the periodic cache-refresh timer.
+		if (Settings.getInstance().isDbCacheEnabled()) {
+			ArbitraryResourceCache cache = ArbitraryResourceCache.getInstance();
+			synchronized (cache.getDataByService()) {
+				cache.getDataByService()
+						.computeIfAbsent(service.value, k -> new HashMap<>())
+						.put(ArbitraryResourceCache.resourceKey(name, identifier), arbitraryResourceData);
 			}
 		}
 

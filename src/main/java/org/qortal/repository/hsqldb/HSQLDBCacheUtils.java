@@ -30,6 +30,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -123,7 +124,12 @@ public class HSQLDBCacheUtils {
 
         // cache all results for requested service
         if( service != null ) {
-            candidates.addAll(cache.getDataByService().getOrDefault(service.value, new ArrayList<>(0)));
+            synchronized (cache.getDataByService()) {
+                Map<String, ArbitraryResourceData> serviceMap = cache.getDataByService().get(service.value);
+                if (serviceMap != null) {
+                    candidates.addAll(serviceMap.values());
+                }
+            }
         }
         // if no requested, then empty cache
 
@@ -849,9 +855,12 @@ public class HSQLDBCacheUtils {
 
             List<ArbitraryResourceData> resources = getResources(repository);
 
-            Map<Integer, List<ArbitraryResourceData>> dataByService
-                    = resources.stream()
-                        .collect(Collectors.groupingBy(data -> data.service.value));
+            Map<Integer, Map<String, ArbitraryResourceData>> dataByService = new HashMap<>();
+            for (ArbitraryResourceData data : resources) {
+                dataByService
+                    .computeIfAbsent(data.service.value, k -> new HashMap<>())
+                    .put(ArbitraryResourceCache.resourceKey(data.name, data.identifier), data);
+            }
 
             // lock, clear and refill
             synchronized (cache.getDataByService()) {
