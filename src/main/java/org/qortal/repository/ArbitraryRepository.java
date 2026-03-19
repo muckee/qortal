@@ -29,6 +29,8 @@ public interface ArbitraryRepository {
 
 	List<ArbitraryTransactionData> getLatestArbitraryTransactions() throws DataException;
 
+	List<ArbitraryTransactionData> getLatestArbitraryTransactions(Integer limit) throws DataException;
+
 	List<ArbitraryTransactionData> getLatestArbitraryTransactionsByName(String name) throws DataException;
 
 	public ArbitraryTransactionData getSingleTransactionBySignature(byte[] signature) throws DataException;

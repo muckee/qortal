@@ -30,6 +30,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -123,7 +124,12 @@ public class HSQLDBCacheUtils {
 
         // cache all results for requested service
         if( service != null ) {
-            candidates.addAll(cache.getDataByService().getOrDefault(service.value, new ArrayList<>(0)));
+            synchronized (cache.getDataByService()) {
+                Map<String, ArbitraryResourceData> serviceMap = cache.getDataByService().get(service.value);
+                if (serviceMap != null) {
+                    candidates.addAll(serviceMap.values());
+                }
+            }
         }
         // if no requested, then empty cache
 
@@ -362,6 +368,147 @@ public class HSQLDBCacheUtils {
         else {
             return listCopy2;
         }
+    }
+
+    /**
+     * Notification-history–specific path: sort once by created desc, then one pass with early exit.
+     * Avoids full filter-then-sort of the entire service list so history stays fast for large caches.
+     * Supports the same metadata filters as filterList (query, title, description, keywords).
+     *
+     * @param candidates   list for a single service (from cache)
+     * @param after       only items with created &gt; after
+     * @param limit       stop after this many results
+     * @param identifier  optional prefix/contains filter on identifier
+     * @param prefixOnly  true for prefix match, false for contains
+     * @param blockedNames names to exclude (e.g. from ListUtils.blockedNames()); null = no exclusion
+     * @param names       optional: exact (case-insensitive) name match — resource name must be one of these; null/empty = pass
+     * @param query       optional: match name, identifier, title or description (or name only if defaultResource); null = pass
+     * @param defaultResource when true with query, only default identifier and query on name
+     * @param title       optional: prefix/contains on metadata title; null/empty = pass
+     * @param description optional: prefix/contains on metadata description; null/empty = pass
+     * @param keywords    optional: at least one keyword in metadata description; null/empty = pass
+     * @param before      optional: only items with created &lt; before; null = no filter
+     * @param followedNames optional: retain only if resource name (case-insensitive) is in this list; null/empty = pass
+     * @return at most {@code limit} items, newest first (no metadata/status stripping)
+     */
+    public static List<ArbitraryResourceData> getRecentForNotificationHistory(
+            List<ArbitraryResourceData> candidates,
+            long after,
+            int limit,
+            String identifier,
+            boolean prefixOnly,
+            List<String> blockedNames,
+            List<String> names,
+            String query,
+            boolean defaultResource,
+            String title,
+            String description,
+            List<String> keywords,
+            Long before,
+            List<String> followedNames) {
+
+        if (candidates == null || candidates.isEmpty() || limit <= 0) {
+            return new ArrayList<>();
+        }
+
+        List<ArbitraryResourceData> sorted = new ArrayList<>(candidates);
+        sorted.sort(CREATED_WHEN_COMPARATOR.reversed());
+
+        List<String> namesLower = null;
+        if (names != null && !names.isEmpty()) {
+            namesLower = names.stream().map(String::toLowerCase).collect(Collectors.toList());
+        }
+
+        List<String> keywordsLower = null;
+        if (keywords != null && !keywords.isEmpty()) {
+            keywordsLower = keywords.stream().map(String::toLowerCase).collect(Collectors.toList());
+        }
+
+        List<String> followedLower = null;
+        if (followedNames != null && !followedNames.isEmpty()) {
+            followedLower = followedNames.stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(String::toLowerCase)
+                    .collect(Collectors.toList());
+        }
+
+        List<ArbitraryResourceData> result = new ArrayList<>(Math.min(limit, sorted.size()));
+        for (ArbitraryResourceData r : sorted) {
+            if (result.size() >= limit) break;
+
+            Long created = r.created;
+            if (created == null || created <= after) continue;
+            if (before != null && created != null && created >= before) continue;
+            if (blockedNames != null && blockedNames.contains(r.name)) continue;
+            if (followedLower != null) {
+                if (r.name == null || !followedLower.contains(r.name.toLowerCase())) continue;
+            }
+
+            if (identifier != null && !identifier.isEmpty()) {
+                String id = r.identifier;
+                if (id == null) continue;
+                String idLower = id.toLowerCase();
+                String identLower = identifier.toLowerCase();
+                if (prefixOnly ? !idLower.startsWith(identLower) : !idLower.contains(identLower)) continue;
+            }
+
+            if (query != null && !query.isEmpty()) {
+                String q = query.toLowerCase();
+                boolean queryMatch;
+                if (defaultResource) {
+                    queryMatch = DEFAULT_IDENTIFIER.equals(r.identifier) && r.name != null
+                            && (prefixOnly ? r.name.toLowerCase().startsWith(q) : r.name.toLowerCase().contains(q));
+                } else {
+                    queryMatch = (r.name != null && (prefixOnly ? r.name.toLowerCase().startsWith(q) : r.name.toLowerCase().contains(q)))
+                            || (r.identifier != null && (prefixOnly ? r.identifier.toLowerCase().startsWith(q) : r.identifier.toLowerCase().contains(q)));
+                    if (!queryMatch && r.metadata != null) {
+                        String t = r.metadata.getTitle();
+                        String d = r.metadata.getDescription();
+                        queryMatch = (t != null && (prefixOnly ? t.toLowerCase().startsWith(q) : t.toLowerCase().contains(q)))
+                                || (d != null && (prefixOnly ? d.toLowerCase().startsWith(q) : d.toLowerCase().contains(q)));
+                    }
+                }
+                if (!queryMatch) continue;
+            }
+
+            if (title != null && !title.isEmpty()) {
+                if (r.metadata == null) continue;
+                String t = r.metadata.getTitle();
+                if (t == null) continue;
+                String tLower = t.toLowerCase();
+                String titleLower = title.toLowerCase();
+                if (prefixOnly ? !tLower.startsWith(titleLower) : !tLower.contains(titleLower)) continue;
+            }
+
+            if (description != null && !description.isEmpty()) {
+                if (r.metadata == null) continue;
+                String d = r.metadata.getDescription();
+                if (d == null) continue;
+                String dLower = d.toLowerCase();
+                String descLower = description.toLowerCase();
+                if (prefixOnly ? !dLower.startsWith(descLower) : !dLower.contains(descLower)) continue;
+            }
+
+            if (keywordsLower != null) {
+                if (r.metadata == null || r.metadata.getDescription() == null) continue;
+                String dLower = r.metadata.getDescription().toLowerCase();
+                boolean anyMatch = false;
+                for (String k : keywordsLower) {
+                    if (dLower.contains(k)) {
+                        anyMatch = true;
+                        break;
+                    }
+                }
+                if (!anyMatch) continue;
+            }
+
+            if (namesLower != null) {
+                if (r.name == null || !namesLower.contains(r.name.toLowerCase())) continue;
+            }
+
+            result.add(r);
+        }
+        return result;
     }
 
     /**
@@ -702,9 +849,12 @@ public class HSQLDBCacheUtils {
 
             List<ArbitraryResourceData> resources = getResources(repository);
 
-            Map<Integer, List<ArbitraryResourceData>> dataByService
-                    = resources.stream()
-                        .collect(Collectors.groupingBy(data -> data.service.value));
+            Map<Integer, Map<String, ArbitraryResourceData>> dataByService = new HashMap<>();
+            for (ArbitraryResourceData data : resources) {
+                dataByService
+                    .computeIfAbsent(data.service.value, k -> new HashMap<>())
+                    .put(ArbitraryResourceCache.resourceKey(data.name, data.identifier), data);
+            }
 
             // lock, clear and refill
             synchronized (cache.getDataByService()) {

@@ -229,13 +229,19 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 
 	@Override
 	public List<ArbitraryTransactionData> getLatestArbitraryTransactions() throws DataException {
+		return getLatestArbitraryTransactions(null);
+	}
+
+	@Override
+	public List<ArbitraryTransactionData> getLatestArbitraryTransactions(Integer limit) throws DataException {
 		String sql = "SELECT type, reference, signature, creator, created_when, fee, " +
 				"tx_group_id, block_height, approval_status, approval_height, " +
 				"version, nonce, service, size, is_data_raw, data, metadata_hash, " +
 				"name, identifier, update_method, secret, compression FROM ArbitraryTransactions " +
 				"JOIN Transactions USING (signature) " +
 				"WHERE name IS NOT NULL " +
-				"ORDER BY created_when DESC";
+				"ORDER BY created_when DESC" +
+				(limit != null ? " LIMIT " + limit : "");
 		List<ArbitraryTransactionData> arbitraryTransactionData = new ArrayList<>();
 
 		try (ResultSet resultSet = this.repository.checkedExecute(sql)) {
