@@ -125,22 +125,17 @@ public class ArbitraryMetadataManager {
                 byte[] metadataHash = latestTransaction.getMetadataHash();
                 if (metadataHash == null) {
                     // This resource doesn't have metadata
-                    LOGGER.info("METADATA_FETCH: fetchMetadata resource has no metadataHash (name={} service={})",
-                            latestTransaction.getName(), latestTransaction.getService() != null ? latestTransaction.getService().name() : null);
                     throw new IllegalArgumentException("This resource doesn't have metadata");
                 }
 
                 ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(metadataHash, signature);
                 if (!metadataFile.exists()) {
-                    LOGGER.info("METADATA_FETCH: fetchMetadata file missing, requesting from network signature={} name={} service={}",
-                            Base58.encode(signature), latestTransaction.getName(), latestTransaction.getService() != null ? latestTransaction.getService().name() : null);
                     // Request from network
                     this.fetchArbitraryMetadata(latestTransaction, useRateLimiter, fromBurst);
                 }
 
                 // Now check again as it may have been downloaded above
                 if (metadataFile.exists()) {
-                    LOGGER.info("METADATA_FETCH: fetchMetadata using local file signature={} name={}", Base58.encode(signature), latestTransaction.getName());
                     // Use local copy
                     ArbitraryDataTransactionMetadata transactionMetadata = new ArbitraryDataTransactionMetadata(metadataFile.getFilePath());
                     try {
@@ -256,7 +251,6 @@ public class ArbitraryMetadataManager {
         
         if (!requestAllowed) {
             if (useRateLimiter) {
-                LOGGER.info("METADATA_FETCH: fetchArbitraryMetadata skipped (rate limited) signature={}", signature58);
                 return null;
             }
             // If rate limiter is disabled, we still want to proceed
@@ -314,16 +308,12 @@ public class ArbitraryMetadataManager {
         try {
             ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(metadataHash, signature);
             if (metadataFile.exists()) {
-                LOGGER.info("METADATA_FETCH: fetchArbitraryMetadata received and saved metadata signature={} (file exists after poll)",
-                        signature58);
                 return metadataFile.getBytes();
             }
         } catch (DataException e) {
             // Do nothing
         }
 
-        LOGGER.info("METADATA_FETCH: fetchArbitraryMetadata timeout or no response signature={} totalWaitMs={}",
-                signature58, totalWait);
         return null;
     }
 
@@ -437,13 +427,10 @@ public class ArbitraryMetadataManager {
         }
 
         ArbitraryMetadataMessage arbitraryMetadataMessage = (ArbitraryMetadataMessage) message;
-        LOGGER.info("METADATA_FETCH: onNetworkArbitraryMetadataMessage received metadata from peer {} messageId={}",
-                peer, message.getId());
 
         // Do we have a pending request for this data?
         Triple<String, Peer, Long> request = arbitraryMetadataRequests.get(message.getId());
         if (request == null || request.getA() == null) {
-            LOGGER.info("METADATA_FETCH: onNetworkArbitraryMetadataMessage no pending request for messageId={}", message.getId());
             return;
         }
         boolean isRelayRequest = (request.getB() != null);
@@ -476,11 +463,8 @@ public class ArbitraryMetadataManager {
                 arbitraryMetadataFile.save();
                 // Clear fileContent after saving - data is now on disk and can be reloaded if needed
                 arbitraryMetadataFile.clearFileContent();
-                LOGGER.info("METADATA_FETCH: onNetworkArbitraryMetadataMessage saved metadata file signature={} name={} service={}",
-                        signature58, arbitraryTransactionData.getName(), arbitraryTransactionData.getService() != null ? arbitraryTransactionData.getService().name() : null);
-            } else if (isBlocked) {
-                LOGGER.info("METADATA_FETCH: onNetworkArbitraryMetadataMessage not saving (blocked) signature={}", signature58);
-            }
+
+            } 
 
             // Forwarding
             if (isRelayRequest && Settings.getInstance().isRelayModeEnabled()) {
@@ -501,8 +485,6 @@ public class ArbitraryMetadataManager {
             // Add to resource queue to update arbitrary resource caches
             if (arbitraryTransactionData != null) {
                 ArbitraryDataCacheManager.getInstance().addToUpdateQueue(arbitraryTransactionData);
-                LOGGER.info("METADATA_FETCH: onNetworkArbitraryMetadataMessage added to update queue signature={} name={}",
-                        signature58, arbitraryTransactionData.getName());
             }
 
         } catch (DataException e) {
@@ -559,11 +541,11 @@ public class ArbitraryMetadataManager {
 
                 // If we've seen this request recently, then ignore
                 if (arbitraryMetadataRequests.putIfAbsent(peerMessage.message.getId(), newEntry) != null) {
-                    LOGGER.info("Ignoring metadata request from peer {} for signature {}", peerMessage.peer, signature58);
+                    LOGGER.trace("Ignoring metadata request from peer {} for signature {}", peerMessage.peer, signature58);
                     continue;
                 }
 
-                LOGGER.info("Received metadata request from peer {} for signature {}", peerMessage.peer, signature58);
+                LOGGER.trace("Received metadata request from peer {} for signature {}", peerMessage.peer, signature58);
 
                 signatureBySignature58.put(signature58, signature);
                 nowBySignature58.put(signature58, now);

@@ -411,11 +411,8 @@ public class HSQLDBCacheUtils {
             return new ArrayList<>();
         }
 
-        long t0 = System.currentTimeMillis();
         List<ArbitraryResourceData> sorted = new ArrayList<>(candidates);
         sorted.sort(CREATED_WHEN_COMPARATOR.reversed());
-        long t1 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory copy+sort ms={} candidates={}", t1 - t0, candidates.size());
 
         List<String> namesLower = null;
         if (names != null && !names.isEmpty()) {
@@ -511,9 +508,6 @@ public class HSQLDBCacheUtils {
 
             result.add(r);
         }
-        long t2 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory filter loop ms={} resultSize={} total ms={}",
-                t2 - t1, result.size(), t2 - t0);
         return result;
     }
 

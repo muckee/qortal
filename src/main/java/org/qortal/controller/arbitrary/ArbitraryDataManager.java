@@ -466,12 +466,6 @@ public class ArbitraryDataManager extends Thread {
 				// fetch the metadata and notify the event bus again
 				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
 
-				LOGGER.info("METADATA_FETCH: fetchAllMetadata picked resource name={} service={} identifier={} signature={}",
-						arbitraryTransactionData != null ? arbitraryTransactionData.getName() : null,
-						arbitraryTransactionData != null && arbitraryTransactionData.getService() != null ? arbitraryTransactionData.getService().name() : null,
-						arbitraryTransactionData != null ? arbitraryTransactionData.getIdentifier() : null,
-						Base58.encode(signature));
-
 				// Ask our connected peers if they have metadata for this signature
 				fetchMetadata(arbitraryTransactionData);
 
@@ -565,20 +559,12 @@ public class ArbitraryDataManager extends Thread {
 		}
 
 		if (candidates.isEmpty()) {
-			LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst - no candidates needing metadata");
 			return;
 		}
 
-		LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst starting burst with {} candidates", candidates.size());
 
 		for (ArbitraryTransactionData txData : candidates) {
 			if (isStopping || System.currentTimeMillis() >= deadline) break;
-
-			LOGGER.info("METADATA_FETCH: fetchLatest100MetadataBurst fetching name={} service={} identifier={} signature={}",
-					txData.getName(),
-					txData.getService() != null ? txData.getService().name() : null,
-					txData.getIdentifier(),
-					Base58.encode(txData.getSignature()));
 
 			fetchMetadataForBurst(txData);
 

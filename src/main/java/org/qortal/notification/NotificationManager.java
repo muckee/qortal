@@ -237,7 +237,6 @@ public class NotificationManager {
                 .computeIfAbsent(nameKey,    n -> Collections.synchronizedList(new ArrayList<>()))
                 .add(entry);
 
-            LOGGER.info("NOTIFY_DEBUG indexed: event={} serviceKey={} nameKey={}", event, serviceKey, nameKey);
         }
     }
 
@@ -267,7 +266,6 @@ public class NotificationManager {
     public void processResourcePublishedEarly(ResourcePublishedEvent ev) {
         Map<String, Map<String, List<SubscriptionEntry>>> serviceMap = eventIndex.get("RESOURCE_PUBLISHED");
         if (serviceMap == null) {
-            LOGGER.info("NOTIFY_DEBUG early: no subscribers for RESOURCE_PUBLISHED, skipping");
             return;
         }
 
@@ -283,47 +281,36 @@ public class NotificationManager {
         }
         nameKeys.add(WILDCARD);
 
-        LOGGER.info("NOTIFY_DEBUG early dispatch: service={} name={} identifier={} serviceKeys={} nameKeys={}",
-            ev.service, ev.name, ev.identifier, serviceKeys, nameKeys);
-        LOGGER.info("NOTIFY_DEBUG early: index service keys available={}", serviceMap.keySet());
 
         for (String serviceKey : serviceKeys) {
             Map<String, List<SubscriptionEntry>> nameMap = serviceMap.get(serviceKey);
             if (nameMap == null) {
-                LOGGER.info("NOTIFY_DEBUG early: no nameMap for serviceKey={}", serviceKey);
                 continue;
             }
 
             for (String nameKey : nameKeys) {
                 List<SubscriptionEntry> entries = nameMap.get(nameKey);
                 if (entries == null) {
-                    LOGGER.info("NOTIFY_DEBUG early: no entries for serviceKey={} nameKey={}", serviceKey, nameKey);
                     continue;
                 }
 
-                LOGGER.info("NOTIFY_DEBUG early: found {} entries for serviceKey={} nameKey={}", entries.size(), serviceKey, nameKey);
-
                 for (SubscriptionEntry entry : new ArrayList<>(entries)) {
                     if (!entry.session.isOpen()) {
-                        LOGGER.info("NOTIFY_DEBUG early: session closed, skipping");
                         continue;
                     }
 
                     if (entry.rule.isExpired()) {
                         entries.remove(entry);
-                        LOGGER.debug("NOTIFY_DEBUG early: subscription expired, removed");
                         continue;
                     }
 
                     ResourcePublishedFilter filter = entry.rule.getResourceFilter();
 
                     if (filter != null && filter.requiresMetadata()) {
-                        LOGGER.info("NOTIFY_DEBUG early: filter requires metadata, skipping for now");
                         continue;
                     }
 
                     boolean matched = filter == null || filter.matches(ev);
-                    LOGGER.info("NOTIFY_DEBUG early: filter.matches={} for identifier={}", matched, ev.identifier);
 
                     if (matched) {
                         sendResourcePublished(entry.session, ev, entry.rule);
@@ -404,7 +391,6 @@ public class NotificationManager {
             long now = System.currentTimeMillis();
             Long last = recentlySentEvents.put(globalKey, now);
             if (last != null && (now - last) < DEDUP_WINDOW_MS) {
-                LOGGER.debug("NOTIFY_DEBUG dedup: suppressing duplicate event type={} key={}", event.getType(), event.getDedupKey());
                 return;
             }
         }
@@ -483,7 +469,6 @@ public class NotificationManager {
         Map<String, Long> seen = recentlySent.computeIfAbsent(session, s -> new ConcurrentHashMap<>());
         Long lastSent = seen.get(dedupKey);
         if (lastSent != null && (now - lastSent) < DEDUP_WINDOW_MS) {
-            LOGGER.debug("NOTIFY_DEBUG dedup: suppressing duplicate for {}", dedupKey);
             return;
         }
         seen.put(dedupKey, now);
@@ -626,7 +611,6 @@ public class NotificationManager {
         if (subs == null) return;
 
         long t0 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: handleNotificationHistory start");
 
         int effectiveLimit = (limit != null && limit > 0) ? limit : DEFAULT_HISTORY_LIMIT;
         int effectivePaymentLimit = (paymentReceivedLimit != null && paymentReceivedLimit > 0)
@@ -656,16 +640,12 @@ public class NotificationManager {
             }
         }
 
-        long t1 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: after collect loops ms={} subscriptions={}", t1 - t0, subs.subscriptions.size());
 
         // Sort indices by timestamp descending
         Integer[] indices = new Integer[timestamps.size()];
         for (int i = 0; i < indices.length; i++) indices[i] = i;
         java.util.Arrays.sort(indices, (a, b) -> Long.compare(timestamps.get(b)[0], timestamps.get(a)[0]));
 
-        long t2 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: after sort ms={} totalItems={}", t2 - t1, timestamps.size());
 
         int resultCount = Math.min(effectiveLimit, indices.length);
 
@@ -681,9 +661,6 @@ public class NotificationManager {
         } catch (Exception e) {
             LOGGER.debug("Error sending notification history: {}", e.getMessage());
         }
-        long t3 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: handleNotificationHistory total ms={} (collect={} sort={} buildAndSend={})",
-                t3 - t0, t1 - t0, t2 - t1, t3 - t2);
     }
 
     private void collectResourceHistoryPaired(
@@ -714,10 +691,6 @@ public class NotificationManager {
             }
         }
 
-        long t1 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: collectResourceHistoryPaired service={} getCandidates ms={} size={}",
-                f.service, t1 - t0, candidates.size());
-
         if (candidates.isEmpty()) return;
 
         List<String> blockedNames = (f.excludeBlocked != null && f.excludeBlocked)
@@ -727,8 +700,6 @@ public class NotificationManager {
                 ? org.qortal.utils.ListUtils.followedNames()
                 : null;
 
-        long t2 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: blockedNames ms={}", t2 - t1);
 
         long afterMs = after != null ? after : 0L;
         List<org.qortal.data.arbitrary.ArbitraryResourceData> results =
@@ -748,17 +719,12 @@ public class NotificationManager {
                         f.before,
                         followedNames);
 
-        long t3 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: getRecentForNotificationHistory ms={} results={}", t3 - t2, results.size());
 
         for (org.qortal.data.arbitrary.ArbitraryResourceData r : results) {
             long ts = r.created != null ? r.created : 0L;
             timestamps.add(new long[]{ts});
             jsons.add(buildResourcePublishedHistoryJson(r, sub));
         }
-        long t4 = System.currentTimeMillis();
-        LOGGER.info("NOTIFY_HISTORY_TIMING: collectResourceHistoryPaired total service={} ms={} (buildJson={})",
-                f.service, t4 - t0, t4 - t3);
     }
 
     private void collectPaymentHistoryPaired(
@@ -774,15 +740,11 @@ public class NotificationManager {
         try (org.qortal.repository.Repository repository =
                      org.qortal.repository.RepositoryManager.getRepository()) {
 
-            long t1 = System.currentTimeMillis();
-            LOGGER.info("NOTIFY_HISTORY_TIMING: collectPaymentHistoryPaired getRepository ms={}", t1 - t0);
 
             List<String[]> payments =
                     repository.getTransactionRepository()
                             .getReceivedPaymentsForNotifications(recipient, after, paymentLimit);
 
-            long t2 = System.currentTimeMillis();
-            LOGGER.info("NOTIFY_HISTORY_TIMING: getReceivedPaymentsForNotifications ms={} count={}", t2 - t1, payments.size());
 
             for (String[] row : payments) {
                 // row: [sender, recipient, amountPretty, timestampMs, signature]
@@ -791,8 +753,6 @@ public class NotificationManager {
                 timestamps.add(new long[]{ts});
                 jsons.add(buildPaymentHistoryJson(row[0], row[1], row[2], ts, sig, sub));
             }
-            long t3 = System.currentTimeMillis();
-            LOGGER.info("NOTIFY_HISTORY_TIMING: collectPaymentHistoryPaired total ms={}", t3 - t0);
         } catch (Exception e) {
             LOGGER.debug("Error fetching payment history: {}", e.getMessage());
         }

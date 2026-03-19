@@ -482,8 +482,6 @@ public class ArbitraryTransaction extends Transaction {
 					repository.getArbitraryRepository().save(metadata);
 					metadata.setArbitraryResourceData(null); // clear back-reference before placing in cache to avoid circular serialization
 					arbitraryResourceData.metadata = metadata;
-					LOGGER.info("METADATA_FETCH: updateArbitraryResourceCacheIncludingMetadata saved metadata to cache name={} service={} identifier={}",
-							name, service != null ? service.name() : null, identifier);
 
 					// First time we have metadata for this resource? Fire notification with metadata populated.
 					boolean hadNoMetadata = existingArbitraryResourceData == null

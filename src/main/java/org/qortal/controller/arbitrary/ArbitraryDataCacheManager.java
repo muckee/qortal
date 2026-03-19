@@ -244,9 +244,6 @@ public class ArbitraryDataCacheManager extends Thread {
             for (ArbitraryTransactionData transactionData : resourceQueueCopy) {
                 // Best not to return when controller is stopping, as ideally we need to finish processing
 
-                LOGGER.info("METADATA_FETCH: processResourceQueue processing signature={} name={} service={}",
-                        Base58.encode(transactionData.getSignature()), transactionData.getName(),
-                        transactionData.getService() != null ? transactionData.getService().name() : null);
 
                 // Remove from the queue regardless of outcome
                 this.updateQueue.remove(transactionData);
@@ -261,8 +258,6 @@ public class ArbitraryDataCacheManager extends Thread {
                     arbitraryTransaction.updateArbitraryResourceStatus(repository);
                     repository.saveChanges();
 
-                    LOGGER.info("METADATA_FETCH: processResourceQueue finished (cache and status updated) signature={} name={}",
-                            Base58.encode(transactionData.getSignature()), transactionData.getName());
 
                     EventBus.INSTANCE.notify(
                         new DataMonitorEvent(
@@ -291,10 +286,6 @@ public class ArbitraryDataCacheManager extends Thread {
 
     public void addToUpdateQueue(ArbitraryTransactionData transactionData) {
         this.updateQueue.add(transactionData);
-        LOGGER.info("METADATA_FETCH: addToUpdateQueue signature={} name={} service={}",
-                Base58.encode(transactionData.getSignature()),
-                transactionData.getName(),
-                transactionData.getService() != null ? transactionData.getService().name() : null);
     }
 
     public boolean needsArbitraryResourcesCacheRebuild(Repository repository) throws DataException {
