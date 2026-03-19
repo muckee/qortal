@@ -122,7 +122,7 @@
     "adminQueryFixHeight": 2012800,
     "multipleNamesPerAccountHeight": 2206300,
     "mintedBlocksAdjustmentRemovalHeight": 2206300,
-    "atValidateHeight": 2515200
+    "atValidateHeight": 9999999999999
   },
   "checkpoints": [
     {
