@@ -125,7 +125,7 @@ public class ArbitraryMetadataManager {
                 byte[] metadataHash = latestTransaction.getMetadataHash();
                 if (metadataHash == null) {
                     // This resource doesn't have metadata
-                    throw new IllegalArgumentException("This resource doesn't have metadata");
+                    return null;
                 }
 
                 ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(metadataHash, signature);

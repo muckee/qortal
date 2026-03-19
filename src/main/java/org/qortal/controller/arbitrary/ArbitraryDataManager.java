@@ -542,9 +542,15 @@ public class ArbitraryDataManager extends Thread {
 		List<ArbitraryTransactionData> candidates = new ArrayList<>();
 		try (final Repository repository = RepositoryManager.getRepository()) {
 			List<ArbitraryTransactionData> recent = repository.getArbitraryRepository().getLatestArbitraryTransactions(LATEST_100_LIMIT);
+			// Results are ordered by created_when DESC, so first occurrence of each resource key is the most recent
+			Set<String> seenResources = new HashSet<>();
 			for (ArbitraryTransactionData txData : recent) {
 				if (isStopping) break;
 				try {
+					if (txData.getMetadataHash() == null) continue;
+					// Deduplicate: only keep the most recent tx per (name, service, identifier)
+					String resourceKey = txData.getName() + "/" + txData.getService() + "/" + txData.getIdentifier();
+					if (!seenResources.add(resourceKey)) continue;
 					ArbitraryTransaction tx = new ArbitraryTransaction(repository, txData);
 					if (!storageManager.isBlocked(txData) && !hasLocalMetadata(tx)) {
 						candidates.add(txData);
