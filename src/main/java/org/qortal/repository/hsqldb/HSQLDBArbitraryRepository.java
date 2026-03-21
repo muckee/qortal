@@ -17,6 +17,7 @@ import org.qortal.data.transaction.ArbitraryTransactionData.DataType;
 import org.qortal.data.transaction.ArbitraryTransactionData.Method;
 import org.qortal.data.transaction.BaseTransactionData;
 import org.qortal.data.transaction.TransactionData;
+import org.qortal.controller.arbitrary.ArbitraryTransactionDataHashWrapper;
 import org.qortal.repository.ArbitraryRepository;
 import org.qortal.repository.DataException;
 import org.qortal.settings.Settings;
@@ -300,6 +301,32 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 			LOGGER.error(e.getMessage(), e);
 			return new ArrayList<>(0);
 		}
+	}
+
+	@Override
+	public List<ArbitraryTransactionDataHashWrapper> getArbitraryTransactionSignaturesLite() throws DataException {
+		String sql = "SELECT signature, service, name, identifier " +
+				"FROM ArbitraryTransactions " +
+				"JOIN Transactions USING (signature) " +
+				"WHERE name IS NOT NULL " +
+				"ORDER BY created_when DESC";
+
+		List<ArbitraryTransactionDataHashWrapper> results = new ArrayList<>();
+		try (ResultSet resultSet = this.repository.checkedExecute(sql)) {
+			if (resultSet == null)
+				return results;
+
+			do {
+				byte[] signature = resultSet.getBytes(1);
+				int service = resultSet.getInt(2);
+				String name = resultSet.getString(3);
+				String identifier = resultSet.getString(4);
+				results.add(new ArbitraryTransactionDataHashWrapper(signature, service, name, identifier));
+			} while (resultSet.next());
+		} catch (SQLException e) {
+			throw new DataException("Unable to fetch lightweight arbitrary transaction signatures", e);
+		}
+		return results;
 	}
 
 	@Override

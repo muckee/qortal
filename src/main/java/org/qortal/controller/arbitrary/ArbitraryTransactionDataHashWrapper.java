@@ -9,6 +9,8 @@ public class ArbitraryTransactionDataHashWrapper {
 
     private ArbitraryTransactionData data;
 
+    private byte[] signature;
+
     private int service;
 
     private String name;
@@ -17,7 +19,7 @@ public class ArbitraryTransactionDataHashWrapper {
 
     public ArbitraryTransactionDataHashWrapper(ArbitraryTransactionData data) {
         this.data = data;
-
+        this.signature = data.getSignature();
         this.service = data.getService().value;
         this.name = data.getName();
         this.identifier = data.getIdentifier();
@@ -29,8 +31,20 @@ public class ArbitraryTransactionDataHashWrapper {
         this.identifier = identifier;
     }
 
+    /** Lightweight constructor — stores only what is needed for dedup and signature retrieval. */
+    public ArbitraryTransactionDataHashWrapper(byte[] signature, int service, String name, String identifier) {
+        this.signature = signature;
+        this.service = service;
+        this.name = name;
+        this.identifier = identifier;
+    }
+
     public ArbitraryTransactionData getData() {
         return data;
+    }
+
+    public byte[] getSignature() {
+        return signature;
     }
 
     public int getService() {
