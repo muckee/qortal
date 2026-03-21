@@ -305,7 +305,7 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 
 	@Override
 	public List<ArbitraryTransactionDataHashWrapper> getArbitraryTransactionSignaturesLite() throws DataException {
-		String sql = "SELECT signature, service, name, identifier " +
+		String sql = "SELECT signature, service, name, identifier, metadata_hash, created_when " +
 				"FROM ArbitraryTransactions " +
 				"JOIN Transactions USING (signature) " +
 				"WHERE name IS NOT NULL " +
@@ -321,7 +321,9 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 				int service = resultSet.getInt(2);
 				String name = resultSet.getString(3);
 				String identifier = resultSet.getString(4);
-				results.add(new ArbitraryTransactionDataHashWrapper(signature, service, name, identifier));
+				byte[] metadataHash = resultSet.getBytes(5);
+				long timestamp = resultSet.getLong(6);
+				results.add(new ArbitraryTransactionDataHashWrapper(signature, service, name, identifier, metadataHash, timestamp));
 			} while (resultSet.next());
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch lightweight arbitrary transaction signatures", e);
@@ -752,6 +754,18 @@ public class HSQLDBArbitraryRepository implements ArbitraryRepository {
 
 		} catch (SQLException e) {
 			throw new DataException("Unable to fetch arbitrary resource from repository", e);
+		}
+	}
+
+	@Override
+	public byte[] getMetadataHashBySignature(byte[] signature) throws DataException {
+		String sql = "SELECT metadata_hash FROM ArbitraryTransactions WHERE signature = ?";
+		try (ResultSet resultSet = this.repository.checkedExecute(sql, signature)) {
+			if (resultSet == null)
+				return null;
+			return resultSet.getBytes(1);
+		} catch (SQLException e) {
+			throw new DataException("Unable to fetch metadata hash by signature", e);
 		}
 	}
 

@@ -245,13 +245,14 @@ public class ArbitraryDataManager extends Thread {
 			}
 			else {
 				// Bounded by name — convert full objects to lite wrappers
-				allArbitraryTransactionsInDescendingOrder
-						= repository.getArbitraryRepository()
-						.getLatestArbitraryTransactionsByName(name)
-						.stream()
-						.map(tx -> new ArbitraryTransactionDataHashWrapper(
-								tx.getSignature(), tx.getService().value, tx.getName(), tx.getIdentifier()))
-						.collect(Collectors.toList());
+			allArbitraryTransactionsInDescendingOrder
+					= repository.getArbitraryRepository()
+					.getLatestArbitraryTransactionsByName(name)
+					.stream()
+					.map(tx -> new ArbitraryTransactionDataHashWrapper(
+							tx.getSignature(), tx.getService().value, tx.getName(), tx.getIdentifier(),
+							tx.getMetadataHash(), tx.getTimestamp()))
+					.collect(Collectors.toList());
 			}
 		} catch( Exception e) {
 			LOGGER.error(e.getMessage(), e);
@@ -267,19 +268,20 @@ public class ArbitraryDataManager extends Thread {
 			// Any arbitrary transactions we want to fetch data for?
 			List<DataMonitorEvent> pendingEvents = new ArrayList<>();
 			try (final Repository repository = RepositoryManager.getRepository()) {
-				List<byte[]> signatures = processLiteTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
+			List<ArbitraryTransactionDataHashWrapper> wrappers = processLiteTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
 
-				if (signatures == null || signatures.isEmpty()) {
+			if (wrappers == null || wrappers.isEmpty()) {
 					offset = 0;
 					break;
 				}
 				offset += limit;
 
 				// Loop through signatures and remove ones we don't need to process
-				Iterator iterator = signatures.iterator();
+				Iterator<ArbitraryTransactionDataHashWrapper> iterator = wrappers.iterator();
 				while (iterator.hasNext()) {
 					Thread.sleep(25L); // Reduce CPU usage
-					byte[] signature = (byte[]) iterator.next();
+					ArbitraryTransactionDataHashWrapper wrapper = iterator.next();
+					byte[] signature = wrapper.getSignature();
 
 					ArbitraryTransaction arbitraryTransaction = fetchTransaction(repository, signature);
 					if (arbitraryTransaction == null) {
@@ -325,13 +327,13 @@ public class ArbitraryDataManager extends Thread {
                     }
 				}
 
-				if (signatures.isEmpty()) {
+			if (wrappers.isEmpty()) {
 					continue;
 				}
 
 				// Pick one at random
-				final int index = new Random().nextInt(signatures.size());
-				byte[] signature = signatures.get(index);
+				final int index = new Random().nextInt(wrappers.size());
+				byte[] signature = wrappers.get(index).getSignature();
 
 				if (signature == null) {
 					continue;
@@ -426,72 +428,67 @@ public class ArbitraryDataManager extends Thread {
 
 			// Any arbitrary transactions we want to fetch data for?
 			DataMonitorEvent pendingEvent = null;
-			try (final Repository repository = RepositoryManager.getRepository()) {
-				List<byte[]> signatures = processLiteTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
+			try {
+				List<ArbitraryTransactionDataHashWrapper> wrappers = processLiteTransactionsForSignatures(limit, offset, allArbitraryTransactionsInDescendingOrder, processedTransactions);
 
-				if (signatures == null || signatures.isEmpty()) {
+				if (wrappers == null || wrappers.isEmpty()) {
 					offset = 0;
 					break;
 				}
 				offset += limit;
 
-				// Loop through signatures and remove ones we don't need to process
-				Iterator iterator = signatures.iterator();
+				// Loop through wrappers and remove ones we don't need to process.
+				// All fields needed for these checks are already in the wrapper — no DB calls required.
+				Iterator<ArbitraryTransactionDataHashWrapper> iterator = wrappers.iterator();
 				while (iterator.hasNext()) {
 					Thread.sleep(25L); // Reduce CPU usage
-					byte[] signature = (byte[]) iterator.next();
-
-					ArbitraryTransaction arbitraryTransaction = fetchTransaction(repository, signature);
-					if (arbitraryTransaction == null) {
-						// Best not to process this one
-						iterator.remove();
-						continue;
-					}
-					ArbitraryTransactionData arbitraryTransactionData = (ArbitraryTransactionData) arbitraryTransaction.getTransactionData();
+					ArbitraryTransactionDataHashWrapper wrapper = iterator.next();
 
 					// Skip transactions that are blocked
-					if (storageManager.isBlocked(arbitraryTransactionData)) {
+					if (ListUtils.isNameBlocked(wrapper.getName())) {
 						iterator.remove();
 						continue;
 					}
 
-					// Remove transactions that we already have local data for
-					if (hasLocalMetadata(arbitraryTransaction)) {
+					// Remove transactions that we already have local metadata for
+					if (hasLocalMetadata(wrapper.getSignature(), wrapper.getMetadataHash())) {
 						iterator.remove();
-                    }
+					}
 				}
 
-				if (signatures.isEmpty()) {
+				if (wrappers.isEmpty()) {
 					continue;
 				}
 
 				// Pick one at random
-				final int index = new Random().nextInt(signatures.size());
-				byte[] signature = signatures.get(index);
+				final int index = new Random().nextInt(wrappers.size());
+				ArbitraryTransactionDataHashWrapper selected = wrappers.get(index);
 
-				if (signature == null) {
-					continue;
-				}
+				// Build the resource descriptor from the wrapper — no extra DB call needed
+				ArbitraryDataResource resource = new ArbitraryDataResource(
+						selected.getName(),
+						ArbitraryDataFile.ResourceIdType.NAME,
+						Service.valueOf(selected.getService()),
+						selected.getIdentifier()
+				);
 
-				// No longer need to see if we have had a more recent PUT since we compared the transactions to process
-				// to the transactions previously processed, so we can fetch the transactiondata, notify the event bus,
-				// fetch the metadata and notify the event bus again
-				ArbitraryTransactionData arbitraryTransactionData = ArbitraryTransactionUtils.fetchTransactionData(repository, signature);
+			// Ask our connected peers if they have metadata for this resource
+			LOGGER.info("fetchAllMetadata: attempting fetch for {}/{}/{}", 
+			selected.getName(), 
+			Service.valueOf(selected.getService()).name(), 
+			selected.getIdentifier());
+			ArbitraryMetadataManager.getInstance().fetchMetadata(resource, true);
 
-			// Ask our connected peers if they have metadata for this signature
-			fetchMetadata(arbitraryTransactionData);
 
 			pendingEvent = new DataMonitorEvent(
 				System.currentTimeMillis(),
-				arbitraryTransactionData.getIdentifier(),
-				arbitraryTransactionData.getName(),
-				arbitraryTransactionData.getService().name(),
+				selected.getIdentifier(),
+				selected.getName(),
+				Service.valueOf(selected.getService()).name(),
 				"fetched metadata",
-				arbitraryTransactionData.getTimestamp(),
-				arbitraryTransactionData.getTimestamp()
+				selected.getTimestamp(),
+				selected.getTimestamp()
 			);
-		} catch (DataException e) {
-			LOGGER.error("Repository issue when fetching arbitrary transaction data", e);
 		} catch (InterruptedException e) {
 			// Thread interrupted during shutdown - restore interrupt status and exit
 			Thread.currentThread().interrupt();
@@ -584,6 +581,8 @@ public class ArbitraryDataManager extends Thread {
 		for (ArbitraryTransactionData txData : candidates) {
 			if (isStopping || System.currentTimeMillis() >= deadline) break;
 
+			Thread.sleep(200L);
+
 			fetchMetadataForBurst(txData);
 
 			if (txData.getService() != null) {
@@ -650,7 +649,7 @@ public class ArbitraryDataManager extends Thread {
 	 * (signature, service, name, identifier), avoiding the memory cost of full
 	 * {@link ArbitraryTransactionData} objects for the entire transaction set.
 	 */
-	private static List<byte[]> processLiteTransactionsForSignatures(
+	private static List<ArbitraryTransactionDataHashWrapper> processLiteTransactionsForSignatures(
 			int limit,
 			int offset,
 			List<ArbitraryTransactionDataHashWrapper> transactionsInDescendingOrder,
@@ -671,8 +670,7 @@ public class ArbitraryDataManager extends Thread {
 		processedTransactions.addAll(transactionsToProcess);
 
 		return transactionsToProcess.stream()
-				.map(ArbitraryTransactionDataHashWrapper::getSignature)
-				.filter(sig -> sig != null)
+				.filter(w -> w.getSignature() != null)
 				.collect(Collectors.toList());
 	}
 
@@ -695,6 +693,19 @@ public class ArbitraryDataManager extends Thread {
 
 		} catch (DataException e) {
 			LOGGER.error("Repository issue when checking arbitrary transaction's data is local", e);
+			return true; // Assume true for now, to avoid network spam on error
+		}
+	}
+
+	private boolean hasLocalMetadata(byte[] signature, byte[] metadataHash) {
+		if (metadataHash == null) {
+			return true;
+		}
+		try {
+			ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(metadataHash, signature);
+			return metadataFile.exists();
+		} catch (DataException e) {
+			LOGGER.error("Repository issue when checking arbitrary transaction's metadata is local", e);
 			return true; // Assume true for now, to avoid network spam on error
 		}
 	}

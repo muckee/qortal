@@ -52,6 +52,8 @@ public interface ArbitraryRepository {
 
 	public byte[] getLatestSignature(Service service, String name, String identifier) throws DataException;
 
+	public byte[] getMetadataHashBySignature(byte[] signature) throws DataException;
+
 	public List<ArbitraryResourceData> getArbitraryResources(Integer limit, Integer offset, Boolean reverse) throws DataException;
 
 	public List<ArbitraryResourceData> getArbitraryResources(Service service, String identifier, List<String> names, boolean defaultResource, Boolean followedOnly, Boolean excludeBlocked, Boolean includeMetadata, Boolean includeStatus, Integer limit, Integer offset, Boolean reverse) throws DataException;

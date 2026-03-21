@@ -115,39 +115,45 @@ public class ArbitraryMetadataManager {
 
     private ArbitraryDataTransactionMetadata fetchMetadataInternal(ArbitraryDataResource arbitraryDataResource, boolean useRateLimiter, boolean fromBurst) {
         try (final Repository repository = RepositoryManager.getRepository()) {
-            // Find latest transaction
-            ArbitraryTransactionData latestTransaction = repository.getArbitraryRepository()
-                    .getLatestTransaction(arbitraryDataResource.getResourceId(), arbitraryDataResource.getService(),
-                            null, arbitraryDataResource.getIdentifier());
+            // Fast path: indexed point lookup on ArbitraryResourcesCache instead of expensive
+            // range scan + JOIN + ORDER BY on ArbitraryTransactions via getLatestTransaction().
+            byte[] signature = repository.getArbitraryRepository()
+                    .getLatestSignature(arbitraryDataResource.getService(),
+                            arbitraryDataResource.getResourceId(), arbitraryDataResource.getIdentifier());
 
-            if (latestTransaction != null) {
-                byte[] signature = latestTransaction.getSignature();
-                byte[] metadataHash = latestTransaction.getMetadataHash();
-                if (metadataHash == null) {
-                    // This resource doesn't have metadata
+            if (signature == null) {
+                // Resource not yet in cache — will be picked up on the next cycle
+                return null;
+            }
+
+            // Fast path: PK lookup for just the metadata_hash column
+            byte[] metadataHash = repository.getArbitraryRepository()
+                    .getMetadataHashBySignature(signature);
+
+            if (metadataHash == null) {
+                // This resource doesn't have metadata
+                return null;
+            }
+
+            ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(metadataHash, signature);
+            if (!metadataFile.exists()) {
+                // Request from network
+                this.fetchArbitraryMetadata(signature, metadataHash, useRateLimiter, fromBurst);
+            }
+
+            // Now check again as it may have been downloaded above
+            if (metadataFile.exists()) {
+                // Use local copy
+                ArbitraryDataTransactionMetadata transactionMetadata = new ArbitraryDataTransactionMetadata(metadataFile.getFilePath());
+                try {
+                    transactionMetadata.read();
+                } catch (DataException e) {
+                    // Invalid file, so delete it
+                    LOGGER.info("Deleting invalid metadata file due to exception: {}", e.getMessage());
+                    transactionMetadata.delete();
                     return null;
                 }
-
-                ArbitraryDataFile metadataFile = ArbitraryDataFile.fromHash(metadataHash, signature);
-                if (!metadataFile.exists()) {
-                    // Request from network
-                    this.fetchArbitraryMetadata(latestTransaction, useRateLimiter, fromBurst);
-                }
-
-                // Now check again as it may have been downloaded above
-                if (metadataFile.exists()) {
-                    // Use local copy
-                    ArbitraryDataTransactionMetadata transactionMetadata = new ArbitraryDataTransactionMetadata(metadataFile.getFilePath());
-                    try {
-                        transactionMetadata.read();
-                    } catch (DataException e) {
-                        // Invalid file, so delete it
-                        LOGGER.info("Deleting invalid metadata file due to exception: {}", e.getMessage());
-                        transactionMetadata.delete();
-                        return null;
-                    }
-                    return transactionMetadata;
-                }
+                return transactionMetadata;
             }
 
         } catch (DataException | IOException e) {
@@ -161,7 +167,7 @@ public class ArbitraryMetadataManager {
     // Request metadata from network
 
     public byte[] fetchArbitraryMetadata(ArbitraryTransactionData arbitraryTransactionData, boolean useRateLimiter) {
-        return fetchArbitraryMetadata(arbitraryTransactionData, useRateLimiter, false);
+        return fetchArbitraryMetadata(arbitraryTransactionData.getSignature(), arbitraryTransactionData.getMetadataHash(), useRateLimiter, false);
     }
 
     /**
@@ -170,12 +176,14 @@ public class ArbitraryMetadataManager {
      *  - After 3 attempts, allowed again if >= 5 minutes since last (counter resets to 1).
      */
     public byte[] fetchArbitraryMetadata(ArbitraryTransactionData arbitraryTransactionData, boolean useRateLimiter, boolean fromBurst) {
-        byte[] metadataHash = arbitraryTransactionData.getMetadataHash();
+        return fetchArbitraryMetadata(arbitraryTransactionData.getSignature(), arbitraryTransactionData.getMetadataHash(), useRateLimiter, fromBurst);
+    }
+
+    private byte[] fetchArbitraryMetadata(byte[] signature, byte[] metadataHash, boolean useRateLimiter, boolean fromBurst) {
         if (metadataHash == null) {
             return null;
         }
 
-        byte[] signature = arbitraryTransactionData.getSignature();
         String signature58 = Base58.encode(signature);
 
         // Require an NTP sync
