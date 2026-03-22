@@ -93,11 +93,14 @@ public class ArbitraryMetadataManager {
             return;
         }
         final long requestMinimumTimestamp = now - ArbitraryDataManager.METADATA_REQUEST_TIMEOUT;
-        // Only evict completed entries (getA() == null) — live entries are removed by their own poll loop's finally block.
-        // This prevents the cleanup from racing with an in-progress fetchArbitraryMetadata poll.
+        // Evict any entry older than METADATA_REQUEST_TIMEOUT regardless of completion state.
+        // - Completed outbound entries (getA() == null): fine to evict after timeout.
+        // - Active outbound entries (getA() != null): their poll loop's finally block removes them
+        //   before the timeout expires, so any such entry still present after the timeout is a
+        //   stale inbound relay entry with no owner thread — safe to evict.
         arbitraryMetadataRequests.entrySet().removeIf(entry ->
                 entry.getValue().getC() == null
-                || (entry.getValue().getC() < requestMinimumTimestamp && entry.getValue().getA() == null));
+                || entry.getValue().getC() < requestMinimumTimestamp);
 
         // Evict burst rate-limit entries older than 10 minutes (covers the 5-min retry window with margin)
         final long burstMinimumTimestamp = now - 10 * 60 * 1000L;
