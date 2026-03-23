@@ -105,6 +105,11 @@ public class ArbitraryMetadataManager {
         // Evict burst rate-limit entries older than 10 minutes (covers the 5-min retry window with margin)
         final long burstMinimumTimestamp = now - 10 * 60 * 1000L;
         burstMetadataSignatureRequests.entrySet().removeIf(entry -> entry.getValue().getC() == null || entry.getValue().getC() < burstMinimumTimestamp);
+
+        // Evict standard rate-limit entries older than 65 minutes (covers the 60min max gate with margin)
+        final long sigMinimumTimestamp = now - 65 * 60 * 1000L;
+        arbitraryMetadataSignatureRequests.entrySet().removeIf(entry ->
+                entry.getValue().getC() == null || entry.getValue().getC() < sigMinimumTimestamp);
     }
 
 
