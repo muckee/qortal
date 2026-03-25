@@ -63,11 +63,12 @@ public class NotificationManager {
     private final Map<Session, Map<String, Long>> recentlySent = new ConcurrentHashMap<>();
 
     /**
-     * Global dedup map for generic events: "type\0dedupKey" -> lastDispatchedTimestamp.
-     * Prevents the same transaction firing multiple notifications when process() is
+     * Per-session dedup map for generic events: session -> ("type\0dedupKey" -> lastDispatchedTimestamp).
+     * Prevents the same transaction firing multiple notifications to the same session when process() is
      * called more than once for the same tx (e.g. sync + group-approval paths).
+     * Entries are removed on session close and swept periodically for entries older than DEDUP_WINDOW_MS.
      */
-    private final Map<String, Long> recentlySentEvents = new ConcurrentHashMap<>();
+    private final Map<Session, Map<String, Long>> recentlySentEvents = new ConcurrentHashMap<>();
 
     private NotificationManager() {
     }
@@ -93,7 +94,27 @@ public class NotificationManager {
         if (subs != null) {
             removeFromIndex(session);
             recentlySent.remove(session);
+            recentlySentEvents.remove(session);
             LOGGER.debug("Notification session closed: address={}", subs.address);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Subscription management
+    // -------------------------------------------------------------------------
+
+    /**
+     * Sweeps stale dedup entries older than {@link #DEDUP_WINDOW_MS} from both
+     * per-session dedup maps. Call periodically (e.g. every minute) to bound
+     * memory for long-lived sessions.
+     */
+    public void cleanupOldEntries(long now) {
+        long cutoff = now - DEDUP_WINDOW_MS;
+        for (Map<String, Long> sessionMap : recentlySentEvents.values()) {
+            sessionMap.entrySet().removeIf(e -> e.getValue() < cutoff);
+        }
+        for (Map<String, Long> sessionMap : recentlySent.values()) {
+            sessionMap.entrySet().removeIf(e -> e.getValue() < cutoff);
         }
     }
 
@@ -385,21 +406,17 @@ public class NotificationManager {
      * string-map {@code data}) to all matching subscriptions.
      */
     public void processEvent(NotificationEvent event) {
-        // Deduplicate events with the same type+dedupKey within the window
-        if (event.getDedupKey() != null) {
-            String globalKey = event.getType() + "\0" + event.getDedupKey();
-            long now = System.currentTimeMillis();
-            Long last = recentlySentEvents.put(globalKey, now);
-            if (last != null && (now - last) < DEDUP_WINDOW_MS) {
-                return;
-            }
-        }
+        // Build the dedup key once (null means no dedup for this event type)
+        final String dedupEventKey = event.getDedupKey() != null
+                ? event.getType() + "\0" + event.getDedupKey()
+                : null;
 
         Map<String, Map<String, List<SubscriptionEntry>>> serviceMap = eventIndex.get(event.getType());
         if (serviceMap == null) {
             return;
         }
 
+        long now = System.currentTimeMillis();
         String eventService = event.getData().get("service");
         String eventName    = event.getData().get("name");
 
@@ -429,6 +446,17 @@ public class NotificationManager {
                             entries.remove(entry);
                             continue;
                         }
+
+                        // Per-session dedup: skip if this session already received this event within the window
+                        if (dedupEventKey != null) {
+                            Map<String, Long> sessionSeen = recentlySentEvents
+                                    .computeIfAbsent(entry.session, s -> new ConcurrentHashMap<>());
+                            Long last = sessionSeen.put(dedupEventKey, now);
+                            if (last != null && (now - last) < DEDUP_WINDOW_MS) {
+                                continue;
+                            }
+                        }
+
                         sendGenericNotification(entry.session, event, entry.rule);
                     }
                 }
