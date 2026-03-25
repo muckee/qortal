@@ -65,7 +65,10 @@ public class DeployAtTransaction extends Transaction {
 			"Amtrk89znaGrHqsRqtEhEKQZzKfbWAHdetB5SSN8cYL6",
 
 			//pirate
-			"HyKCg5oiwMKkRrZKk1e5gET27kfrEVUwCNXGQALXqg9x"
+			"HyKCg5oiwMKkRrZKk1e5gET27kfrEVUwCNXGQALXqg9x",
+
+			//escrow v1-lite
+			"5xwLAjTo1RyKLQS5gM1TvUvDR53H2ARCGyNwyyGcDp4q"
 
 	);
 
