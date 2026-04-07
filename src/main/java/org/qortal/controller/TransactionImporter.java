@@ -576,43 +576,49 @@ public class TransactionImporter extends Thread {
     }
 
     private void processNetworkGetUnconfirmedTransactionsMessages() {
-        if (Controller.isStopping()) {
-            return;
-        }
-
-        List<PeerMessage> messagesToProcess;
-        synchronized (getUnconfirmedTransactionsMessageLock) {
-            messagesToProcess = new ArrayList<>(getUnconfirmedTransactionsMessageList);
-            getUnconfirmedTransactionsMessageList.clear();
-        }
-
-        if( messagesToProcess.isEmpty() ) return;
-
-        List<byte[]> signatures = Collections.emptyList();
-
-        // If we're NOT up-to-date then don't send out unconfirmed transactions
-        // as it's possible they are already included in a later block that we don't have.
-        if (Controller.getInstance().isUpToDate()) {
-            try (final Repository repository = RepositoryManager.getRepository()) {
-                signatures = repository.getTransactionRepository().getUnconfirmedTransactionSignatures();
-            } catch (DataException e) {
-                LOGGER.error(String.format("Repository issue while sending unconfirmed transaction signatures to peers"), e);
+        try {
+            if (Controller.isStopping()) {
+                return;
             }
-        }
 
-        // add the validated chat transaction signatures here since they are no longer in the transaction repository, so
-        // they are no longer getting adding in above with the unconfirmed transactions
-        signatures.addAll(
-            ChatTransactionDelegate.getInstance().getValidatedChatTransactions().stream()
-                .map(TransactionData::getSignature)
-                .collect(Collectors.toList())
-        );
+            List<PeerMessage> messagesToProcess;
+            synchronized (getUnconfirmedTransactionsMessageLock) {
+                messagesToProcess = new ArrayList<>(getUnconfirmedTransactionsMessageList);
+                getUnconfirmedTransactionsMessageList.clear();
+            }
 
-        Message transactionSignaturesMessage = new TransactionSignaturesMessage(signatures);
+            if( messagesToProcess.isEmpty() ) return;
 
-        for( PeerMessage messageToProcess : messagesToProcess ) {
-            if (!messageToProcess.getPeer().sendMessage(transactionSignaturesMessage))
-                messageToProcess.getPeer().disconnect("failed to send unconfirmed transaction signatures");
+            // this must start and stay as an ArrayList,
+            // because ArrayList supports the addAll operation
+            List<byte[]> signatures = new ArrayList<>();
+
+            // If we're NOT up-to-date then don't send out unconfirmed transactions
+            // as it's possible they are already included in a later block that we don't have.
+            if (Controller.getInstance().isUpToDate()) {
+                try (final Repository repository = RepositoryManager.getRepository()) {
+                    signatures.addAll( repository.getTransactionRepository().getUnconfirmedTransactionSignatures() );
+                } catch (DataException e) {
+                    LOGGER.error(String.format("Repository issue while sending unconfirmed transaction signatures to peers"), e);
+                }
+            }
+
+            // add the validated chat transaction signatures here since they are no longer in the transaction repository, so
+            // they are no longer getting adding in above with the unconfirmed transactions
+            signatures.addAll(
+                ChatTransactionDelegate.getInstance().getValidatedChatTransactions().stream()
+                    .map(TransactionData::getSignature)
+                    .collect(Collectors.toList())
+            );
+
+            Message transactionSignaturesMessage = new TransactionSignaturesMessage(signatures);
+
+            for( PeerMessage messageToProcess : messagesToProcess ) {
+                if (!messageToProcess.getPeer().sendMessage(transactionSignaturesMessage))
+                    messageToProcess.getPeer().disconnect("failed to send unconfirmed transaction signatures");
+            }
+        } catch (Exception e) {
+            LOGGER.error(e.getMessage(), e);
         }
     }
 
