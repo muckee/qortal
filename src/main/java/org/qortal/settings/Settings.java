@@ -589,7 +589,21 @@ public class Settings {
 	 */
     private  boolean hostMonitorEnabled = false;
 
-    // Domain mapping
+	/**
+	 * Thread Dump Interval
+	 *
+	 * The interval (in minutes) to perform a thread dump. If zero or less, then no thread dumps will be performed.
+	 */
+	private long threadDumpInterval = 0;
+
+	/**
+	 * Thread Dump Expiration
+	 *
+	 * The time (in hours) to elapse before a thread dump file will be deleted.
+	 */
+	private int threadDumpExpiration = 24;
+
+	// Domain mapping
 	public static class ThreadLimit {
 		private String messageType;
 		private Integer limit;
@@ -1520,5 +1534,13 @@ public class Settings {
 
 	public boolean isHostMonitorEnabled() {
 		return hostMonitorEnabled;
+	}
+
+	public long getThreadDumpInterval() {
+		return threadDumpInterval;
+	}
+
+	public int getThreadDumpExpiration() {
+		return threadDumpExpiration;
 	}
 }
