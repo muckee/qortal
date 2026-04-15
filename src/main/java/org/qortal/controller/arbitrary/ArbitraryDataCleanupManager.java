@@ -528,7 +528,7 @@ public class ArbitraryDataCleanupManager extends Thread {
 
 				// We're expecting the contents of each subfolder to be a directory
 				if (directory.isDirectory()) {
-					if (!ArbitraryTransactionUtils.isFileRecent(directory.toPath(), now, minAge)) {
+					if (!FilesystemUtils.isFileRecent(directory.toPath(), now, minAge)) {
 						// File isn't recent, so can be deleted
 						this.safeDeleteDirectory(directory, "not recent");
 					}
