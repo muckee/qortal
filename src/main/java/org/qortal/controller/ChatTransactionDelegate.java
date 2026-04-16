@@ -609,6 +609,12 @@ public class ChatTransactionDelegate implements ChatRepository {
      */
     public Transaction.ValidationResult isValid(ChatTransactionData chatTransactionData, boolean checkBlocking)  {
 
+        long cutoffTimestamp = NTP.getTime() - BlockChain.getInstance().getTransactionExpiryPeriod();
+
+        if( chatTransactionData.getTimestamp() < cutoffTimestamp ) {
+            return Transaction.ValidationResult.TIMESTAMP_TOO_OLD;
+        }
+
         // discard messages to far in the future
         if (chatTransactionData.getTimestamp() > NTP.getTime() + TOO_FAR_IN_THE_FUTURE) {
             return Transaction.ValidationResult.TIMESTAMP_TOO_NEW;
