@@ -18,6 +18,8 @@ public interface GroupRepository {
 
 	public boolean reducedGroupNameExists(String reducedGroupName) throws DataException;
 
+	public List<GroupBalanceData> getGroupMemberBalances(Integer limit, Integer offset, Boolean reverse) throws DataException;
+
 	public List<GroupData> getAllGroups(Integer limit, Integer offset, Boolean reverse) throws DataException;
 
 	public default List<GroupData> getAllGroups() throws DataException {
@@ -160,8 +162,15 @@ public interface GroupRepository {
 		return getGroupBans(groupId, null, null, null);
 	}
 
+    List<GroupMemberTransactionCounterData> getBanCountsForYear(int year, Integer limit, Integer offset) throws DataException;
+
+	List<GroupMemberTransactionCounterData> getKickCountsForYear(int year, Integer limit, Integer offset) throws DataException;
+
+	List<GroupMemberTransactionCounterData> getJoinCountsForYear(int year, Integer limit, Integer offset) throws DataException;
+
+	List<GroupMemberTransactionCounterData> getLeaveCountsForYear(int year, Integer limit, Integer offset) throws DataException;
+
 	public void save(GroupBanData groupBanData) throws DataException;
 
 	public void deleteBan(int groupId, String offender) throws DataException;
-
 }
