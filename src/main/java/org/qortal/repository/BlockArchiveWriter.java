@@ -251,7 +251,7 @@ public class BlockArchiveWriter {
 
         }
         int totalLength = headerBytes.size() + bytes.size();
-        LOGGER.info(String.format("Total length of %d blocks is {}", i, StringUtils.formatBytes(totalLength)));
+        LOGGER.info("Total length of {} blocks is {}", i, StringUtils.formatBytes(totalLength));
 
         // Validate file size, in case something went wrong
         if (totalLength < fileSizeTarget && this.shouldEnforceFileSizeTarget) {
