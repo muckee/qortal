@@ -509,7 +509,7 @@ public class ArbitraryDataStorageManager extends Thread {
            LOGGER.error(e.getMessage(), e);
         }
 
-        LOGGER.info("Total used: {} bytes, Total capacity: {} bytes", this.totalDirectorySize, this.storageCapacity);
+        LOGGER.info("Total used: {}, Total capacity: {}", StringUtils.formatBytes(this.totalDirectorySize), StringUtils.formatBytes(this.storageCapacity));
     }
 
     /**
