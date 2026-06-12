@@ -95,7 +95,8 @@ public class BlockChain {
 		adminQueryFixHeight,
 		multipleNamesPerAccountHeight,
 		mintedBlocksAdjustmentRemovalHeight,
-		atValidateHeight
+		atValidateHeight,
+		assetOrderBoundsHeight
 	}
 
     // V5.5 Default List of Historic Triggers
@@ -354,8 +355,9 @@ public class BlockChain {
 		}
 
         // Load in the default feature triggers
-        defaultFeatureTriggerHeight.put(FeatureTrigger.multipleNamesPerAccountHeight, 2206300L);
-        defaultFeatureTriggerHeight.put(FeatureTrigger.mintedBlocksAdjustmentRemovalHeight, 2206300L);
+		defaultFeatureTriggerHeight.put(FeatureTrigger.multipleNamesPerAccountHeight, 2206300L);
+		defaultFeatureTriggerHeight.put(FeatureTrigger.mintedBlocksAdjustmentRemovalHeight, 2206300L);
+		defaultFeatureTriggerHeight.put(FeatureTrigger.assetOrderBoundsHeight, 9999999999999L);
 
 		try  {
 			// Attempt to unmarshal JSON stream to BlockChain config
@@ -709,6 +711,10 @@ public class BlockChain {
 
 	public int getAtValidateHeight() {
 		return this.featureTriggers.get(FeatureTrigger.atValidateHeight.name()).intValue();
+	}
+
+	public long getAssetOrderBoundsHeight() {
+		return this.featureTriggers.get(FeatureTrigger.assetOrderBoundsHeight.name()).longValue();
 	}
 
 	// More complex getters for aspects that change by height or timestamp
