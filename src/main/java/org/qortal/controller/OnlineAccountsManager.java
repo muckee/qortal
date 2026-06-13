@@ -24,6 +24,7 @@ import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
 import org.qortal.settings.Settings;
+import org.qortal.transform.Transformer;
 import org.qortal.utils.Base58;
 import org.qortal.utils.Groups;
 import org.qortal.utils.NTP;
@@ -57,6 +58,10 @@ public class OnlineAccountsManager {
      * How many timestamp-sets of online accounts we cache for 'latest blocks'.
      */
     private static final int MAX_BLOCKS_CACHED_ONLINE_ACCOUNTS = 3;
+    /**
+     * How many timestamp-sets of successful V2 signature verifications we cache.
+     */
+    private static final int MAX_CACHED_SIGNATURE_TIMESTAMP_SETS = MAX_CACHED_TIMESTAMP_SETS + MAX_BLOCKS_CACHED_ONLINE_ACCOUNTS;
 
     private static final long ONLINE_ACCOUNTS_QUEUE_INTERVAL = 100L; // ms
     private static final long ONLINE_ACCOUNTS_TASKS_INTERVAL = 10 * 1000L; // ms
@@ -103,6 +108,10 @@ public class OnlineAccountsManager {
      * <i>Probably</i> only accessed / modified by a single Synchronizer thread.
      */
     private final SortedMap<Long, Set<OnlineAccountData>> latestBlocksOnlineAccounts = new ConcurrentSkipListMap<>();
+    /**
+     * Cache of exact V2 online-account signatures already verified as valid, keyed by online-account timestamp.
+     */
+    private final SortedMap<Long, Set<VerifiedOnlineSignature>> verifiedOnlineAccountSignatures = new ConcurrentSkipListMap<>();
 
     private long lastOnlineAccountsRequest = 0;
 
@@ -130,6 +139,16 @@ public class OnlineAccountsManager {
 
     public static long toOnlineAccountTimestamp(long timestamp) {
         return (timestamp / getOnlineTimestampModulus()) * getOnlineTimestampModulus();
+    }
+
+    /**
+     * Returns whether online-account signatures for the given online-account timestamp must use the
+     * secure per-account Ed25519 scheme (challenge bound to R and A) rather than the legacy, forgeable
+     * custom aggregate scheme. Keyed off the deterministic online-account timestamp so producers and
+     * validators agree across the hard-fork boundary.
+     */
+    public static boolean isSignatureV2Active(long onlineAccountTimestamp) {
+        return onlineAccountTimestamp >= BlockChain.getInstance().getOnlineAccountsSignatureV2Timestamp();
     }
 
     private static int getPoWBufferSize() {
@@ -161,6 +180,36 @@ public class OnlineAccountsManager {
 
     public static OnlineAccountsManager getInstance() {
         return SingletonContainer.INSTANCE;
+    }
+
+    private static class VerifiedOnlineSignature {
+        private final byte[] publicKey;
+        private final byte[] signature;
+        private final int hash;
+
+        private VerifiedOnlineSignature(byte[] publicKey, byte[] signature) {
+            this.publicKey = Arrays.copyOf(publicKey, publicKey.length);
+            this.signature = Arrays.copyOf(signature, signature.length);
+            this.hash = 31 * Arrays.hashCode(this.publicKey) + Arrays.hashCode(this.signature);
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (other == this)
+                return true;
+
+            if (!(other instanceof VerifiedOnlineSignature))
+                return false;
+
+            VerifiedOnlineSignature otherSignature = (VerifiedOnlineSignature) other;
+            return Arrays.equals(this.publicKey, otherSignature.publicKey)
+                    && Arrays.equals(this.signature, otherSignature.signature);
+        }
+
+        @Override
+        public int hashCode() {
+            return this.hash;
+        }
     }
 
     public void start() {
@@ -201,7 +250,9 @@ public class OnlineAccountsManager {
         for (PrivateKeyAccount onlineAccount : onlineAccounts) {
             // Check mintingAccount is actually reward-share?
 
-            byte[] signature = Qortal25519Extras.signForAggregation(onlineAccount.getPrivateKey(), timestampBytes);
+            byte[] signature = isSignatureV2Active(onlineAccountsTimestamp)
+                    ? Qortal25519Extras.sign(onlineAccount.getPrivateKey(), timestampBytes)
+                    : Qortal25519Extras.signForAggregation(onlineAccount.getPrivateKey(), timestampBytes);
             byte[] publicKey = onlineAccount.getPublicKey();
 
             Integer nonce = new Random().nextInt(500000);
@@ -348,7 +399,9 @@ public class OnlineAccountsManager {
 
         // Verify signature
         byte[] data = Longs.toByteArray(onlineAccountData.getTimestamp());
-        boolean isSignatureValid = Qortal25519Extras.verifyAggregated(rewardSharePublicKey, onlineAccountData.getSignature(), data);
+        boolean isSignatureValid = isSignatureV2Active(onlineAccountTimestamp)
+                ? getInstance().verifyOrCacheV2OnlineAccountSignature(rewardSharePublicKey, onlineAccountData.getSignature(), onlineAccountTimestamp)
+                : Qortal25519Extras.verifyAggregated(rewardSharePublicKey, onlineAccountData.getSignature(), data);
         if (!isSignatureValid) {
             LOGGER.trace(() -> String.format("Rejecting invalid online account %s", Base58.encode(rewardSharePublicKey)));
             return false;
@@ -379,6 +432,34 @@ public class OnlineAccountsManager {
             LOGGER.trace(() -> String.format("Rejecting online reward-share for account %s due to invalid PoW nonce", mintingAccount.getAddress()));
             return false;
         }
+
+        return true;
+    }
+
+    /**
+     * Verifies a secure V2 online-account signature, caching only exact successful verifications.
+     * <p>
+     * The cache key intentionally includes public key and signature, with timestamp as the outer key,
+     * so cached validity cannot be reused for a different signer, timestamp or signature.
+     */
+    public boolean verifyOrCacheV2OnlineAccountSignature(byte[] publicKey, byte[] signature, long onlineAccountTimestamp) {
+        if (publicKey == null || publicKey.length != Transformer.PUBLIC_KEY_LENGTH
+                || signature == null || signature.length != Transformer.SIGNATURE_LENGTH)
+            return false;
+
+        VerifiedOnlineSignature verifiedSignature = new VerifiedOnlineSignature(publicKey, signature);
+        Set<VerifiedOnlineSignature> signaturesForTimestamp = this.verifiedOnlineAccountSignatures.get(onlineAccountTimestamp);
+
+        if (signaturesForTimestamp != null && signaturesForTimestamp.contains(verifiedSignature))
+            return true;
+
+        byte[] timestampBytes = Longs.toByteArray(onlineAccountTimestamp);
+        if (!Qortal25519Extras.verify(publicKey, signature, timestampBytes))
+            return false;
+
+        this.verifiedOnlineAccountSignatures.computeIfAbsent(onlineAccountTimestamp, k -> ConcurrentHashMap.newKeySet())
+                .add(verifiedSignature);
+        trimVerifiedOnlineAccountSignatures(onlineAccountTimestamp);
 
         return true;
     }
@@ -464,6 +545,20 @@ public class OnlineAccountsManager {
         final long cutoffThreshold = now - MAX_CACHED_TIMESTAMP_SETS * getOnlineTimestampModulus();
         this.currentOnlineAccounts.keySet().removeIf(timestamp -> timestamp < cutoffThreshold);
         this.currentOnlineAccountsHashes.keySet().removeIf(timestamp -> timestamp < cutoffThreshold);
+
+        final long signatureCutoffThreshold = now - MAX_CACHED_SIGNATURE_TIMESTAMP_SETS * getOnlineTimestampModulus();
+        this.verifiedOnlineAccountSignatures.keySet().removeIf(timestamp -> timestamp < signatureCutoffThreshold);
+        trimVerifiedOnlineAccountSignatures(null);
+    }
+
+    private void trimVerifiedOnlineAccountSignatures(Long timestampToKeep) {
+        while (this.verifiedOnlineAccountSignatures.size() > MAX_CACHED_SIGNATURE_TIMESTAMP_SETS) {
+            Long firstKey = this.verifiedOnlineAccountSignatures.firstKey();
+            if (!firstKey.equals(timestampToKeep))
+                this.verifiedOnlineAccountSignatures.remove(firstKey);
+            else
+                this.verifiedOnlineAccountSignatures.remove(this.verifiedOnlineAccountSignatures.lastKey());
+        }
     }
 
     /**
@@ -616,7 +711,9 @@ public class OnlineAccountsManager {
                     return false;
                 }
 
-                byte[] signature = Qortal25519Extras.signForAggregation(privateKey, timestampBytes);
+                byte[] signature = isSignatureV2Active(onlineAccountsTimestamp)
+                        ? Qortal25519Extras.sign(privateKey, timestampBytes)
+                        : Qortal25519Extras.signForAggregation(privateKey, timestampBytes);
 
                 // Our account is online
                 OnlineAccountData ourOnlineAccountData = new OnlineAccountData(onlineAccountsTimestamp, signature, publicKey, nonce);
@@ -828,6 +925,7 @@ public class OnlineAccountsManager {
     public void removeAllOnlineAccounts() {
         LOGGER.warn("removeAllOnlineAccounts() called - clearing current online accounts cache", new IllegalStateException("removeAllOnlineAccounts caller trace"));
         this.currentOnlineAccounts.clear();
+        this.verifiedOnlineAccountSignatures.clear();
     }
 
 

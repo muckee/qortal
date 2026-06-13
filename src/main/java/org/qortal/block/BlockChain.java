@@ -242,6 +242,11 @@ public class BlockChain {
 	 * featureTriggers because unit tests need to set this value via Reflection. */
 	private long onlineAccountsModulusV3Timestamp;
 
+	/** Feature trigger timestamp for switching online-account signatures from the forgeable custom
+	 * aggregate scheme to per-account standard Ed25519 signatures (challenge bound to R and A).
+	 * Can't use featureTriggers because unit tests need to set this value via Reflection. */
+	private long onlineAccountsSignatureV2Timestamp;
+
 	/** Snapshot timestamp for self sponsorship algo V1 */
 	private long selfSponsorshipAlgoV1SnapshotTimestamp;
 
@@ -434,6 +439,10 @@ public class BlockChain {
 
 	public long getOnlineAccountsModulusV3Timestamp() {
 		return this.onlineAccountsModulusV3Timestamp;
+	}
+
+	public long getOnlineAccountsSignatureV2Timestamp() {
+		return this.onlineAccountsSignatureV2Timestamp;
 	}
 
 	/* Block reward batching */

@@ -17,6 +17,7 @@
 	"founderEffectiveMintingLevel": 10,
 	"onlineAccountSignaturesMinLifetime": 3600000,
 	"onlineAccountSignaturesMaxLifetime": 86400000,
+	"onlineAccountsSignatureV2Timestamp": 9999999999999,
 	"selfSponsorshipAlgoV1SnapshotTimestamp": 9999999999999,
 	"selfSponsorshipAlgoV2SnapshotTimestamp": 9999999999999,
 	"selfSponsorshipAlgoV3SnapshotTimestamp": 9999999999999,
