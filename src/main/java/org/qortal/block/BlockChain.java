@@ -96,6 +96,7 @@ public class BlockChain {
 		multipleNamesPerAccountHeight,
 		mintedBlocksAdjustmentRemovalHeight,
 		atValidateHeight,
+		onlineAccountsSignatureV2Timestamp,
 		assetOrderBoundsHeight
 	}
 
@@ -242,11 +243,6 @@ public class BlockChain {
 	 * featureTriggers because unit tests need to set this value via Reflection. */
 	private long onlineAccountsModulusV3Timestamp;
 
-	/** Feature trigger timestamp for switching online-account signatures from the forgeable custom
-	 * aggregate scheme to per-account standard Ed25519 signatures (challenge bound to R and A).
-	 * Can't use featureTriggers because unit tests need to set this value via Reflection. */
-	private long onlineAccountsSignatureV2Timestamp;
-
 	/** Snapshot timestamp for self sponsorship algo V1 */
 	private long selfSponsorshipAlgoV1SnapshotTimestamp;
 
@@ -362,6 +358,7 @@ public class BlockChain {
         // Load in the default feature triggers
 		defaultFeatureTriggerHeight.put(FeatureTrigger.multipleNamesPerAccountHeight, 2206300L);
 		defaultFeatureTriggerHeight.put(FeatureTrigger.mintedBlocksAdjustmentRemovalHeight, 2206300L);
+		defaultFeatureTriggerHeight.put(FeatureTrigger.onlineAccountsSignatureV2Timestamp, 9999999999999L);
 		defaultFeatureTriggerHeight.put(FeatureTrigger.assetOrderBoundsHeight, 9999999999999L);
 
 		try  {
@@ -442,7 +439,7 @@ public class BlockChain {
 	}
 
 	public long getOnlineAccountsSignatureV2Timestamp() {
-		return this.onlineAccountsSignatureV2Timestamp;
+		return this.featureTriggers.get(FeatureTrigger.onlineAccountsSignatureV2Timestamp.name()).longValue();
 	}
 
 	/* Block reward batching */

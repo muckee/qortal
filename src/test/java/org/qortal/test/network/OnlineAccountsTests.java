@@ -34,6 +34,7 @@ import java.security.SecureRandom;
 import java.security.Security;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import static org.junit.Assert.assertEquals;
@@ -99,27 +100,31 @@ public class OnlineAccountsTests extends Common {
     public void testOnlineAccountsSignatureV2() throws IllegalAccessException, DataException {
         try (final Repository repository = RepositoryManager.getRepository()) {
             // Activate the secure per-account Ed25519 signature scheme (C-01 fix) immediately
-            FieldUtils.writeField(BlockChain.getInstance(), "onlineAccountsSignatureV2Timestamp", 0L, true);
+            long originalOnlineAccountsSignatureV2Timestamp = setOnlineAccountsSignatureV2Timestamp(0L);
 
-            PrivateKeyAccount[] onlineAccounts = new PrivateKeyAccount[] {
-                    Common.getTestAccount(repository, "alice-reward-share"),
-                    Common.getTestAccount(repository, "bob-reward-share"),
-                    Common.getTestAccount(repository, "chloe-reward-share"),
-                    Common.getTestAccount(repository, "dilbert-reward-share")
-            };
+            try {
+                PrivateKeyAccount[] onlineAccounts = new PrivateKeyAccount[] {
+                        Common.getTestAccount(repository, "alice-reward-share"),
+                        Common.getTestAccount(repository, "bob-reward-share"),
+                        Common.getTestAccount(repository, "chloe-reward-share"),
+                        Common.getTestAccount(repository, "dilbert-reward-share")
+                };
 
-            // Minting fully re-validates online accounts via Block.areOnlineAccountsValid(), which now
-            // verifies each account's standard Ed25519 signature individually. A non-null block means
-            // the V2 verification path accepted the per-account signatures.
-            Block block = BlockMinter.mintTestingBlock(repository, onlineAccounts);
-            assertTrue("V2 block should have minted and validated", block != null);
+                // Minting fully re-validates online accounts via Block.areOnlineAccountsValid(), which now
+                // verifies each account's standard Ed25519 signature individually. A non-null block means
+                // the V2 verification path accepted the per-account signatures.
+                Block block = BlockMinter.mintTestingBlock(repository, onlineAccounts);
+                assertTrue("V2 block should have minted and validated", block != null);
 
-            int onlineAccountsCount = block.getBlockData().getOnlineAccountsCount();
-            assertTrue("expected at least one online account", onlineAccountsCount >= 1);
+                int onlineAccountsCount = block.getBlockData().getOnlineAccountsCount();
+                assertTrue("expected at least one online account", onlineAccountsCount >= 1);
 
-            // Under the V2 scheme each online account stores its own signature, so the signature count
-            // must equal the online-accounts count (rather than the single legacy aggregate).
-            assertEquals(onlineAccountsCount, block.getBlockData().getOnlineAccountsSignaturesCount());
+                // Under the V2 scheme each online account stores its own signature, so the signature count
+                // must equal the online-accounts count (rather than the single legacy aggregate).
+                assertEquals(onlineAccountsCount, block.getBlockData().getOnlineAccountsSignaturesCount());
+            } finally {
+                setOnlineAccountsSignatureV2Timestamp(originalOnlineAccountsSignatureV2Timestamp);
+            }
         }
     }
 
@@ -143,26 +148,30 @@ public class OnlineAccountsTests extends Common {
     public void testOnlineAccountsSignatureV2RejectsTamperedBlockSignature() throws IllegalAccessException, DataException {
         try (final Repository repository = RepositoryManager.getRepository()) {
             // Activate the secure per-account Ed25519 signature scheme (C-01 fix) immediately
-            FieldUtils.writeField(BlockChain.getInstance(), "onlineAccountsSignatureV2Timestamp", 0L, true);
+            long originalOnlineAccountsSignatureV2Timestamp = setOnlineAccountsSignatureV2Timestamp(0L);
 
-            PrivateKeyAccount[] onlineAccounts = new PrivateKeyAccount[] {
-                    Common.getTestAccount(repository, "alice-reward-share"),
-                    Common.getTestAccount(repository, "bob-reward-share"),
-                    Common.getTestAccount(repository, "chloe-reward-share"),
-                    Common.getTestAccount(repository, "dilbert-reward-share")
-            };
+            try {
+                PrivateKeyAccount[] onlineAccounts = new PrivateKeyAccount[] {
+                        Common.getTestAccount(repository, "alice-reward-share"),
+                        Common.getTestAccount(repository, "bob-reward-share"),
+                        Common.getTestAccount(repository, "chloe-reward-share"),
+                        Common.getTestAccount(repository, "dilbert-reward-share")
+                };
 
-            Block block = BlockMinter.mintTestingBlock(repository, onlineAccounts);
-            assertTrue("V2 block should have minted and validated", block != null);
+                Block block = BlockMinter.mintTestingBlock(repository, onlineAccounts);
+                assertTrue("V2 block should have minted and validated", block != null);
 
-            byte[] tamperedSignatures = block.getBlockData().getOnlineAccountsSignatures().clone();
-            tamperedSignatures[0] ^= 0x01;
+                byte[] tamperedSignatures = block.getBlockData().getOnlineAccountsSignatures().clone();
+                tamperedSignatures[0] ^= 0x01;
 
-            BlockData tamperedBlockData = new BlockData(block.getBlockData());
-            tamperedBlockData.setOnlineAccountsSignatures(tamperedSignatures);
+                BlockData tamperedBlockData = new BlockData(block.getBlockData());
+                tamperedBlockData.setOnlineAccountsSignatures(tamperedSignatures);
 
-            Block tamperedBlock = new Block(repository, tamperedBlockData);
-            assertEquals(Block.ValidationResult.ONLINE_ACCOUNT_SIGNATURE_INCORRECT, tamperedBlock.areOnlineAccountsValid());
+                Block tamperedBlock = new Block(repository, tamperedBlockData);
+                assertEquals(Block.ValidationResult.ONLINE_ACCOUNT_SIGNATURE_INCORRECT, tamperedBlock.areOnlineAccountsValid());
+            } finally {
+                setOnlineAccountsSignatureV2Timestamp(originalOnlineAccountsSignatureV2Timestamp);
+            }
         }
     }
 
@@ -185,6 +194,15 @@ public class OnlineAccountsTests extends Common {
         tamperedSignature[0] ^= 0x01;
 
         assertFalse(OnlineAccountsManager.getInstance().verifyOrCacheV2OnlineAccountSignature(publicKey, tamperedSignature, onlineAccountsTimestamp));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static long setOnlineAccountsSignatureV2Timestamp(long timestamp) throws IllegalAccessException {
+        Map<String, Long> featureTriggers = (Map<String, Long>) FieldUtils.readField(BlockChain.getInstance(), "featureTriggers", true);
+        String featureTrigger = BlockChain.FeatureTrigger.onlineAccountsSignatureV2Timestamp.name();
+        long previousTimestamp = featureTriggers.get(featureTrigger);
+        featureTriggers.put(featureTrigger, timestamp);
+        return previousTimestamp;
     }
 
     @Test

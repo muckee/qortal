@@ -30,7 +30,6 @@
 	"onlineAccountSignaturesMaxLifetime": 86400000,
 	"onlineAccountsModulusV2Timestamp": 1659801600000,
 	"onlineAccountsModulusV3Timestamp": 1731961800000,
-	"onlineAccountsSignatureV2Timestamp": 9999999999999,
 	"selfSponsorshipAlgoV1SnapshotTimestamp": 1670230000000,
 	"selfSponsorshipAlgoV2SnapshotTimestamp": 1708360200000,
 	"selfSponsorshipAlgoV3SnapshotTimestamp": 1708432200000,
@@ -124,6 +123,7 @@
 		"multipleNamesPerAccountHeight": 2206300,
 		"mintedBlocksAdjustmentRemovalHeight": 2206300,
 		"atValidateHeight": 2521500,
+		"onlineAccountsSignatureV2Timestamp": 9999999999999,
 		"assetOrderBoundsHeight": 9999999999999
 	},
 	"checkpoints": [
