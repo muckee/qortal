@@ -18,6 +18,7 @@ import org.qortal.controller.OnlineAccountsManager;
 import org.qortal.crypto.Qortal25519Extras;
 import org.qortal.data.block.BlockData;
 import org.qortal.data.network.OnlineAccountData;
+import org.qortal.network.message.OnlineAccountsV3Message;
 import org.qortal.repository.DataException;
 import org.qortal.repository.Repository;
 import org.qortal.repository.RepositoryManager;
@@ -33,10 +34,15 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -100,7 +106,7 @@ public class OnlineAccountsTests extends Common {
     public void testOnlineAccountsSignatureV2() throws IllegalAccessException, DataException {
         try (final Repository repository = RepositoryManager.getRepository()) {
             // Activate the secure per-account Ed25519 signature scheme (C-01 fix) immediately
-            long originalOnlineAccountsSignatureV2Timestamp = setOnlineAccountsSignatureV2Timestamp(0L);
+            long originalOnlineAccountsSignatureV2Height = setOnlineAccountsSignatureV2Height(0L);
 
             try {
                 PrivateKeyAccount[] onlineAccounts = new PrivateKeyAccount[] {
@@ -123,7 +129,7 @@ public class OnlineAccountsTests extends Common {
                 // must equal the online-accounts count (rather than the single legacy aggregate).
                 assertEquals(onlineAccountsCount, block.getBlockData().getOnlineAccountsSignaturesCount());
             } finally {
-                setOnlineAccountsSignatureV2Timestamp(originalOnlineAccountsSignatureV2Timestamp);
+                setOnlineAccountsSignatureV2Height(originalOnlineAccountsSignatureV2Height);
             }
         }
     }
@@ -148,7 +154,7 @@ public class OnlineAccountsTests extends Common {
     public void testOnlineAccountsSignatureV2RejectsTamperedBlockSignature() throws IllegalAccessException, DataException {
         try (final Repository repository = RepositoryManager.getRepository()) {
             // Activate the secure per-account Ed25519 signature scheme (C-01 fix) immediately
-            long originalOnlineAccountsSignatureV2Timestamp = setOnlineAccountsSignatureV2Timestamp(0L);
+            long originalOnlineAccountsSignatureV2Height = setOnlineAccountsSignatureV2Height(0L);
 
             try {
                 PrivateKeyAccount[] onlineAccounts = new PrivateKeyAccount[] {
@@ -170,7 +176,7 @@ public class OnlineAccountsTests extends Common {
                 Block tamperedBlock = new Block(repository, tamperedBlockData);
                 assertEquals(Block.ValidationResult.ONLINE_ACCOUNT_SIGNATURE_INCORRECT, tamperedBlock.areOnlineAccountsValid());
             } finally {
-                setOnlineAccountsSignatureV2Timestamp(originalOnlineAccountsSignatureV2Timestamp);
+                setOnlineAccountsSignatureV2Height(originalOnlineAccountsSignatureV2Height);
             }
         }
     }
@@ -196,13 +202,111 @@ public class OnlineAccountsTests extends Common {
         assertFalse(OnlineAccountsManager.getInstance().verifyOrCacheV2OnlineAccountSignature(publicKey, tamperedSignature, onlineAccountsTimestamp));
     }
 
+    @Test
+    public void testOnlineAccountsSignatureV2HeightFiltersLegacyCachedAccount() throws IllegalAccessException, DataException {
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            int nextBlockHeight = repository.getBlockRepository().getBlockchainHeight() + 1;
+            long originalOnlineAccountsSignatureV2Height = setOnlineAccountsSignatureV2Height(nextBlockHeight);
+
+            try {
+                clearOnlineAccountCaches();
+
+                PrivateKeyAccount account = Common.getTestAccount(repository, "alice-reward-share");
+                long onlineAccountsTimestamp = OnlineAccountsManager.getCurrentOnlineAccountTimestamp();
+                byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
+                int nonce = 12345;
+
+                byte[] legacySignature = Qortal25519Extras.signForAggregation(account.getPrivateKey(), timestampBytes);
+                byte[] v2Signature = Qortal25519Extras.sign(account.getPrivateKey(), timestampBytes);
+
+                OnlineAccountData legacyAccount = new OnlineAccountData(onlineAccountsTimestamp, legacySignature, account.getPublicKey(), nonce);
+                OnlineAccountData v2Account = new OnlineAccountData(onlineAccountsTimestamp, v2Signature, account.getPublicKey(), nonce);
+
+                Map<Long, Set<OnlineAccountData>> currentOnlineAccounts = getCurrentOnlineAccounts();
+                currentOnlineAccounts.computeIfAbsent(onlineAccountsTimestamp, ignored -> ConcurrentHashMap.newKeySet()).add(legacyAccount);
+
+                assertTrue("legacy online account should not be usable for V2 block height",
+                        OnlineAccountsManager.getInstance().getOnlineAccounts(onlineAccountsTimestamp, nextBlockHeight).isEmpty());
+
+                currentOnlineAccounts.get(onlineAccountsTimestamp).clear();
+                currentOnlineAccounts.get(onlineAccountsTimestamp).add(v2Account);
+
+                List<OnlineAccountData> onlineAccounts = OnlineAccountsManager.getInstance().getOnlineAccounts(onlineAccountsTimestamp, nextBlockHeight);
+                assertEquals(1, onlineAccounts.size());
+                assertArrayEquals(v2Signature, onlineAccounts.get(0).getSignature());
+            } finally {
+                clearOnlineAccountCaches();
+                setOnlineAccountsSignatureV2Height(originalOnlineAccountsSignatureV2Height);
+            }
+        }
+    }
+
+    @Test
+    public void testOnlineAccountsSignatureV2HeightReplacesLegacyQueuedAccount() throws IllegalAccessException, DataException {
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            int nextBlockHeight = repository.getBlockRepository().getBlockchainHeight() + 1;
+            long originalOnlineAccountsSignatureV2Height = setOnlineAccountsSignatureV2Height(nextBlockHeight);
+
+            try {
+                clearOnlineAccountCaches();
+
+                PrivateKeyAccount account = Common.getTestAccount(repository, "alice-reward-share");
+                long onlineAccountsTimestamp = OnlineAccountsManager.getCurrentOnlineAccountTimestamp();
+                byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
+                int nonce = 12345;
+
+                byte[] legacySignature = Qortal25519Extras.signForAggregation(account.getPrivateKey(), timestampBytes);
+                byte[] v2Signature = Qortal25519Extras.sign(account.getPrivateKey(), timestampBytes);
+
+                OnlineAccountData legacyAccount = new OnlineAccountData(onlineAccountsTimestamp, legacySignature, account.getPublicKey(), nonce);
+                OnlineAccountData v2Account = new OnlineAccountData(onlineAccountsTimestamp, v2Signature, account.getPublicKey(), nonce);
+
+                Set<OnlineAccountData> onlineAccountsImportQueue = getOnlineAccountsImportQueue();
+                onlineAccountsImportQueue.add(legacyAccount);
+
+                OnlineAccountsV3Message onlineAccountsMessage = new OnlineAccountsV3Message(Collections.singletonList(v2Account));
+                FieldUtils.writeField(onlineAccountsMessage, "onlineAccounts", Collections.singletonList(v2Account), true);
+
+                OnlineAccountsManager.getInstance().onNetworkOnlineAccountsV3Message(null, onlineAccountsMessage);
+
+                assertEquals(1, onlineAccountsImportQueue.size());
+                OnlineAccountData queuedAccount = onlineAccountsImportQueue.iterator().next();
+                assertTrue(Arrays.equals(account.getPublicKey(), queuedAccount.getPublicKey()));
+                assertArrayEquals(v2Signature, queuedAccount.getSignature());
+            } finally {
+                clearOnlineAccountCaches();
+                setOnlineAccountsSignatureV2Height(originalOnlineAccountsSignatureV2Height);
+            }
+        }
+    }
+
     @SuppressWarnings("unchecked")
-    private static long setOnlineAccountsSignatureV2Timestamp(long timestamp) throws IllegalAccessException {
+    private static long setOnlineAccountsSignatureV2Height(long height) throws IllegalAccessException {
         Map<String, Long> featureTriggers = (Map<String, Long>) FieldUtils.readField(BlockChain.getInstance(), "featureTriggers", true);
-        String featureTrigger = BlockChain.FeatureTrigger.onlineAccountsSignatureV2Timestamp.name();
-        long previousTimestamp = featureTriggers.get(featureTrigger);
-        featureTriggers.put(featureTrigger, timestamp);
-        return previousTimestamp;
+        String featureTrigger = BlockChain.FeatureTrigger.onlineAccountsSignatureV2Height.name();
+        long previousHeight = featureTriggers.get(featureTrigger);
+        featureTriggers.put(featureTrigger, height);
+        return previousHeight;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<Long, Set<OnlineAccountData>> getCurrentOnlineAccounts() throws IllegalAccessException {
+        return (Map<Long, Set<OnlineAccountData>>) FieldUtils.readField(OnlineAccountsManager.getInstance(), "currentOnlineAccounts", true);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<OnlineAccountData> getOnlineAccountsImportQueue() throws IllegalAccessException {
+        return (Set<OnlineAccountData>) FieldUtils.readField(OnlineAccountsManager.getInstance(), "onlineAccountsImportQueue", true);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void clearOnlineAccountCaches() throws IllegalAccessException {
+        getCurrentOnlineAccounts().clear();
+        getOnlineAccountsImportQueue().clear();
+
+        Map<Long, Map<Byte, byte[]>> currentOnlineAccountsHashes =
+                (Map<Long, Map<Byte, byte[]>>) FieldUtils.readField(OnlineAccountsManager.getInstance(), "currentOnlineAccountsHashes", true);
+        currentOnlineAccountsHashes.clear();
     }
 
     @Test

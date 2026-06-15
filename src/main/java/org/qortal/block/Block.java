@@ -419,8 +419,8 @@ public class Block {
 		else if (isOnlineAccountsBlock(height)) {
 			// Standard online accounts block - add online accounts in regular way
 
-			// Fetch our list of online accounts, removing any that are missing a nonce
-			List<OnlineAccountData> onlineAccounts = OnlineAccountsManager.getInstance().getOnlineAccounts(onlineAccountsTimestamp);
+			// Fetch accounts with signatures valid for this block height, then remove any missing a nonce.
+			List<OnlineAccountData> onlineAccounts = OnlineAccountsManager.getInstance().getOnlineAccounts(onlineAccountsTimestamp, height);
 			onlineAccounts.removeIf(a -> a.getNonce() == null || a.getNonce() < 0);
 
 			// After feature trigger, remove any online accounts that are level 0
@@ -457,7 +457,10 @@ public class Block {
 				if (Settings.getInstance().isSingleNodeTestnet()) {
 					Integer nonce = new Random().nextInt(500000);
 					byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
-					byte[] signature = Qortal25519Extras.signForAggregation(minter.getPrivateKey(), timestampBytes);
+					// Even single-node fallback blocks must use the signature scheme active at this height.
+					byte[] signature = OnlineAccountsManager.isSignatureV2Active(height)
+							? Qortal25519Extras.sign(minter.getPrivateKey(), timestampBytes)
+							: Qortal25519Extras.signForAggregation(minter.getPrivateKey(), timestampBytes);
 					byte[] publicKey = minter.getPublicKey();
 					OnlineAccountData me = new OnlineAccountData(
 							NTP.getTime(),
@@ -495,9 +498,9 @@ public class Block {
 			encodedOnlineAccounts = BlockTransformer.encodeOnlineAccounts(onlineAccountsSet);
 			onlineAccountsCount = onlineAccountsSet.size();
 
-			// After the signature V2 feature trigger we store each account's signature individually
+			// After the signature V2 height we store each account's signature individually
 			// (secure per-account Ed25519), otherwise the legacy forgeable aggregate single signature.
-			boolean signatureV2 = OnlineAccountsManager.isSignatureV2Active(onlineAccountsTimestamp);
+			boolean signatureV2 = OnlineAccountsManager.isSignatureV2Active(height);
 
 			// Build ordered lists of signatures and nonces, in account-index order, so that block
 			// validation can pair each signature/nonce with the correct reward-share public key.
@@ -1227,9 +1230,9 @@ public class Block {
 		long onlineTimestamp = this.blockData.getOnlineAccountsTimestamp();
 		byte[] onlineTimestampBytes = Longs.toByteArray(onlineTimestamp);
 
-		// After the signature V2 feature trigger, each online account carries its own standard Ed25519
+		// After the signature V2 height, each online account carries its own standard Ed25519
 		// signature; before it, a single legacy aggregate signature covers the whole set.
-		boolean signatureV2 = OnlineAccountsManager.isSignatureV2Active(onlineTimestamp);
+		boolean signatureV2 = OnlineAccountsManager.isSignatureV2Active(this.blockData.getHeight());
 
 		final int signaturesLength = signatureV2
 				? onlineRewardShares.size() * Transformer.SIGNATURE_LENGTH

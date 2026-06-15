@@ -123,7 +123,7 @@
 		"multipleNamesPerAccountHeight": 2206300,
 		"mintedBlocksAdjustmentRemovalHeight": 2206300,
 		"atValidateHeight": 2521500,
-		"onlineAccountsSignatureV2Timestamp": 2614375,
+		"onlineAccountsSignatureV2Height": 2614375,
 		"assetOrderBoundsHeight": 2614375
 	},
 	"checkpoints": [

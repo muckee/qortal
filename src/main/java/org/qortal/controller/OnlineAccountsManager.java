@@ -142,13 +142,12 @@ public class OnlineAccountsManager {
     }
 
     /**
-     * Returns whether online-account signatures for the given online-account timestamp must use the
+     * Returns whether online-account signatures for the given block height must use the
      * secure per-account Ed25519 scheme (challenge bound to R and A) rather than the legacy, forgeable
-     * custom aggregate scheme. Keyed off the deterministic online-account timestamp so producers and
-     * validators agree across the hard-fork boundary.
+     * custom aggregate scheme.
      */
-    public static boolean isSignatureV2Active(long onlineAccountTimestamp) {
-        return onlineAccountTimestamp >= BlockChain.getInstance().getOnlineAccountsSignatureV2Timestamp();
+    public static boolean isSignatureV2Active(int blockHeight) {
+        return blockHeight >= BlockChain.getInstance().getOnlineAccountsSignatureV2Height();
     }
 
     private static int getPoWBufferSize() {
@@ -244,21 +243,28 @@ public class OnlineAccountsManager {
         if (onlineAccountsTimestamp == null)
             return;
 
-        byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
-
         Set<OnlineAccountData> replacementAccounts = new HashSet<>();
-        for (PrivateKeyAccount onlineAccount : onlineAccounts) {
-            // Check mintingAccount is actually reward-share?
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            // Online-account announcements are prepared for the next block we expect to mint/validate.
+            int nextBlockHeight = repository.getBlockRepository().getBlockchainHeight() + 1;
+            byte[] timestampBytes = Longs.toByteArray(onlineAccountsTimestamp);
 
-            byte[] signature = isSignatureV2Active(onlineAccountsTimestamp)
-                    ? Qortal25519Extras.sign(onlineAccount.getPrivateKey(), timestampBytes)
-                    : Qortal25519Extras.signForAggregation(onlineAccount.getPrivateKey(), timestampBytes);
-            byte[] publicKey = onlineAccount.getPublicKey();
+            for (PrivateKeyAccount onlineAccount : onlineAccounts) {
+                // Check mintingAccount is actually reward-share?
 
-            Integer nonce = new Random().nextInt(500000);
+                byte[] signature = isSignatureV2Active(nextBlockHeight)
+                        ? Qortal25519Extras.sign(onlineAccount.getPrivateKey(), timestampBytes)
+                        : Qortal25519Extras.signForAggregation(onlineAccount.getPrivateKey(), timestampBytes);
+                byte[] publicKey = onlineAccount.getPublicKey();
 
-            OnlineAccountData ourOnlineAccountData = new OnlineAccountData(onlineAccountsTimestamp, signature, publicKey, nonce);
-            replacementAccounts.add(ourOnlineAccountData);
+                Integer nonce = new Random().nextInt(500000);
+
+                OnlineAccountData ourOnlineAccountData = new OnlineAccountData(onlineAccountsTimestamp, signature, publicKey, nonce);
+                replacementAccounts.add(ourOnlineAccountData);
+            }
+        } catch (DataException e) {
+            LOGGER.warn(String.format("Repository issue trying to prepare testing online accounts: %s", e.getMessage()));
+            return;
         }
 
         this.currentOnlineAccounts.clear();
@@ -279,28 +285,34 @@ public class OnlineAccountsManager {
         try (final Repository repository = RepositoryManager.getRepository()) {
 
             int blockHeight = repository.getBlockRepository().getBlockchainHeight();
+            // Imported online accounts are candidates for the next block, so validate against that height.
+            int nextBlockHeight = blockHeight + 1;
 
             List<String> mintingGroupMemberAddresses
                 = Groups.getAllMembers(
                     repository.getGroupRepository(),
-                    Groups.getGroupIdsToMint(BlockChain.getInstance(), blockHeight)
+                    Groups.getGroupIdsToMint(BlockChain.getInstance(), nextBlockHeight)
             );
 
             for (OnlineAccountData onlineAccountData : this.onlineAccountsImportQueue) {
                 if (isStopping)
                     return;
 
-                // Skip this account if it's already validated
+                // Skip only if the cached entry is valid for the signature scheme active at the next block.
                 Set<OnlineAccountData> onlineAccounts = this.currentOnlineAccounts.get(onlineAccountData.getTimestamp());
-                if (onlineAccounts != null && onlineAccounts.contains(onlineAccountData)) {
+                if (onlineAccounts != null && onlineAccounts.contains(onlineAccountData)
+                        && onlineAccounts.stream().anyMatch(existingAccount -> existingAccount.equals(onlineAccountData) && isSignatureValidForHeight(existingAccount, nextBlockHeight))) {
                     // We have already validated this online account
                     onlineAccountsImportQueue.remove(onlineAccountData);
                     continue;
                 }
 
-                boolean isValid = this.isValidCurrentAccount(repository, mintingGroupMemberAddresses, onlineAccountData);
-                if (isValid)
+                boolean isValid = this.isValidCurrentAccount(repository, mintingGroupMemberAddresses, onlineAccountData, nextBlockHeight);
+                if (isValid) {
+                    // OnlineAccountData equality ignores signatures, so remove stale legacy/V2 variants first.
+                    removeCurrentOnlineAccount(onlineAccountData);
                     onlineAccountsToAdd.add(onlineAccountData);
+                }
 
                 // Don't remove from the queue yet - we'll do this at the end of the process
                 // This prevents duplicates being added to the queue whilst it's being processed
@@ -377,7 +389,7 @@ public class OnlineAccountsManager {
         return inplaceArray;
     }
 
-    private static boolean isValidCurrentAccount(Repository repository, List<String> mintingGroupMemberAddresses, OnlineAccountData onlineAccountData) throws DataException {
+    private static boolean isValidCurrentAccount(Repository repository, List<String> mintingGroupMemberAddresses, OnlineAccountData onlineAccountData, int blockHeight) throws DataException {
         final Long now = NTP.getTime();
         if (now == null)
             return false;
@@ -398,10 +410,7 @@ public class OnlineAccountsManager {
         }
 
         // Verify signature
-        byte[] data = Longs.toByteArray(onlineAccountData.getTimestamp());
-        boolean isSignatureValid = isSignatureV2Active(onlineAccountTimestamp)
-                ? getInstance().verifyOrCacheV2OnlineAccountSignature(rewardSharePublicKey, onlineAccountData.getSignature(), onlineAccountTimestamp)
-                : Qortal25519Extras.verifyAggregated(rewardSharePublicKey, onlineAccountData.getSignature(), data);
+        boolean isSignatureValid = isSignatureValidForHeight(onlineAccountData, blockHeight);
         if (!isSignatureValid) {
             LOGGER.trace(() -> String.format("Rejecting invalid online account %s", Base58.encode(rewardSharePublicKey)));
             return false;
@@ -534,6 +543,23 @@ public class OnlineAccountsManager {
         return isNewEntry;
     }
 
+    private void removeCurrentOnlineAccount(OnlineAccountData onlineAccountData) {
+        Set<OnlineAccountData> onlineAccounts = this.currentOnlineAccounts.get(onlineAccountData.getTimestamp());
+        if (onlineAccounts == null)
+            return;
+
+        onlineAccounts.removeIf(account -> Arrays.equals(account.getPublicKey(), onlineAccountData.getPublicKey()));
+    }
+
+    private static boolean isSignatureValidForHeight(OnlineAccountData onlineAccountData, int blockHeight) {
+        byte[] data = Longs.toByteArray(onlineAccountData.getTimestamp());
+
+        // The same timestamp/pubkey/nonce can have either legacy or V2 signature bytes at the fork boundary.
+        return isSignatureV2Active(blockHeight)
+                ? getInstance().verifyOrCacheV2OnlineAccountSignature(onlineAccountData.getPublicKey(), onlineAccountData.getSignature(), onlineAccountData.getTimestamp())
+                : Qortal25519Extras.verifyAggregated(onlineAccountData.getPublicKey(), onlineAccountData.getSignature(), data);
+    }
+
     /**
      * Expire old entries.
      */
@@ -629,8 +655,11 @@ public class OnlineAccountsManager {
     private boolean computeOurAccountsForTimestamp(Long onlineAccountsTimestamp) {
         if (onlineAccountsTimestamp != null) {
             List<MintingAccountData> mintingAccounts;
+            int nextBlockHeight;
             try (final Repository repository = RepositoryManager.getRepository()) {
                 mintingAccounts = repository.getAccountRepository().getMintingAccounts();
+                // Locally generated online accounts are for the next block, not the current tip.
+                nextBlockHeight = repository.getBlockRepository().getBlockchainHeight() + 1;
 
                 // We have no accounts to send
                 if (mintingAccounts.isEmpty())
@@ -674,10 +703,14 @@ public class OnlineAccountsManager {
                 byte[] privateKey = mintingAccountData.getPrivateKey();
                 byte[] publicKey = Crypto.toPublicKey(privateKey);
 
-                // We don't want to compute the online account nonce and signature again if it already exists
+                // Reuse an existing entry only if its signature scheme is valid for the next block.
                 Set<OnlineAccountData> onlineAccounts = this.currentOnlineAccounts.computeIfAbsent(onlineAccountsTimestamp, k -> ConcurrentHashMap.newKeySet());
-                boolean alreadyExists = onlineAccounts.stream().anyMatch(a -> Arrays.equals(a.getPublicKey(), publicKey));
-                if (alreadyExists) {
+                OnlineAccountData existingAccount = onlineAccounts.stream()
+                        .filter(a -> Arrays.equals(a.getPublicKey(), publicKey))
+                        .findFirst()
+                        .orElse(null);
+
+                if (existingAccount != null && isSignatureValidForHeight(existingAccount, nextBlockHeight)) {
                     this.hasOurOnlineAccounts = true;
 
                     if (remaining > 0) {
@@ -711,7 +744,7 @@ public class OnlineAccountsManager {
                     return false;
                 }
 
-                byte[] signature = isSignatureV2Active(onlineAccountsTimestamp)
+                byte[] signature = isSignatureV2Active(nextBlockHeight)
                         ? Qortal25519Extras.sign(privateKey, timestampBytes)
                         : Qortal25519Extras.signForAggregation(privateKey, timestampBytes);
 
@@ -720,6 +753,8 @@ public class OnlineAccountsManager {
 
                 // Make sure to verify before adding
                 if (verifyMemoryPoW(ourOnlineAccountData, null)) {
+                    // Replace stale legacy/V2 variants with the newly generated signature.
+                    onlineAccounts.removeIf(a -> Arrays.equals(a.getPublicKey(), publicKey));
                     ourOnlineAccounts.add(ourOnlineAccountData);
                 } else {
                     LOGGER.warn("Computed nonce failed local verification for account {} timestamp {} nonce {} (difficulty {}, buffer {})",
@@ -854,6 +889,16 @@ public class OnlineAccountsManager {
         LOGGER.debug(String.format("caller's timestamp: %d, our timestamps: %s", onlineTimestamp, String.join(", ", this.currentOnlineAccounts.keySet().stream().map(l -> Long.toString(l)).collect(Collectors.joining(", ")))));
 
         return new ArrayList<>(Set.copyOf(this.currentOnlineAccounts.getOrDefault(onlineTimestamp, Collections.emptySet())));
+    }
+
+    /**
+     * Returns list of online accounts matching given timestamp and valid for the signature scheme active at block height.
+     * Used by block minting so cached legacy entries cannot leak into V2 blocks.
+     */
+    public List<OnlineAccountData> getOnlineAccounts(long onlineTimestamp, int blockHeight) {
+        return this.getOnlineAccounts(onlineTimestamp).stream()
+                .filter(onlineAccountData -> isSignatureValidForHeight(onlineAccountData, blockHeight))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -996,14 +1041,27 @@ public class OnlineAccountsManager {
         LOGGER.trace("Received {} online accounts from {}", peersOnlineAccounts.size(), peer);
 
         int importCount = 0;
+        int nextBlockHeight;
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            // Queue de-duplication has to respect the signature scheme required by the next block.
+            nextBlockHeight = repository.getBlockRepository().getBlockchainHeight() + 1;
+        } catch (DataException e) {
+            LOGGER.warn(String.format("Repository issue trying to inspect blockchain height: %s", e.getMessage()));
+            return;
+        }
 
         // Add any online accounts to the queue that aren't already present
         for (OnlineAccountData onlineAccountData : peersOnlineAccounts) {
 
             Set<OnlineAccountData> onlineAccounts = this.currentOnlineAccounts.computeIfAbsent(onlineAccountData.getTimestamp(), k -> ConcurrentHashMap.newKeySet());
-            if (onlineAccounts.contains(onlineAccountData))
+            if (onlineAccounts.contains(onlineAccountData)
+                    && onlineAccounts.stream().anyMatch(existingAccount -> existingAccount.equals(onlineAccountData) && isSignatureValidForHeight(existingAccount, nextBlockHeight)))
                 // We have already validated this online account
                 continue;
+
+            // Replace stale queued variants because OnlineAccountData equality deliberately ignores signatures.
+            this.onlineAccountsImportQueue.removeIf(existingAccount ->
+                    existingAccount.equals(onlineAccountData) && !isSignatureValidForHeight(existingAccount, nextBlockHeight));
 
             boolean isNewEntry = onlineAccountsImportQueue.add(onlineAccountData);
 
