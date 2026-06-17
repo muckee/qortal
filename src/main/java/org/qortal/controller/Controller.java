@@ -445,15 +445,6 @@ public class Controller extends Thread {
 			}
 
 
-			if( Settings.getInstance().isDbCacheEnabled() ) {
-				LOGGER.info("Starting Db Cache...");
-				HSQLDBDataCacheManager hsqldbDataCacheManager = new HSQLDBDataCacheManager();
-				hsqldbDataCacheManager.start();
-			}
-			else {
-				LOGGER.info("Db Cache Disabled");
-			}
-
 			if (Settings.getInstance().getArbitraryIndexingPriority() > 0 ) {
 				LOGGER.info("Arbitrary Indexing Starting ...");
 				ArbitraryIndexUtils.startCaching(
@@ -622,6 +613,15 @@ public class Controller extends Thread {
         if( Settings.getInstance().isWalletEnabled("ARRR")) {
             PirateChainWalletController.getInstance().start();
         }
+
+	    if( Settings.getInstance().isDbCacheEnabled() ) {
+				LOGGER.info("Starting Db Cache...");
+				HSQLDBDataCacheManager hsqldbDataCacheManager = new HSQLDBDataCacheManager();
+				hsqldbDataCacheManager.start();
+		}
+		else {
+				LOGGER.info("Db Cache Disabled");
+		}
 
 		LOGGER.info(String.format("Starting API on port %d", Settings.getInstance().getApiPort()));
 		try {
