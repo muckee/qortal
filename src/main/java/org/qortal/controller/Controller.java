@@ -107,8 +107,7 @@ public class Controller extends Thread {
 		return "jdbc:hsqldb:file:" + path + File.separator
 				+ "blockchain;create=true;hsqldb.full_log_replay=true"
 				+ ";hsqldb.cache_rows=" + cacheRows
-				+ ";hsqldb.cache_size=" + cacheSize
-				+ ";hsqldb.management.jmx=true";
+				+ ";hsqldb.cache_size=" + cacheSize;
 	}
 	private static final long NTP_PRE_SYNC_CHECK_PERIOD = 5 * 1000L; // ms
 	private static final long NTP_POST_SYNC_CHECK_PERIOD = 5 * 60 * 1000L; // ms
@@ -442,7 +441,7 @@ public class Controller extends Thread {
 			NTP.start(Settings.getInstance().getNtpServers());
 
 		LOGGER.info("Starting repository");
-		LOGGER.info("Repository URL: {}", getRepositoryUrl());
+		LOGGER.debug("Repository URL: {}", getRepositoryUrl());
 		try {
 			HSQLDBRepositoryFactory repositoryFactory = new HSQLDBRepositoryFactory(getRepositoryUrl());
 
