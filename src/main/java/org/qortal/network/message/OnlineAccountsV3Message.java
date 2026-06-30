@@ -88,25 +88,15 @@ public class OnlineAccountsV3Message extends Message {
 	}
 
 	public static Message fromByteBuffer(int id, ByteBuffer bytes) throws MessageException {
-		int accountCount = bytes.getInt();
-
-		if (accountCount < 0)
-			throw new MessageException("invalid online accounts count");
-
-		if (accountCount == 0) {
-			if (bytes.hasRemaining())
-				throw new MessageException("invalid online accounts count");
-
+		int accountCount = GroupedMessageUtils.readInitialGroupCount(bytes, "invalid online accounts count");
+		if (accountCount == 0)
 			return new OnlineAccountsV3Message(id, List.of());
-		}
 
-		// if (count * entry size) + timestamp > remaining, then invalid count
-		if ((((long) accountCount * ENTRY_SIZE) + Transformer.LONG_LENGTH) > bytes.remaining())
-			throw new MessageException("invalid online accounts count");
+		GroupedMessageUtils.validateGroupCount(accountCount, bytes, ENTRY_SIZE, "invalid online accounts count");
 
 		List<OnlineAccountData> onlineAccounts = new ArrayList<>(accountCount);
 
-		while (accountCount > 0) {
+		while (true) {
 			long timestamp = bytes.getLong();
 
 			for (int i = 0; i < accountCount; ++i) {
@@ -126,12 +116,11 @@ public class OnlineAccountsV3Message extends Message {
 				onlineAccounts.add(new OnlineAccountData(timestamp, signature, publicKey, nonce));
 			}
 
-			if (bytes.hasRemaining()) {
-				accountCount = bytes.getInt();
-			} else {
-				// we've finished
-				accountCount = 0;
-			}
+			if (!bytes.hasRemaining())
+				break;
+
+			accountCount = GroupedMessageUtils.readNextGroupCount(bytes, "invalid online accounts count");
+			GroupedMessageUtils.validateGroupCount(accountCount, bytes, ENTRY_SIZE, "invalid online accounts count");
 		}
 
 		return new OnlineAccountsV3Message(id, onlineAccounts);

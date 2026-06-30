@@ -63,6 +63,9 @@ public class AtTransactionTransformer extends TransactionTransformer {
 			if (messageLength > AtTransaction.MAX_DATA_SIZE)
 				throw new TransformationException("excessive message length " + messageLength);
 
+			if (messageLength > byteBuffer.remaining())
+				throw new TransformationException("message length exceeds remaining bytes " + messageLength);
+
 			message = new byte[messageLength];
 			byteBuffer.get(message);
 		}
