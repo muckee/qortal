@@ -38,6 +38,12 @@ public class GroupedMessageValidationTests {
 	}
 
 	@Test
+	public void testOnlineAccountsV3RejectsMalformedInitialGroup() {
+		assertRejected(bytes -> OnlineAccountsV3Message.fromByteBuffer(0, bytes), Ints.toByteArray(1));
+		assertRejected(bytes -> OnlineAccountsV3Message.fromByteBuffer(0, bytes), concat(Ints.toByteArray(1), Longs.toByteArray(1_000_000L), new byte[] { 1, 2, 3 }));
+	}
+
+	@Test
 	public void testOnlineAccountsV3TwoGroupPayloadIsAccepted() throws MessageException {
 		byte[] payload = concat(
 				buildOnlineAccountsGroup(1_000_000L, (byte) 1, (byte) 2, 111),
@@ -62,6 +68,12 @@ public class GroupedMessageValidationTests {
 	}
 
 	@Test
+	public void testTradePresencesRejectsMalformedInitialGroup() {
+		assertRejected(bytes -> TradePresencesMessage.fromByteBuffer(0, bytes), Ints.toByteArray(1));
+		assertRejected(bytes -> TradePresencesMessage.fromByteBuffer(0, bytes), concat(Ints.toByteArray(1), Longs.toByteArray(1_000_000L), new byte[] { 1, 2, 3 }));
+	}
+
+	@Test
 	public void testTradePresencesTwoGroupPayloadIsAccepted() throws MessageException {
 		byte[] payload = concat(
 				buildTradePresencesGroup(1_000_000L, (byte) 2, (byte) 3, (byte) 4),
@@ -83,6 +95,12 @@ public class GroupedMessageValidationTests {
 		assertRejected(bytes -> GetTradePresencesMessage.fromByteBuffer(0, bytes), concat(firstGroup, Ints.toByteArray(0)));
 		assertRejected(bytes -> GetTradePresencesMessage.fromByteBuffer(0, bytes), concat(firstGroup, Ints.toByteArray(Integer.MAX_VALUE)));
 		assertRejected(bytes -> GetTradePresencesMessage.fromByteBuffer(0, bytes), concat(firstGroup, new byte[] { 1, 2, 3 }));
+	}
+
+	@Test
+	public void testGetTradePresencesRejectsMalformedInitialGroup() {
+		assertRejected(bytes -> GetTradePresencesMessage.fromByteBuffer(0, bytes), Ints.toByteArray(1));
+		assertRejected(bytes -> GetTradePresencesMessage.fromByteBuffer(0, bytes), concat(Ints.toByteArray(1), Longs.toByteArray(1_000_000L), new byte[] { 1, 2, 3 }));
 	}
 
 	@Test

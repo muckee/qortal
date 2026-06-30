@@ -88,11 +88,9 @@ public class OnlineAccountsV3Message extends Message {
 	}
 
 	public static Message fromByteBuffer(int id, ByteBuffer bytes) throws MessageException {
-		int accountCount = GroupedMessageUtils.readInitialGroupCount(bytes, "invalid online accounts count");
+		int accountCount = GroupedMessageUtils.readInitialGroupCount(bytes, ENTRY_SIZE, "invalid online accounts count");
 		if (accountCount == 0)
 			return new OnlineAccountsV3Message(id, List.of());
-
-		GroupedMessageUtils.validateGroupCount(accountCount, bytes, ENTRY_SIZE, "invalid online accounts count");
 
 		List<OnlineAccountData> onlineAccounts = new ArrayList<>(accountCount);
 
@@ -119,8 +117,7 @@ public class OnlineAccountsV3Message extends Message {
 			if (!bytes.hasRemaining())
 				break;
 
-			accountCount = GroupedMessageUtils.readNextGroupCount(bytes, "invalid online accounts count");
-			GroupedMessageUtils.validateGroupCount(accountCount, bytes, ENTRY_SIZE, "invalid online accounts count");
+			accountCount = GroupedMessageUtils.readNextGroupCount(bytes, ENTRY_SIZE, "invalid online accounts count");
 		}
 
 		return new OnlineAccountsV3Message(id, onlineAccounts);

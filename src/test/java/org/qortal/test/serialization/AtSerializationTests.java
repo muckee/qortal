@@ -1,6 +1,7 @@
 package org.qortal.test.serialization;
 
 import com.google.common.hash.HashCode;
+import com.google.common.primitives.Ints;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -14,6 +15,7 @@ import org.qortal.test.common.Common;
 import org.qortal.test.common.transaction.AtTestTransaction;
 import org.qortal.transaction.AtTransaction;
 import org.qortal.transaction.Transaction;
+import org.qortal.transform.Transformer;
 import org.qortal.transform.TransformationException;
 import org.qortal.transform.transaction.TransactionTransformer;
 import org.qortal.utils.Base58;
@@ -22,6 +24,7 @@ import java.util.Random;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 public class AtSerializationTests extends Common {
 
@@ -147,6 +150,35 @@ public class AtSerializationTests extends Common {
 
             byte[] reserializedTransaction = TransactionTransformer.toBytes(deserializedTransactionData);
             assertEquals("Reserialized maximum-size MESSAGE-type AT transaction bytes differ", HashCode.fromBytes(serializedTransaction).toString(), HashCode.fromBytes(reserializedTransaction).toString());
+        }
+    }
+
+    @Test
+    public void testMessageTypeAtSerializationRejectsDeclaredLengthOverrun() throws DataException, TransformationException {
+        try (final Repository repository = RepositoryManager.getRepository()) {
+            PrivateKeyAccount signingAccount = Common.getTestAccount(repository, "alice");
+            ATTransactionData transactionData = (ATTransactionData) AtTestTransaction.messageType(repository, signingAccount, true, new byte[0]);
+            Transaction transaction = Transaction.fromData(repository, transactionData);
+            transaction.sign(signingAccount);
+
+            byte[] serializedTransaction = TransactionTransformer.toBytes(transactionData);
+            byte[] mutatedTransaction = serializedTransaction.clone();
+
+            int messageLengthOffset = Transformer.INT_LENGTH
+                    + Transformer.LONG_LENGTH
+                    + Transformer.SIGNATURE_LENGTH
+                    + Transformer.ADDRESS_LENGTH
+                    + Transformer.ADDRESS_LENGTH
+                    + Transformer.INT_LENGTH;
+
+            System.arraycopy(Ints.toByteArray(serializedTransaction.length + 1), 0, mutatedTransaction, messageLengthOffset, Transformer.INT_LENGTH);
+
+            try {
+                TransactionTransformer.fromBytes(mutatedTransaction);
+                fail("Expected oversized AT message length to be rejected");
+            } catch (TransformationException expected) {
+                // Expected
+            }
         }
     }
 

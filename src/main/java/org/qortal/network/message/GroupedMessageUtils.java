@@ -9,15 +9,20 @@ final class GroupedMessageUtils {
 	private GroupedMessageUtils() {
 	}
 
-	static int readInitialGroupCount(ByteBuffer bytes, String errorMessage) throws MessageException {
-		return readGroupCount(bytes, true, errorMessage);
+	static int readInitialGroupCount(ByteBuffer bytes, long entrySize, String errorMessage) throws MessageException {
+		int count = readGroupCount(bytes, true, errorMessage);
+		if (count > 0)
+			validateGroupCount(count, bytes, entrySize, errorMessage);
+		return count;
 	}
 
-	static int readNextGroupCount(ByteBuffer bytes, String errorMessage) throws MessageException {
-		return readGroupCount(bytes, false, errorMessage);
+	static int readNextGroupCount(ByteBuffer bytes, long entrySize, String errorMessage) throws MessageException {
+		int count = readGroupCount(bytes, false, errorMessage);
+		validateGroupCount(count, bytes, entrySize, errorMessage);
+		return count;
 	}
 
-	static void validateGroupCount(int count, ByteBuffer bytes, long entrySize, String errorMessage) throws MessageException {
+	private static void validateGroupCount(int count, ByteBuffer bytes, long entrySize, String errorMessage) throws MessageException {
 		long requiredBytes = Transformer.LONG_LENGTH + ((long) count * entrySize);
 		if (requiredBytes > bytes.remaining())
 			throw new MessageException(errorMessage);
