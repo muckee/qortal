@@ -8,6 +8,7 @@ import org.qortal.data.transaction.BaseTransactionData;
 import org.qortal.data.transaction.TransactionData;
 import org.qortal.group.Group;
 import org.qortal.transaction.Transaction;
+import org.qortal.transaction.AtTransaction;
 import org.qortal.transform.TransformationException;
 import org.qortal.utils.Serialization;
 
@@ -56,15 +57,14 @@ public class AtTransactionTransformer extends TransactionTransformer {
 		if (isMessageType) {
 			messageLength = byteBuffer.getInt();
 
-			if(messageLength > 0) {
+			if (messageLength < 0)
+				throw new TransformationException("negative message length " + messageLength);
 
-				if(messageLength > TransactionTransformer.SHA256_LENGTH) {
-					throw new TransformationException("excessive message length " + messageLength);
-				}
+			if (messageLength > AtTransaction.MAX_DATA_SIZE)
+				throw new TransformationException("excessive message length " + messageLength);
 
-				message = new byte[messageLength];
-				byteBuffer.get(message);
-			}
+			message = new byte[messageLength];
+			byteBuffer.get(message);
 		}
 		else {
 			// Assume PAYMENT-type, as there were no MESSAGE-type transactions until this time

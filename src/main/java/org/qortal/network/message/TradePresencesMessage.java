@@ -89,8 +89,18 @@ public class TradePresencesMessage extends Message {
 	public static Message fromByteBuffer(int id, ByteBuffer bytes)  throws MessageException {
 		int groupedEntriesCount = bytes.getInt();
 
-		// if negative or (count * entry size) + timestamp > remaining, then invalid count
-		if (groupedEntriesCount < 0 || (((long) groupedEntriesCount * ENTRY_SIZE) + Transformer.LONG_LENGTH) > bytes.remaining())
+		if (groupedEntriesCount < 0)
+			throw new MessageException("invalid grouped entries count");
+
+		if (groupedEntriesCount == 0) {
+			if (bytes.hasRemaining())
+				throw new MessageException("invalid grouped entries count");
+
+			return new TradePresencesMessage(id, List.of());
+		}
+
+		// if (count * entry size) + timestamp > remaining, then invalid count
+		if ((((long) groupedEntriesCount * ENTRY_SIZE) + Transformer.LONG_LENGTH) > bytes.remaining())
 			throw new MessageException("invalid grouped entries count");
 
 		List<TradePresenceData> tradePresences = new ArrayList<>(groupedEntriesCount);
